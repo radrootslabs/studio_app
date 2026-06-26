@@ -915,8 +915,10 @@ mod tests {
 
     impl TestDirectory {
         fn new() -> Self {
-            let path = std::env::temp_dir()
-                .join(format!("radroots_studio_app_pack_day_print_{}", Uuid::new_v4()));
+            let path = std::env::temp_dir().join(format!(
+                "radroots_studio_app_pack_day_print_{}",
+                Uuid::new_v4()
+            ));
             fs::create_dir_all(&path).expect("test directory should create");
             Self { path }
         }

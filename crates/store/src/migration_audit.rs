@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use radroots_studio_app_sync::{AppPublishPayload, SyncOperationKind};
 use radroots_events::kinds::{
     KIND_FARM, KIND_LISTING, KIND_LISTING_DRAFT, KIND_ORDER_CANCELLATION, KIND_ORDER_DECISION,
     KIND_ORDER_REQUEST, KIND_ORDER_REVISION_DECISION, KIND_ORDER_REVISION_PROPOSAL,
@@ -10,6 +9,7 @@ use radroots_local_events::{
     LocalEventRecord, LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus,
 };
 use radroots_sql_core::SqlExecutor;
+use radroots_studio_app_sync::{AppPublishPayload, SyncOperationKind};
 use rusqlite::params;
 use serde_json::Value;
 
@@ -839,16 +839,16 @@ fn duplicate_candidates_from_map(
 
 #[cfg(test)]
 mod tests {
-    use radroots_studio_app_sync::{
-        AppFarmProfilePublishPayload, AppPublishContext, AppPublishPayload, PendingSyncOperation,
-    };
-    use radroots_studio_app_view::{FarmId, FarmReadiness};
     use radroots_events::kinds::{KIND_LISTING, KIND_ORDER_REQUEST, KIND_TRADE_VALIDATION_RECEIPT};
     use radroots_local_events::{
         LocalEventRecord, LocalEventRecordInput, LocalEventsStore, LocalRecordFamily,
         LocalRecordStatus, PublishOutboxStatus, SourceRuntime,
     };
     use radroots_sql_core::SqliteExecutor;
+    use radroots_studio_app_sync::{
+        AppFarmProfilePublishPayload, AppPublishContext, AppPublishPayload, PendingSyncOperation,
+    };
+    use radroots_studio_app_view::{FarmId, FarmReadiness};
     use rusqlite::params;
     use serde_json::json;
 

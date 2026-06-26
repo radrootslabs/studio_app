@@ -2,6 +2,13 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use radroots_identity::{IdentityError, RadrootsIdentityId};
+use radroots_nostr_accounts::prelude::{
+    RadrootsNostrAccountRecord, RadrootsNostrAccountsError, RadrootsNostrAccountsManager,
+    account_secret_slot,
+};
+use radroots_protected_store::RadrootsProtectedFileSecretVault;
+use radroots_secret_vault::{RadrootsSecretVault, RadrootsSecretVaultAccessError};
 use radroots_studio_app_core::AppDesktopRuntimePaths;
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerError,
@@ -10,13 +17,6 @@ use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerSessionStoreState,
 };
 use radroots_studio_app_view::{AccountCustody, AppIdentityProjection};
-use radroots_identity::{IdentityError, RadrootsIdentityId};
-use radroots_nostr_accounts::prelude::{
-    RadrootsNostrAccountRecord, RadrootsNostrAccountsError, RadrootsNostrAccountsManager,
-    account_secret_slot,
-};
-use radroots_protected_store::RadrootsProtectedFileSecretVault;
-use radroots_secret_vault::{RadrootsSecretVault, RadrootsSecretVaultAccessError};
 use thiserror::Error;
 
 const REMOTE_SIGNER_LABEL: &str = "remote signer";
@@ -382,13 +382,14 @@ mod tests {
     use std::env;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use radroots_studio_app_remote_signer::{
-        RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
-        RadrootsAppRemoteSignerSessionRecord, radroots_studio_app_remote_signer_requested_permissions,
-    };
     use radroots_identity::{RadrootsIdentity, RadrootsIdentityPublic};
     use radroots_nostr_accounts::prelude::{
         RadrootsNostrAccountStatus, RadrootsNostrAccountsManager,
+    };
+    use radroots_studio_app_remote_signer::{
+        RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
+        RadrootsAppRemoteSignerSessionRecord,
+        radroots_studio_app_remote_signer_requested_permissions,
     };
 
     use super::{

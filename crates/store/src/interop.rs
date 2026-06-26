@@ -1,12 +1,5 @@
 use std::{fs, path::Path};
 
-use radroots_studio_app_view::{
-    FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
-    FulfillmentWindowId, OrderId, PickupLocationId, ProductId, ProductStatus,
-    TradeProvenanceProjection, TradeRevisionStatus, TradeValidationReceiptProofSystem,
-    TradeValidationReceiptResult, TradeValidationReceiptType, TradeWorkflowProjection,
-    TradeWorkflowSource, order_status_from_active_order_projection,
-};
 use radroots_events::{
     RadrootsNostrEvent,
     ids::{RadrootsEventId, RadrootsOrderId, RadrootsPublicKey},
@@ -35,6 +28,13 @@ use radroots_local_events::{
     RelayDeliveryEvidence, RelayDeliveryState, SourceRuntime,
 };
 use radroots_sql_core::{SqlExecutor, SqliteExecutor};
+use radroots_studio_app_view::{
+    FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
+    FulfillmentWindowId, OrderId, PickupLocationId, ProductId, ProductStatus,
+    TradeProvenanceProjection, TradeRevisionStatus, TradeValidationReceiptProofSystem,
+    TradeValidationReceiptResult, TradeValidationReceiptType, TradeWorkflowProjection,
+    TradeWorkflowSource, order_status_from_active_order_projection,
+};
 use radroots_trade::order::{
     RadrootsOrderCancellationRecord, RadrootsOrderDecisionRecord, RadrootsOrderProjection,
     RadrootsOrderReductionInputs, RadrootsOrderRequestRecord, RadrootsOrderRevisionDecisionRecord,
@@ -3730,13 +3730,6 @@ fn farm_readiness_from_storage_key(readiness: &str) -> Result<FarmReadiness, App
 mod tests {
     use std::collections::BTreeSet;
 
-    use radroots_studio_app_view::{
-        BuyerContext, BuyerOrderStatus, FarmId, FarmOrderMethod, OrderId, OrderStatus,
-        OrdersFilter, OrdersScreenQueryState, ProductAvailabilityState, ProductId,
-        TradeAgreementStatus, TradeInventoryStatus, TradeRevisionStatus,
-        TradeValidationReceiptProofSystem, TradeValidationReceiptResult,
-        TradeValidationReceiptType, TradeWorkflowSource,
-    };
     use radroots_core::{
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
     };
@@ -3766,6 +3759,13 @@ mod tests {
         LocalRecordStatus, PublishOutboxStatus, RelayDeliveryEvidence, SourceRuntime,
     };
     use radroots_sql_core::SqliteExecutor;
+    use radroots_studio_app_view::{
+        BuyerContext, BuyerOrderStatus, FarmId, FarmOrderMethod, OrderId, OrderStatus,
+        OrdersFilter, OrdersScreenQueryState, ProductAvailabilityState, ProductId,
+        TradeAgreementStatus, TradeInventoryStatus, TradeRevisionStatus,
+        TradeValidationReceiptProofSystem, TradeValidationReceiptResult,
+        TradeValidationReceiptType, TradeWorkflowSource,
+    };
     use radroots_trade::validation_receipt::{
         RadrootsTradeValidationReceipt, RadrootsValidationReceiptProof,
         RadrootsValidationReceiptProofSystem, RadrootsValidationReceiptResult,
@@ -5066,13 +5066,17 @@ mod tests {
 
         assert_eq!(decision_report.imported_records, 1);
         assert_eq!(buyer_orders.rows.len(), 1);
-        assert_eq!(buyer_orders.rows[0].status, BuyerOrderStatus::Scheduled);
-        assert_eq!(buyer_detail.status, BuyerOrderStatus::Scheduled);
-        assert_eq!(seller_orders.rows[0].status, OrderStatus::Scheduled);
+        assert_eq!(buyer_orders.rows[0].status, BuyerOrderStatus::Placed);
+        assert_eq!(buyer_detail.status, BuyerOrderStatus::Placed);
+        assert_eq!(seller_orders.rows[0].status, OrderStatus::NeedsAction);
         assert_eq!(buyer_detail.workflow, buyer_orders.rows[0].workflow);
         assert_eq!(
             seller_orders.rows[0].workflow,
             buyer_orders.rows[0].workflow
+        );
+        assert_eq!(
+            buyer_orders.rows[0].workflow.agreement,
+            TradeAgreementStatus::PendingRhi
         );
         assert_eq!(
             buyer_orders.rows[0].workflow.inventory,
@@ -5329,7 +5333,11 @@ mod tests {
                 },
             )
             .expect("load lifecycle seller orders after decision");
-        assert_eq!(seller_orders.rows[0].status, OrderStatus::Scheduled);
+        assert_eq!(seller_orders.rows[0].status, OrderStatus::NeedsAction);
+        assert_eq!(
+            seller_orders.rows[0].workflow.agreement,
+            TradeAgreementStatus::PendingRhi
+        );
         assert_eq!(
             seller_orders.rows[0].workflow.inventory,
             TradeInventoryStatus::Reserved
@@ -5411,8 +5419,12 @@ mod tests {
             .load_local_interop_records()
             .expect("load validation receipt imports");
 
-        assert_eq!(buyer_detail.status, BuyerOrderStatus::Scheduled);
-        assert_eq!(seller_detail.status, OrderStatus::Scheduled);
+        assert_eq!(buyer_detail.status, BuyerOrderStatus::Placed);
+        assert_eq!(seller_detail.status, OrderStatus::NeedsAction);
+        assert_eq!(
+            buyer_detail.workflow.agreement,
+            TradeAgreementStatus::PendingRhi
+        );
         assert_eq!(seller_detail.primary_action, None);
         assert_eq!(buyer_detail.validation_receipts.len(), 2);
         assert_eq!(
@@ -5681,8 +5693,12 @@ mod tests {
 
         assert!(buyer_detail.validation_receipts.is_empty());
         assert!(seller_detail.validation_receipts.is_empty());
-        assert_eq!(buyer_detail.status, BuyerOrderStatus::Scheduled);
-        assert_eq!(seller_detail.status, OrderStatus::Scheduled);
+        assert_eq!(buyer_detail.status, BuyerOrderStatus::Placed);
+        assert_eq!(seller_detail.status, OrderStatus::NeedsAction);
+        assert_eq!(
+            buyer_detail.workflow.agreement,
+            TradeAgreementStatus::PendingRhi
+        );
         assert_eq!(seller_detail.primary_action, None);
     }
 
@@ -5848,7 +5864,11 @@ mod tests {
                 },
             )
             .expect("load revision seller orders after decision");
-        assert_eq!(seller_orders.rows[0].status, OrderStatus::Scheduled);
+        assert_eq!(seller_orders.rows[0].status, OrderStatus::NeedsAction);
+        assert_eq!(
+            seller_orders.rows[0].workflow.agreement,
+            TradeAgreementStatus::PendingRhi
+        );
         assert_eq!(
             seller_orders.rows[0].workflow.revision,
             TradeRevisionStatus::Updated

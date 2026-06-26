@@ -412,6 +412,7 @@
   "trade.workflow.axis.inventory": "Stock",
   "trade.workflow.axis.source": "Source",
   "trade.workflow.agreement.ordered": "Ordered",
+  "trade.workflow.agreement.pending_rhi": "Pending validation",
   "trade.workflow.agreement.confirmed": "Confirmed",
   "trade.workflow.agreement.declined": "Declined",
   "trade.workflow.agreement.cancelled": "Cancelled",

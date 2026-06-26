@@ -1905,7 +1905,7 @@ mod tests {
         ids::{RadrootsDTag, RadrootsInventoryBinId},
         listing::{
             RadrootsListing, RadrootsListingAvailability, RadrootsListingBin,
-            RadrootsListingDeliveryMethod, RadrootsListingLocation, RadrootsListingProduct,
+            RadrootsListingDeliveryMethod, RadrootsListingProduct, RadrootsListingPublicLocation,
             RadrootsListingStatus,
         },
     };
@@ -2342,14 +2342,12 @@ mod tests {
                 status: RadrootsListingStatus::Active,
             }),
             delivery_method: Some(RadrootsListingDeliveryMethod::Pickup),
-            location: Some(RadrootsListingLocation {
+            location: Some(RadrootsListingPublicLocation {
                 primary: "North Farm".to_owned(),
                 city: None,
                 region: None,
                 country: Some("US".to_owned()),
-                lat: None,
-                lng: None,
-                geohash: None,
+                geohash: "9q8yy".to_owned(),
             }),
             images: None,
         }

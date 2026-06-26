@@ -39,6 +39,7 @@ fn parse_trade_agreement_status(
 ) -> Result<TradeAgreementStatus, AppSqliteError> {
     match value.as_str() {
         "ordered" => Ok(TradeAgreementStatus::Ordered),
+        "pending_rhi" => Ok(TradeAgreementStatus::PendingRhi),
         "confirmed" => Ok(TradeAgreementStatus::Confirmed),
         "declined" => Ok(TradeAgreementStatus::Declined),
         "cancelled" => Ok(TradeAgreementStatus::Cancelled),

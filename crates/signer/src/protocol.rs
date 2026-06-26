@@ -105,8 +105,10 @@ where
     F: FnMut(RadrootsAppRemoteSignerProgressUpdate),
 {
     let mut poller =
-        radroots_studio_app_remote_signer_open_pending_poller(record, client_secret_key_hex).await?;
-    radroots_studio_app_remote_signer_poll_pending_poller_with_progress(&mut poller, &mut progress).await
+        radroots_studio_app_remote_signer_open_pending_poller(record, client_secret_key_hex)
+            .await?;
+    radroots_studio_app_remote_signer_poll_pending_poller_with_progress(&mut poller, &mut progress)
+        .await
 }
 
 pub(crate) async fn radroots_studio_app_remote_signer_open_pending_poller(
@@ -770,8 +772,8 @@ mod tests {
 
     #[test]
     fn connect_request_uses_explicit_requested_permissions() {
-        let target =
-            radroots_studio_app_remote_signer_preview(fixture_discovery_url().as_str()).expect("preview");
+        let target = radroots_studio_app_remote_signer_preview(fixture_discovery_url().as_str())
+            .expect("preview");
 
         let request = connect_request_for_target(&target);
 

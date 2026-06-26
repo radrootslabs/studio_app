@@ -3,7 +3,9 @@ use std::path::{Component, Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::Command;
 
-use radroots_studio_app_view::{PackDayExportArtifactKind, PackDayExportBundle, PackDayHostHandoffKind};
+use radroots_studio_app_view::{
+    PackDayExportArtifactKind, PackDayExportBundle, PackDayHostHandoffKind,
+};
 use thiserror::Error;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

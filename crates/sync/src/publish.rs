@@ -1,6 +1,3 @@
-use radroots_studio_app_view::{
-    FarmId, FarmReadiness, FulfillmentWindowId, OrderId, ProductId, ProductStatus,
-};
 use radroots_sdk::protocol::order::{
     RadrootsOrderEconomics, RadrootsOrderItem, RadrootsOrderRevisionOutcome,
 };
@@ -8,6 +5,9 @@ use radroots_sdk::{
     FARM_PUBLISH_OPERATION_KIND, LISTING_PUBLISH_OPERATION_KIND, ORDER_CANCELLATION_OPERATION_KIND,
     ORDER_DECISION_OPERATION_KIND, ORDER_REVISION_DECISION_OPERATION_KIND,
     ORDER_REVISION_PROPOSAL_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND,
+};
+use radroots_studio_app_view::{
+    FarmId, FarmReadiness, FulfillmentWindowId, OrderId, ProductId, ProductStatus,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -680,10 +680,10 @@ mod tests {
     use crate::{
         PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind,
     };
-    use radroots_studio_app_view::{FarmId, FarmReadiness, OrderId, ProductId, ProductStatus};
     use radroots_sdk::protocol::order::{
         RadrootsOrderEconomics, RadrootsOrderItem, RadrootsOrderRevisionOutcome,
     };
+    use radroots_studio_app_view::{FarmId, FarmReadiness, OrderId, ProductId, ProductStatus};
     use serde_json::json;
 
     #[test]

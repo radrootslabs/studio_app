@@ -639,6 +639,10 @@ mod tests {
             "Ordered"
         );
         assert_eq!(
+            app_text(AppTextKey::TradeWorkflowAgreementPendingRhi),
+            "Pending validation"
+        );
+        assert_eq!(
             app_text(AppTextKey::TradeWorkflowAgreementConfirmed),
             "Confirmed"
         );

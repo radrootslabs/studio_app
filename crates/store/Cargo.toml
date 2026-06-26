@@ -17,7 +17,7 @@ radroots_studio_app_view.workspace = true
 radroots_studio_app_sync.workspace = true
 radroots_sql_core.workspace = true
 radroots_trade.workspace = true
-rusqlite.workspace = true
+rusqlite = { version = "0.32.1", features = ["bundled"] }
 serde_json.workspace = true
 thiserror.workspace = true
 uuid.workspace = true

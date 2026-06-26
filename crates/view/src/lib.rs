@@ -4,11 +4,11 @@ pub use radroots_studio_app_types::*;
 
 use radroots_core::RadrootsCoreMoney;
 use radroots_events::order::RadrootsOrderEconomics;
-use radroots_trade::order::{RadrootsOrderProjection, RadrootsOrderStatus};
 use radroots_trade::validation_receipt::{
     RadrootsValidationReceiptProofSystem, RadrootsValidationReceiptResult,
     RadrootsValidationReceiptType,
 };
+use radroots_trade::{order::RadrootsOrderProjection, workflow::RadrootsTradeWorkflowState};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, error::Error, fmt, str::FromStr};
 use url::Url;
@@ -1073,6 +1073,7 @@ pub struct BuyerOrderReviewProjection {
 pub enum TradeAgreementStatus {
     #[default]
     Ordered,
+    PendingRhi,
     Confirmed,
     Declined,
     Cancelled,
@@ -1083,6 +1084,7 @@ impl TradeAgreementStatus {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::Ordered => "ordered",
+            Self::PendingRhi => "pending_rhi",
             Self::Confirmed => "confirmed",
             Self::Declined => "declined",
             Self::Cancelled => "cancelled",
@@ -1093,6 +1095,7 @@ impl TradeAgreementStatus {
     pub const fn label_key_id(self) -> &'static str {
         match self {
             Self::Ordered => "messages.trade.workflow.agreement.ordered",
+            Self::PendingRhi => "messages.trade.workflow.agreement.pending_rhi",
             Self::Confirmed => "messages.trade.workflow.agreement.confirmed",
             Self::Declined => "messages.trade.workflow.agreement.declined",
             Self::Cancelled => "messages.trade.workflow.agreement.cancelled",
@@ -1100,20 +1103,22 @@ impl TradeAgreementStatus {
         }
     }
 
-    pub const fn from_active_order_status(status: &RadrootsOrderStatus) -> Self {
+    pub const fn from_active_order_status(status: &RadrootsTradeWorkflowState) -> Self {
         match status {
-            RadrootsOrderStatus::Missing => Self::NeedsReview,
-            RadrootsOrderStatus::Requested => Self::Ordered,
-            RadrootsOrderStatus::Accepted => Self::Confirmed,
-            RadrootsOrderStatus::Declined => Self::Declined,
-            RadrootsOrderStatus::Cancelled => Self::Cancelled,
-            RadrootsOrderStatus::Invalid => Self::NeedsReview,
+            RadrootsTradeWorkflowState::Missing => Self::NeedsReview,
+            RadrootsTradeWorkflowState::Requested
+            | RadrootsTradeWorkflowState::RevisionProposed => Self::Ordered,
+            RadrootsTradeWorkflowState::AgreedPendingRhi => Self::PendingRhi,
+            RadrootsTradeWorkflowState::Committed => Self::Confirmed,
+            RadrootsTradeWorkflowState::Declined => Self::Declined,
+            RadrootsTradeWorkflowState::Cancelled => Self::Cancelled,
+            RadrootsTradeWorkflowState::Invalid => Self::NeedsReview,
         }
     }
 }
 
-impl From<&RadrootsOrderStatus> for TradeAgreementStatus {
-    fn from(status: &RadrootsOrderStatus) -> Self {
+impl From<&RadrootsTradeWorkflowState> for TradeAgreementStatus {
+    fn from(status: &RadrootsTradeWorkflowState) -> Self {
         Self::from_active_order_status(status)
     }
 }
@@ -1210,10 +1215,16 @@ impl TradeInventoryStatus {
 
     pub fn from_active_order_projection(projection: &RadrootsOrderProjection) -> Self {
         match projection.status {
-            RadrootsOrderStatus::Requested => Self::NeedsReview,
-            RadrootsOrderStatus::Accepted => Self::Reserved,
-            RadrootsOrderStatus::Declined | RadrootsOrderStatus::Cancelled => Self::Available,
-            RadrootsOrderStatus::Missing | RadrootsOrderStatus::Invalid => Self::NeedsReview,
+            RadrootsTradeWorkflowState::Requested
+            | RadrootsTradeWorkflowState::RevisionProposed => Self::NeedsReview,
+            RadrootsTradeWorkflowState::AgreedPendingRhi
+            | RadrootsTradeWorkflowState::Committed => Self::Reserved,
+            RadrootsTradeWorkflowState::Declined | RadrootsTradeWorkflowState::Cancelled => {
+                Self::Available
+            }
+            RadrootsTradeWorkflowState::Missing | RadrootsTradeWorkflowState::Invalid => {
+                Self::NeedsReview
+            }
         }
     }
 }
@@ -1566,13 +1577,15 @@ pub fn order_status_from_active_order_projection(
     projection: &RadrootsOrderProjection,
 ) -> Option<OrderStatus> {
     match projection.status {
-        RadrootsOrderStatus::Missing => None,
-        RadrootsOrderStatus::Requested => Some(OrderStatus::NeedsAction),
-        RadrootsOrderStatus::Accepted => Some(OrderStatus::Scheduled),
-        RadrootsOrderStatus::Declined | RadrootsOrderStatus::Cancelled => {
+        RadrootsTradeWorkflowState::Missing => None,
+        RadrootsTradeWorkflowState::Requested
+        | RadrootsTradeWorkflowState::RevisionProposed
+        | RadrootsTradeWorkflowState::AgreedPendingRhi => Some(OrderStatus::NeedsAction),
+        RadrootsTradeWorkflowState::Committed => Some(OrderStatus::Scheduled),
+        RadrootsTradeWorkflowState::Declined | RadrootsTradeWorkflowState::Cancelled => {
             Some(OrderStatus::Declined)
         }
-        RadrootsOrderStatus::Invalid => Some(OrderStatus::NeedsAction),
+        RadrootsTradeWorkflowState::Invalid => Some(OrderStatus::NeedsAction),
     }
 }
 
@@ -2114,11 +2127,11 @@ mod tests {
     use radroots_events::order::{
         RadrootsOrderEconomicItem, RadrootsOrderEconomics, RadrootsOrderPricingBasis,
     };
-    use radroots_trade::order::{RadrootsOrderProjection, RadrootsOrderStatus};
     use radroots_trade::validation_receipt::{
         RadrootsValidationReceiptProofSystem, RadrootsValidationReceiptResult,
         RadrootsValidationReceiptType,
     };
+    use radroots_trade::{order::RadrootsOrderProjection, workflow::RadrootsTradeWorkflowState};
 
     use super::{
         AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
@@ -2822,7 +2835,7 @@ mod tests {
         }
     }
 
-    fn test_active_order_projection(status: RadrootsOrderStatus) -> RadrootsOrderProjection {
+    fn test_active_order_projection(status: RadrootsTradeWorkflowState) -> RadrootsOrderProjection {
         RadrootsOrderProjection {
             order_id: test_order_id("ord_AAAAAAAAAAAAAAAAAAAAAg"),
             status,
@@ -2832,6 +2845,7 @@ mod tests {
             decision_event_id: Some(test_event_id(
                 "2222222222222222222222222222222222222222222222222222222222222222",
             )),
+            validation_receipt_event_id: None,
             cancellation_event_id: None,
             lifecycle_terminal: false,
             economics: Some(test_trade_economics()),
@@ -2839,6 +2853,8 @@ mod tests {
                 "2222222222222222222222222222222222222222222222222222222222222222",
             )),
             pending_revision_event_id: None,
+            pending_inventory_reservations: Vec::new(),
+            committed_inventory_reservations: Vec::new(),
             listing_addr: Some(test_listing_addr(
                 "30402:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:AAAAAAAAAAAAAAAAAAAAAg",
             )),
@@ -2858,15 +2874,21 @@ mod tests {
     #[test]
     fn trade_workflow_projection_maps_shared_active_order_projection_to_product_axes() {
         assert_eq!(
-            TradeAgreementStatus::from_active_order_status(&RadrootsOrderStatus::Requested),
+            TradeAgreementStatus::from_active_order_status(&RadrootsTradeWorkflowState::Requested),
             TradeAgreementStatus::Ordered
         );
         assert_eq!(
-            TradeAgreementStatus::from_active_order_status(&RadrootsOrderStatus::Accepted),
+            TradeAgreementStatus::from_active_order_status(
+                &RadrootsTradeWorkflowState::AgreedPendingRhi
+            ),
+            TradeAgreementStatus::PendingRhi
+        );
+        assert_eq!(
+            TradeAgreementStatus::from_active_order_status(&RadrootsTradeWorkflowState::Committed),
             TradeAgreementStatus::Confirmed
         );
         assert_eq!(
-            TradeAgreementStatus::from_active_order_status(&RadrootsOrderStatus::Invalid),
+            TradeAgreementStatus::from_active_order_status(&RadrootsTradeWorkflowState::Invalid),
             TradeAgreementStatus::NeedsReview
         );
         assert_eq!(
@@ -2897,7 +2919,7 @@ mod tests {
         );
 
         let order_id = OrderId::new();
-        let active_order = test_active_order_projection(RadrootsOrderStatus::Accepted);
+        let active_order = test_active_order_projection(RadrootsTradeWorkflowState::Committed);
         let projection = TradeWorkflowProjection::from_active_order_projection(
             order_id,
             &active_order,
@@ -2922,7 +2944,28 @@ mod tests {
             Some(OrderStatus::Scheduled)
         );
 
-        let requested_order = test_active_order_projection(RadrootsOrderStatus::Requested);
+        let pending_rhi_order =
+            test_active_order_projection(RadrootsTradeWorkflowState::AgreedPendingRhi);
+        let pending_rhi_projection = TradeWorkflowProjection::from_active_order_projection(
+            order_id,
+            &pending_rhi_order,
+            TradeRevisionStatus::None,
+            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::LocalEvents),
+        );
+        assert_eq!(
+            pending_rhi_projection.agreement,
+            TradeAgreementStatus::PendingRhi
+        );
+        assert_eq!(
+            pending_rhi_projection.inventory,
+            TradeInventoryStatus::Reserved
+        );
+        assert_eq!(
+            order_status_from_active_order_projection(&pending_rhi_order),
+            Some(OrderStatus::NeedsAction)
+        );
+
+        let requested_order = test_active_order_projection(RadrootsTradeWorkflowState::Requested);
         let requested_projection = TradeWorkflowProjection::from_active_order_projection(
             order_id,
             &requested_order,
@@ -2995,11 +3038,15 @@ mod tests {
     #[test]
     fn trade_workflow_projection_uses_localization_key_ids_for_visible_status_labels() {
         assert_eq!(
-            TradeAgreementStatus::from_active_order_status(&RadrootsOrderStatus::Requested)
+            TradeAgreementStatus::from_active_order_status(&RadrootsTradeWorkflowState::Requested)
                 .storage_key(),
             "ordered"
         );
         assert_eq!(TradeAgreementStatus::Ordered.storage_key(), "ordered");
+        assert_eq!(
+            TradeAgreementStatus::PendingRhi.storage_key(),
+            "pending_rhi"
+        );
         assert_eq!(
             TradeRevisionStatus::KeptAsPlaced.storage_key(),
             "kept_as_placed"
@@ -3013,6 +3060,10 @@ mod tests {
         assert_eq!(
             TradeAgreementStatus::Ordered.label_key_id(),
             "messages.trade.workflow.agreement.ordered"
+        );
+        assert_eq!(
+            TradeAgreementStatus::PendingRhi.label_key_id(),
+            "messages.trade.workflow.agreement.pending_rhi"
         );
         assert_eq!(
             TradeAgreementStatus::NeedsReview.label_key_id(),

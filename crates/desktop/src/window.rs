@@ -11,6 +11,7 @@ use gpui_component::{
     menu::PopupMenuItem,
     select::{SearchableVec, Select, SelectDelegate, SelectEvent, SelectState},
 };
+use radroots_nostr::prelude::RadrootsNostrClient;
 use radroots_studio_app_core::{
     AppSdkLifecycleState, AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy,
 };
@@ -20,7 +21,8 @@ use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSource,
     radroots_studio_app_remote_signer_connect_pending,
     radroots_studio_app_remote_signer_poll_pending_session_with_progress,
-    radroots_studio_app_remote_signer_preview, radroots_studio_app_remote_signer_requested_permissions,
+    radroots_studio_app_remote_signer_preview,
+    radroots_studio_app_remote_signer_requested_permissions,
 };
 use radroots_studio_app_sqlite::{AppSqliteError, derive_farm_rules_readiness};
 use radroots_studio_app_state::{
@@ -83,7 +85,6 @@ use radroots_studio_app_view::{
     TradeValidationReceiptProjection, TradeValidationReceiptResult, TradeValidationReceiptType,
     TradeWorkflowProjection, TradeWorkflowSource,
 };
-use radroots_nostr::prelude::RadrootsNostrClient;
 use std::{
     collections::BTreeSet,
     path::{Component, Path, PathBuf},
@@ -11615,6 +11616,7 @@ fn trade_workflow_value_badge(value_key: AppTextKey) -> AnyElement {
 fn trade_agreement_status_key(status: TradeAgreementStatus) -> AppTextKey {
     match status {
         TradeAgreementStatus::Ordered => AppTextKey::TradeWorkflowAgreementOrdered,
+        TradeAgreementStatus::PendingRhi => AppTextKey::TradeWorkflowAgreementPendingRhi,
         TradeAgreementStatus::Confirmed => AppTextKey::TradeWorkflowAgreementConfirmed,
         TradeAgreementStatus::Declined => AppTextKey::TradeWorkflowAgreementDeclined,
         TradeAgreementStatus::Cancelled => AppTextKey::TradeWorkflowAgreementCancelled,
@@ -12363,7 +12365,8 @@ fn startup_signer_entry_surface(
 }
 
 fn startup_signer_preview_summary(input: &str) -> Result<StartupSignerPreviewSummary, String> {
-    let target = radroots_studio_app_remote_signer_preview(input).map_err(|error| error.to_string())?;
+    let target =
+        radroots_studio_app_remote_signer_preview(input).map_err(|error| error.to_string())?;
 
     Ok(StartupSignerPreviewSummary {
         source_label: startup_signer_source_text(target.source),
@@ -16277,6 +16280,7 @@ mod tests {
         DesktopAppSdkReadyDiagnosticsSummary, DesktopAppSdkStatusSummary,
         DesktopAppSyncConflictSummary, DesktopAppSyncStatusSummary,
     };
+    use radroots_identity::RadrootsIdentity;
     use radroots_studio_app_core::{
         AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePlatform,
         AppSdkLifecycleState, AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy,
@@ -16312,7 +16316,6 @@ mod tests {
         TradeEconomicsProjection, TradeInventoryStatus, TradeRevisionStatus,
         TradeWorkflowProjection, TradeWorkflowSource,
     };
-    use radroots_identity::RadrootsIdentity;
     use std::{
         fs,
         path::PathBuf,
@@ -16722,6 +16725,10 @@ mod tests {
             (
                 TradeAgreementStatus::Ordered,
                 AppTextKey::TradeWorkflowAgreementOrdered,
+            ),
+            (
+                TradeAgreementStatus::PendingRhi,
+                AppTextKey::TradeWorkflowAgreementPendingRhi,
             ),
             (
                 TradeAgreementStatus::Confirmed,
@@ -17396,7 +17403,9 @@ mod tests {
         );
 
         runtime.pack_day_projection.export = PackDayExportProjection::running(
-            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id),
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(
+                fulfillment_window_id,
+            ),
         );
         assert!(!pack_day_export_action_enabled(&runtime));
         assert_eq!(
@@ -17436,8 +17445,9 @@ mod tests {
                 },
             ],
         };
-        let request =
-            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id);
+        let request = radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(
+            fulfillment_window_id,
+        );
 
         let rows = pack_day_export_detail_rows(&PackDayExportProjection::succeeded(
             request.clone(),
@@ -17508,7 +17518,9 @@ mod tests {
         assert!(pack_day_host_handoff_action_presentations(&runtime).is_empty());
 
         runtime.pack_day_projection.export = PackDayExportProjection::succeeded(
-            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id),
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(
+                fulfillment_window_id,
+            ),
             bundle,
         );
 
@@ -17548,7 +17560,9 @@ mod tests {
         let bundle = sample_pack_day_bundle(temp_dir.path());
         let fulfillment_window_id = bundle.fulfillment_window_id;
         let export_request =
-            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id);
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(
+                fulfillment_window_id,
+            );
         let reveal_request =
             PackDayHostHandoffRequest::for_bundle(PackDayHostHandoffKind::RevealBundle, &bundle);
         let open_request = PackDayHostHandoffRequest::for_bundle(
@@ -17626,7 +17640,9 @@ mod tests {
         );
 
         runtime.pack_day_projection.export = PackDayExportProjection::succeeded(
-            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id),
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(
+                fulfillment_window_id,
+            ),
             bundle,
         );
 
@@ -17674,7 +17690,9 @@ mod tests {
         assert!(pack_day_print_action_presentations(&runtime).is_empty());
 
         runtime.pack_day_projection.export = PackDayExportProjection::succeeded(
-            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id),
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(
+                fulfillment_window_id,
+            ),
             bundle,
         );
 
@@ -17717,7 +17735,9 @@ mod tests {
         assert_eq!(pack_day_batch_print_action_presentation(&runtime), None);
 
         runtime.pack_day_projection.export = PackDayExportProjection::succeeded(
-            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id),
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(
+                fulfillment_window_id,
+            ),
             bundle,
         );
 
@@ -17739,7 +17759,9 @@ mod tests {
         let bundle = sample_pack_day_bundle(temp_dir.path());
         let fulfillment_window_id = bundle.fulfillment_window_id;
         let export_request =
-            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id);
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(
+                fulfillment_window_id,
+            );
         let batch_request = PackDayBatchPrintRequest::for_bundle(&bundle);
         let mut runtime = summary(
             HomeRoute::Today,
@@ -17779,7 +17801,9 @@ mod tests {
         let bundle = sample_pack_day_bundle(temp_dir.path());
         let fulfillment_window_id = bundle.fulfillment_window_id;
         let export_request =
-            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id);
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(
+                fulfillment_window_id,
+            );
         let batch_request = PackDayBatchPrintRequest::for_bundle(&bundle);
         let mut runtime = summary(
             HomeRoute::Today,
@@ -17862,7 +17886,9 @@ mod tests {
         let bundle = sample_pack_day_bundle(temp_dir.path());
         let fulfillment_window_id = bundle.fulfillment_window_id;
         let export_request =
-            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id);
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(
+                fulfillment_window_id,
+            );
         let print_request =
             PackDayPrintRequest::for_bundle(PackDayPrintKind::PrintPackSheet, &bundle);
         let failed_request =
@@ -17964,7 +17990,9 @@ mod tests {
         let bundle = sample_pack_day_bundle(temp_dir.path());
         let fulfillment_window_id = bundle.fulfillment_window_id;
         let export_request =
-            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id);
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(
+                fulfillment_window_id,
+            );
         let host_handoff_request =
             PackDayHostHandoffRequest::for_bundle(PackDayHostHandoffKind::RevealBundle, &bundle);
         let mut runtime = summary(

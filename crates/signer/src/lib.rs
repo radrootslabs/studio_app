@@ -8,7 +8,8 @@ mod session;
 pub use error::RadrootsAppRemoteSignerError;
 pub use input::{
     RadrootsAppRemoteSignerSource, RadrootsAppRemoteSignerTarget,
-    radroots_studio_app_remote_signer_preview, radroots_studio_app_remote_signer_requested_permissions,
+    radroots_studio_app_remote_signer_preview,
+    radroots_studio_app_remote_signer_requested_permissions,
 };
 pub use protocol::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,

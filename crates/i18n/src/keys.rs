@@ -432,6 +432,7 @@ define_app_text_keys! {
     TradeWorkflowAxisInventory => "trade.workflow.axis.inventory",
     TradeWorkflowAxisSource => "trade.workflow.axis.source",
     TradeWorkflowAgreementOrdered => "trade.workflow.agreement.ordered",
+    TradeWorkflowAgreementPendingRhi => "trade.workflow.agreement.pending_rhi",
     TradeWorkflowAgreementConfirmed => "trade.workflow.agreement.confirmed",
     TradeWorkflowAgreementDeclined => "trade.workflow.agreement.declined",
     TradeWorkflowAgreementCancelled => "trade.workflow.agreement.cancelled",

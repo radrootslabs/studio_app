@@ -713,6 +713,7 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::TradeWorkflowAxisInventory",
     "AppTextKey::TradeWorkflowAxisSource",
     "AppTextKey::TradeWorkflowAgreementOrdered",
+    "AppTextKey::TradeWorkflowAgreementPendingRhi",
     "AppTextKey::TradeWorkflowAgreementConfirmed",
     "AppTextKey::TradeWorkflowAgreementDeclined",
     "AppTextKey::TradeWorkflowAgreementCancelled",

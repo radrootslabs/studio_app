@@ -6,6 +6,56 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Duration, Utc};
+use radroots_core::{
+    RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreQuantity,
+    RadrootsCoreQuantityPrice, RadrootsCoreUnit,
+};
+use radroots_events::{
+    ids::{
+        RadrootsDTag, RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress,
+        RadrootsOrderId, RadrootsOrderRevisionId, RadrootsPublicKey,
+    },
+    kinds::{
+        KIND_FARM, KIND_LISTING, KIND_LISTING_DRAFT, KIND_ORDER_CANCELLATION, KIND_ORDER_DECISION,
+        KIND_ORDER_REQUEST, KIND_ORDER_REVISION_DECISION, KIND_ORDER_REVISION_PROPOSAL,
+        KIND_PROFILE,
+    },
+};
+use radroots_events_codec::order::order_event_context_from_tags;
+use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
+use radroots_local_events::{
+    BUYER_ORDER_REQUEST_ACTOR_SOURCE_RESOLVED_ACCOUNT,
+    BUYER_ORDER_REQUEST_ACTOR_SOURCE_UNRESOLVED_APP, BUYER_ORDER_REQUEST_DOCUMENT_KIND,
+    BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, LocalEventRecord, LocalEventRecordInput,
+    LocalEventRecordUpdate, LocalEventsStore, LocalRecordFamily, LocalRecordStatus,
+    PublishOutboxStatus, RelayDeliveryEvidence, RelayDeliveryFailure, SourceRuntime,
+    buyer_order_request_local_work_record_id, validate_buyer_order_request_local_work_payload,
+};
+use radroots_nostr::prelude::{
+    RadrootsNostrClient, RadrootsNostrEvent, RadrootsNostrFilter, RadrootsNostrOutput,
+    RadrootsNostrTimestamp, radroots_nostr_kind, radroots_nostr_parse_pubkey,
+};
+use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
+use radroots_sdk::protocol::events::{
+    RadrootsNostrEvent as SdkRadrootsNostrEvent, RadrootsNostrEventPtr,
+};
+use radroots_sdk::protocol::farm::{RadrootsFarm, RadrootsFarmRef};
+use radroots_sdk::protocol::listing::{
+    RadrootsListing, RadrootsListingAvailability, RadrootsListingBin,
+    RadrootsListingDeliveryMethod, RadrootsListingProduct, RadrootsListingStatus,
+};
+use radroots_sdk::protocol::order::{
+    RadrootsOrderCancellation, RadrootsOrderDecision, RadrootsOrderDecisionOutcome,
+    RadrootsOrderEconomics, RadrootsOrderInventoryCommitment, RadrootsOrderItem,
+    RadrootsOrderRequest, RadrootsOrderRevisionDecision, RadrootsOrderRevisionOutcome,
+    RadrootsOrderRevisionProposal,
+};
+use radroots_sdk::{
+    FARM_PUBLISH_OPERATION_KIND, LISTING_PUBLISH_OPERATION_KIND, ORDER_CANCELLATION_OPERATION_KIND,
+    ORDER_DECISION_OPERATION_KIND, ORDER_REVISION_DECISION_OPERATION_KIND,
+    ORDER_REVISION_PROPOSAL_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND,
+};
+use radroots_sql_core::SqliteExecutor;
 use radroots_studio_app_core::{
     AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
     AppRuntimePathsError, AppRuntimeSnapshot, AppSdkConfig, AppSdkDiagnostics,
@@ -67,63 +117,13 @@ use radroots_studio_app_view::{
     ReminderUrgency, SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
     TodayAgendaProjection,
 };
-use radroots_core::{
-    RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreQuantity,
-    RadrootsCoreQuantityPrice, RadrootsCoreUnit,
-};
-use radroots_events::{
-    ids::{
-        RadrootsDTag, RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress,
-        RadrootsOrderId, RadrootsOrderRevisionId, RadrootsPublicKey,
-    },
-    kinds::{
-        KIND_FARM, KIND_LISTING, KIND_LISTING_DRAFT, KIND_ORDER_CANCELLATION, KIND_ORDER_DECISION,
-        KIND_ORDER_REQUEST, KIND_ORDER_REVISION_DECISION, KIND_ORDER_REVISION_PROPOSAL,
-        KIND_PROFILE,
-    },
-};
-use radroots_events_codec::order::order_event_context_from_tags;
-use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
-use radroots_local_events::{
-    BUYER_ORDER_REQUEST_ACTOR_SOURCE_RESOLVED_ACCOUNT,
-    BUYER_ORDER_REQUEST_ACTOR_SOURCE_UNRESOLVED_APP, BUYER_ORDER_REQUEST_DOCUMENT_KIND,
-    BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, LocalEventRecord, LocalEventRecordInput,
-    LocalEventRecordUpdate, LocalEventsStore, LocalRecordFamily, LocalRecordStatus,
-    PublishOutboxStatus, RelayDeliveryEvidence, RelayDeliveryFailure, SourceRuntime,
-    buyer_order_request_local_work_record_id, validate_buyer_order_request_local_work_payload,
-};
-use radroots_nostr::prelude::{
-    RadrootsNostrClient, RadrootsNostrEvent, RadrootsNostrFilter, RadrootsNostrOutput,
-    RadrootsNostrTimestamp, radroots_nostr_kind, radroots_nostr_parse_pubkey,
-};
-use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
-use radroots_sdk::protocol::events::{
-    RadrootsNostrEvent as SdkRadrootsNostrEvent, RadrootsNostrEventPtr,
-};
-use radroots_sdk::protocol::farm::{RadrootsFarm, RadrootsFarmRef};
-use radroots_sdk::protocol::listing::{
-    RadrootsListing, RadrootsListingAvailability, RadrootsListingBin,
-    RadrootsListingDeliveryMethod, RadrootsListingLocation, RadrootsListingProduct,
-    RadrootsListingStatus,
-};
-use radroots_sdk::protocol::order::{
-    RadrootsOrderCancellation, RadrootsOrderDecision, RadrootsOrderDecisionOutcome,
-    RadrootsOrderEconomics, RadrootsOrderInventoryCommitment, RadrootsOrderItem,
-    RadrootsOrderRequest, RadrootsOrderRevisionDecision, RadrootsOrderRevisionOutcome,
-    RadrootsOrderRevisionProposal,
-};
-use radroots_sdk::{
-    FARM_PUBLISH_OPERATION_KIND, LISTING_PUBLISH_OPERATION_KIND, ORDER_CANCELLATION_OPERATION_KIND,
-    ORDER_DECISION_OPERATION_KIND, ORDER_REVISION_DECISION_OPERATION_KIND,
-    ORDER_REVISION_PROPOSAL_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND,
-};
-use radroots_sql_core::SqliteExecutor;
 use radroots_trade::listing::parse_public_listing_address;
 use radroots_trade::order::{
     RadrootsOrderCancellationRecord, RadrootsOrderDecisionRecord, RadrootsOrderReductionInputs,
     RadrootsOrderRequestRecord, RadrootsOrderRevisionDecisionRecord,
-    RadrootsOrderRevisionProposalRecord, RadrootsOrderStatus, reduce_order_events,
+    RadrootsOrderRevisionProposalRecord, reduce_order_events,
 };
+use radroots_trade::workflow::RadrootsTradeWorkflowState;
 use serde_json::json;
 use thiserror::Error;
 use tokio::runtime::Builder as TokioRuntimeBuilder;
@@ -245,7 +245,7 @@ struct ResolvedAppOrderRevisionDecisionEvidence {
 struct ResolvedAppOrderLifecycleEvidence {
     evidence_events: Vec<SdkRadrootsNostrEvent>,
     request_event_id: String,
-    status: RadrootsOrderStatus,
+    status: RadrootsTradeWorkflowState,
     agreement_event_id: Option<String>,
     last_event_id: Option<String>,
     decision: Option<ResolvedAppOrderDecisionEvidence>,
@@ -2734,7 +2734,8 @@ impl DesktopAppRuntimeState {
             });
         }
         let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
-        if lifecycle.decision.is_some() || lifecycle.status != RadrootsOrderStatus::Requested {
+        if lifecycle.decision.is_some() || lifecycle.status != RadrootsTradeWorkflowState::Requested
+        {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "seller order revision requires an undecided order",
             });
@@ -2868,7 +2869,8 @@ impl DesktopAppRuntimeState {
             });
         }
         let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
-        if lifecycle.decision.is_some() || lifecycle.status != RadrootsOrderStatus::Requested {
+        if lifecycle.decision.is_some() || lifecycle.status != RadrootsTradeWorkflowState::Requested
+        {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "buyer order revision requires active pre-agreement negotiation",
             });
@@ -3002,7 +3004,7 @@ impl DesktopAppRuntimeState {
             });
         }
         let prev_event_id = match lifecycle.status {
-            RadrootsOrderStatus::Requested => {
+            RadrootsTradeWorkflowState::Requested => {
                 if active_order_pending_revision_proposal(&lifecycle).is_some() {
                     return Err(AppSqliteError::InvalidProjection {
                         reason: "buyer order cancellation requires no pending seller proposal",
@@ -3010,15 +3012,17 @@ impl DesktopAppRuntimeState {
                 }
                 request.request_event_id.clone()
             }
-            RadrootsOrderStatus::Accepted => {
+            RadrootsTradeWorkflowState::RevisionProposed
+            | RadrootsTradeWorkflowState::AgreedPendingRhi
+            | RadrootsTradeWorkflowState::Committed => {
                 return Err(AppSqliteError::InvalidProjection {
                     reason: "buyer order cancellation requires an open pre-agreement order",
                 });
             }
-            RadrootsOrderStatus::Missing
-            | RadrootsOrderStatus::Declined
-            | RadrootsOrderStatus::Cancelled
-            | RadrootsOrderStatus::Invalid => {
+            RadrootsTradeWorkflowState::Missing
+            | RadrootsTradeWorkflowState::Declined
+            | RadrootsTradeWorkflowState::Cancelled
+            | RadrootsTradeWorkflowState::Invalid => {
                 return Err(AppSqliteError::InvalidProjection {
                     reason: "buyer order cancellation requires an open pre-agreement order",
                 });
@@ -5370,7 +5374,9 @@ impl DesktopAppRuntimeState {
 
     fn selected_product_editor_id(&self) -> Option<ProductId> {
         match &self.state_store.products_projection().editor {
-            radroots_studio_app_state::ProductEditorState::Open(session) => session.selected_product_id,
+            radroots_studio_app_state::ProductEditorState::Open(session) => {
+                session.selected_product_id
+            }
             radroots_studio_app_state::ProductEditorState::Closed => None,
         }
     }
@@ -5694,7 +5700,8 @@ impl DesktopAppRuntimeState {
                 cancellations: buckets.cancellations.clone(),
             },
         );
-        if !projection.issues.is_empty() || projection.status == RadrootsOrderStatus::Invalid {
+        if !projection.issues.is_empty() || projection.status == RadrootsTradeWorkflowState::Invalid
+        {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "order lifecycle evidence is invalid",
             });
@@ -7578,19 +7585,7 @@ fn listing_publish_payload_to_sdk_listing(
         delivery_method: Some(parse_app_listing_delivery_method(
             payload.fulfillment_method.as_deref().unwrap_or_default(),
         )?),
-        location: payload
-            .fulfillment_location
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-            .map(|primary| RadrootsListingLocation {
-                primary: primary.trim().to_owned(),
-                city: None,
-                region: None,
-                country: None,
-                lat: None,
-                lng: None,
-                geohash: None,
-            }),
+        location: None,
         published_at: None,
         images: None,
     })
@@ -9748,6 +9743,44 @@ mod tests {
 
     use chrono::{Duration, Utc};
     use futures_util::{SinkExt, StreamExt};
+    use radroots_core::{
+        RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
+    };
+    use radroots_events::ids::{
+        RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress, RadrootsOrderId,
+        RadrootsOrderQuoteId, RadrootsOrderRevisionId, RadrootsPublicKey,
+    };
+    use radroots_events_codec::wire::WireEventParts;
+    use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
+    use radroots_local_events::{
+        BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, LocalEventRecord, LocalEventRecordInput,
+        LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus,
+        RelayDeliveryEvidence, SourceRuntime,
+    };
+    use radroots_nostr::prelude::{
+        RadrootsNostrClient, RadrootsNostrEvent, RadrootsNostrKeys, RadrootsNostrSecretKey,
+        RadrootsNostrTimestamp, radroots_event_from_nostr, radroots_nostr_build_event,
+    };
+    use radroots_nostr_accounts::prelude::{
+        RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
+        RadrootsNostrMemoryAccountStore, RadrootsNostrSecretVaultMemory, RadrootsSecretVault,
+        account_secret_slot,
+    };
+    use radroots_sdk::protocol::events::{
+        RadrootsNostrEvent as SdkRadrootsNostrEvent, RadrootsNostrEventPtr,
+    };
+    use radroots_sdk::protocol::order::{
+        RadrootsOrderCancellation, RadrootsOrderDecision, RadrootsOrderDecisionOutcome,
+        RadrootsOrderEconomicItem, RadrootsOrderEconomics, RadrootsOrderInventoryCommitment,
+        RadrootsOrderItem, RadrootsOrderPricingBasis, RadrootsOrderRequest,
+        RadrootsOrderRevisionOutcome, RadrootsOrderRevisionProposal,
+    };
+    use radroots_sdk::{
+        LISTING_PUBLISH_OPERATION_KIND, ORDER_CANCELLATION_OPERATION_KIND,
+        ORDER_DECISION_OPERATION_KIND, ORDER_REVISION_DECISION_OPERATION_KIND,
+        ORDER_SUBMIT_OPERATION_KIND,
+    };
+    use radroots_sql_core::{SqlExecutor, SqliteExecutor};
     use radroots_studio_app_core::{
         AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePlatform,
         AppSdkLifecycleState, AppSdkProjectionLifecycleState, AppSharedAccountsPaths,
@@ -9796,44 +9829,6 @@ mod tests {
         SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
         ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
-    use radroots_core::{
-        RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
-    };
-    use radroots_events::ids::{
-        RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress, RadrootsOrderId,
-        RadrootsOrderQuoteId, RadrootsOrderRevisionId, RadrootsPublicKey,
-    };
-    use radroots_events_codec::wire::WireEventParts;
-    use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
-    use radroots_local_events::{
-        BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, LocalEventRecord, LocalEventRecordInput,
-        LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus,
-        RelayDeliveryEvidence, SourceRuntime,
-    };
-    use radroots_nostr::prelude::{
-        RadrootsNostrClient, RadrootsNostrEvent, RadrootsNostrKeys, RadrootsNostrSecretKey,
-        RadrootsNostrTimestamp, radroots_event_from_nostr, radroots_nostr_build_event,
-    };
-    use radroots_nostr_accounts::prelude::{
-        RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
-        RadrootsNostrMemoryAccountStore, RadrootsNostrSecretVaultMemory, RadrootsSecretVault,
-        account_secret_slot,
-    };
-    use radroots_sdk::protocol::events::{
-        RadrootsNostrEvent as SdkRadrootsNostrEvent, RadrootsNostrEventPtr,
-    };
-    use radroots_sdk::protocol::order::{
-        RadrootsOrderCancellation, RadrootsOrderDecision, RadrootsOrderDecisionOutcome,
-        RadrootsOrderEconomicItem, RadrootsOrderEconomics, RadrootsOrderInventoryCommitment,
-        RadrootsOrderItem, RadrootsOrderPricingBasis, RadrootsOrderRequest,
-        RadrootsOrderRevisionOutcome, RadrootsOrderRevisionProposal,
-    };
-    use radroots_sdk::{
-        LISTING_PUBLISH_OPERATION_KIND, ORDER_CANCELLATION_OPERATION_KIND,
-        ORDER_DECISION_OPERATION_KIND, ORDER_REVISION_DECISION_OPERATION_KIND,
-        ORDER_SUBMIT_OPERATION_KIND,
-    };
-    use radroots_sql_core::{SqlExecutor, SqliteExecutor};
     use serde_json::json;
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;

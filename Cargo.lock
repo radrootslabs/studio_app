@@ -3025,6 +3025,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
+ "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -3033,13 +3034,16 @@ version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0"
 dependencies = [
+ "base64 0.22.1",
  "bytes",
  "futures-channel",
  "futures-util",
  "http",
  "http-body",
  "hyper",
+ "ipnet",
  "libc",
+ "percent-encoding",
  "pin-project-lite",
  "socket2",
  "tokio",
@@ -3813,7 +3817,6 @@ dependencies = [
 [[package]]
 name = "mf2_i18n"
 version = "0.1.0"
-source = "git+https://github.com/triesap/mf2_i18n.git?rev=e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1#e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1"
 dependencies = [
  "mf2_i18n_build",
  "mf2_i18n_core",
@@ -3826,7 +3829,6 @@ dependencies = [
 [[package]]
 name = "mf2_i18n_build"
 version = "0.1.0"
-source = "git+https://github.com/triesap/mf2_i18n.git?rev=e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1#e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1"
 dependencies = [
  "blake3",
  "hex",
@@ -3841,12 +3843,10 @@ dependencies = [
 [[package]]
 name = "mf2_i18n_core"
 version = "0.1.0"
-source = "git+https://github.com/triesap/mf2_i18n.git?rev=e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1#e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1"
 
 [[package]]
 name = "mf2_i18n_embedded"
 version = "0.1.0"
-source = "git+https://github.com/triesap/mf2_i18n.git?rev=e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1#e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1"
 dependencies = [
  "mf2_i18n_core",
 ]
@@ -3854,7 +3854,6 @@ dependencies = [
 [[package]]
 name = "mf2_i18n_native"
 version = "0.1.0"
-source = "git+https://github.com/triesap/mf2_i18n.git?rev=e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1#e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1"
 dependencies = [
  "mf2_i18n_core",
  "mf2_i18n_embedded",
@@ -3866,7 +3865,6 @@ dependencies = [
 [[package]]
 name = "mf2_i18n_runtime"
 version = "0.1.0"
-source = "git+https://github.com/triesap/mf2_i18n.git?rev=e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1#e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -3881,7 +3879,6 @@ dependencies = [
 [[package]]
 name = "mf2_i18n_std"
 version = "0.1.0"
-source = "git+https://github.com/triesap/mf2_i18n.git?rev=e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1#e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1"
 dependencies = [
  "chrono",
  "intl_pluralrules",
@@ -5093,160 +5090,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
-name = "radroots_studio_app"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "futures-util",
- "gpui",
- "gpui-component",
- "gpui-component-assets",
- "radroots_studio_app_core",
- "radroots_studio_app_i18n",
- "radroots_studio_app_remote_signer",
- "radroots_studio_app_sqlite",
- "radroots_studio_app_state",
- "radroots_studio_app_sync",
- "radroots_studio_app_ui",
- "radroots_studio_app_view",
- "radroots_core",
- "radroots_events",
- "radroots_events_codec",
- "radroots_identity",
- "radroots_local_events",
- "radroots_nostr",
- "radroots_nostr_accounts",
- "radroots_protected_store",
- "radroots_sdk",
- "radroots_secret_vault",
- "radroots_sql_core",
- "radroots_trade",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "radroots_studio_app_core"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "radroots_studio_app_view",
- "radroots_authority",
- "radroots_core",
- "radroots_events",
- "radroots_local_events",
- "radroots_nostr",
- "radroots_runtime_paths",
- "radroots_sdk",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "radroots_studio_app_i18n"
-version = "0.1.0"
-dependencies = [
- "mf2_i18n",
-]
-
-[[package]]
-name = "radroots_studio_app_remote_signer"
-version = "0.1.0"
-dependencies = [
- "nostr",
- "radroots_identity",
- "radroots_nostr",
- "radroots_nostr_connect",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "url",
-]
-
-[[package]]
-name = "radroots_studio_app_sqlite"
-version = "0.1.0"
-dependencies = [
- "radroots_studio_app_sync",
- "radroots_studio_app_view",
- "radroots_core",
- "radroots_events",
- "radroots_events_codec",
- "radroots_local_events",
- "radroots_sql_core",
- "radroots_trade",
- "rusqlite",
- "serde_json",
- "thiserror 2.0.18",
- "uuid",
-]
-
-[[package]]
-name = "radroots_studio_app_state"
-version = "0.1.0"
-dependencies = [
- "radroots_studio_app_sync",
- "radroots_studio_app_view",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "radroots_studio_app_sync"
-version = "0.1.0"
-dependencies = [
- "radroots_studio_app_view",
- "radroots_sdk",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "radroots_studio_app_types"
-version = "0.1.0"
-dependencies = [
- "serde",
- "uuid",
-]
-
-[[package]]
-name = "radroots_studio_app_ui"
-version = "0.1.0"
-dependencies = [
- "gpui",
- "gpui-component",
- "radroots_studio_app_core",
- "radroots_studio_app_i18n",
-]
-
-[[package]]
-name = "radroots_studio_app_view"
-version = "0.1.0"
-dependencies = [
- "radroots_studio_app_types",
- "radroots_core",
- "radroots_events",
- "radroots_trade",
- "serde",
- "url",
- "uuid",
-]
-
-[[package]]
 name = "radroots_authority"
 version = "0.1.0-alpha.2"
 dependencies = [
@@ -5295,6 +5138,21 @@ dependencies = [
  "radroots_events",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "radroots_geocoder"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "hex",
+ "radroots_runtime_paths",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
+ "url",
 ]
 
 [[package]]
@@ -5473,17 +5331,20 @@ dependencies = [
  "radroots_event_store",
  "radroots_events",
  "radroots_events_codec",
+ "radroots_geocoder",
  "radroots_identity",
  "radroots_nostr",
  "radroots_nostr_connect",
  "radroots_nostr_signer",
  "radroots_outbox",
  "radroots_relay_transport",
+ "radroots_runtime_paths",
  "radroots_trade",
  "serde",
  "serde_json",
  "sha2",
  "sqlx",
+ "tokio",
  "uuid",
 ]
 
@@ -5499,6 +5360,160 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "radroots_studio_app"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures-util",
+ "gpui",
+ "gpui-component",
+ "gpui-component-assets",
+ "radroots_core",
+ "radroots_events",
+ "radroots_events_codec",
+ "radroots_identity",
+ "radroots_local_events",
+ "radroots_nostr",
+ "radroots_nostr_accounts",
+ "radroots_protected_store",
+ "radroots_sdk",
+ "radroots_secret_vault",
+ "radroots_sql_core",
+ "radroots_studio_app_core",
+ "radroots_studio_app_i18n",
+ "radroots_studio_app_remote_signer",
+ "radroots_studio_app_sqlite",
+ "radroots_studio_app_state",
+ "radroots_studio_app_sync",
+ "radroots_studio_app_ui",
+ "radroots_studio_app_view",
+ "radroots_trade",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "radroots_studio_app_core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "radroots_authority",
+ "radroots_core",
+ "radroots_events",
+ "radroots_local_events",
+ "radroots_nostr",
+ "radroots_runtime_paths",
+ "radroots_sdk",
+ "radroots_studio_app_view",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "radroots_studio_app_i18n"
+version = "0.1.0"
+dependencies = [
+ "mf2_i18n",
+]
+
+[[package]]
+name = "radroots_studio_app_remote_signer"
+version = "0.1.0"
+dependencies = [
+ "nostr",
+ "radroots_identity",
+ "radroots_nostr",
+ "radroots_nostr_connect",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "radroots_studio_app_sqlite"
+version = "0.1.0"
+dependencies = [
+ "radroots_core",
+ "radroots_events",
+ "radroots_events_codec",
+ "radroots_local_events",
+ "radroots_sql_core",
+ "radroots_studio_app_sync",
+ "radroots_studio_app_view",
+ "radroots_trade",
+ "rusqlite",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "radroots_studio_app_state"
+version = "0.1.0"
+dependencies = [
+ "radroots_studio_app_sync",
+ "radroots_studio_app_view",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "radroots_studio_app_sync"
+version = "0.1.0"
+dependencies = [
+ "radroots_sdk",
+ "radroots_studio_app_view",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "radroots_studio_app_types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "radroots_studio_app_ui"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "gpui-component",
+ "radroots_studio_app_core",
+ "radroots_studio_app_i18n",
+]
+
+[[package]]
+name = "radroots_studio_app_view"
+version = "0.1.0"
+dependencies = [
+ "radroots_core",
+ "radroots_events",
+ "radroots_studio_app_types",
+ "radroots_trade",
+ "serde",
+ "url",
  "uuid",
 ]
 
@@ -5768,6 +5783,46 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
+
+[[package]]
+name = "reqwest"
+version = "0.12.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "futures-channel",
+ "futures-core",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "js-sys",
+ "log",
+ "percent-encoding",
+ "pin-project-lite",
+ "quinn",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sync_wrapper",
+ "tokio",
+ "tokio-rustls",
+ "tower",
+ "tower-http",
+ "tower-service",
+ "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "webpki-roots 1.0.7",
+]
 
 [[package]]
 name = "resvg"
@@ -7467,6 +7522,24 @@ dependencies = [
  "tokio",
  "tower-layer",
  "tower-service",
+]
+
+[[package]]
+name = "tower-http"
+version = "0.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840"
+dependencies = [
+ "bitflags 2.11.1",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "pin-project-lite",
+ "tower",
+ "tower-layer",
+ "tower-service",
+ "url",
 ]
 
 [[package]]

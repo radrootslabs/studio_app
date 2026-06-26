@@ -3,12 +3,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use radroots_studio_app_core::AppSharedAccountsPaths;
-use radroots_studio_app_sqlite::{AppSqliteError, AppSqliteStore};
-use radroots_studio_app_view::{
-    AccountSummary, AccountSurfaceActivationProjection, ActiveSurface, AppIdentityProjection,
-    FarmId, FarmerActivationProjection, SelectedAccountProjection, SelectedSurfaceProjection,
-};
 use radroots_identity::{IdentityError, RadrootsIdentity, RadrootsIdentityId};
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountRecord, RadrootsNostrAccountStatus, RadrootsNostrAccountsError,
@@ -17,6 +11,12 @@ use radroots_nostr_accounts::prelude::{
 use radroots_secret_vault::{
     RadrootsHostVaultCapabilities, RadrootsSecretBackend, RadrootsSecretBackendAvailability,
     RadrootsSecretBackendSelection,
+};
+use radroots_studio_app_core::AppSharedAccountsPaths;
+use radroots_studio_app_sqlite::{AppSqliteError, AppSqliteStore};
+use radroots_studio_app_view::{
+    AccountSummary, AccountSurfaceActivationProjection, ActiveSurface, AppIdentityProjection,
+    FarmId, FarmerActivationProjection, SelectedAccountProjection, SelectedSurfaceProjection,
 };
 use thiserror::Error;
 
@@ -359,18 +359,18 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use radroots_studio_app_core::AppSharedAccountsPaths;
-    use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget};
-    use radroots_studio_app_view::{
-        AccountSurfaceActivationProjection, ActiveSurface, AppStartupGate, IdentityReadiness,
-        SelectedSurfaceProjection,
-    };
     use radroots_identity::RadrootsIdentity;
     use radroots_nostr_accounts::prelude::{
         RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
         RadrootsNostrMemoryAccountStore, RadrootsNostrSecretVaultMemory,
     };
     use radroots_secret_vault::RadrootsHostVaultCapabilities;
+    use radroots_studio_app_core::AppSharedAccountsPaths;
+    use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget};
+    use radroots_studio_app_view::{
+        AccountSurfaceActivationProjection, ActiveSurface, AppStartupGate, IdentityReadiness,
+        SelectedSurfaceProjection,
+    };
 
     use super::{
         DesktopLocalIdentityImportRequest, account_summary_from_record,
@@ -385,7 +385,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let base = std::env::temp_dir().join(format!("radroots_studio_app_accounts_{label}_{suffix}"));
+        let base =
+            std::env::temp_dir().join(format!("radroots_studio_app_accounts_{label}_{suffix}"));
 
         AppSharedAccountsPaths {
             data_root: base.join("data/shared/accounts"),
@@ -453,7 +454,9 @@ mod tests {
         let activation = AccountSurfaceActivationProjection::new(
             account_id.as_str(),
             SelectedSurfaceProjection::new(ActiveSurface::Farmer),
-            radroots_studio_app_view::FarmerActivationProjection::active(radroots_studio_app_view::FarmId::new()),
+            radroots_studio_app_view::FarmerActivationProjection::active(
+                radroots_studio_app_view::FarmId::new(),
+            ),
         );
         sqlite_store
             .save_surface_activation(&activation)
@@ -589,7 +592,9 @@ mod tests {
         let activation = AccountSurfaceActivationProjection::new(
             second_account_id.as_str(),
             SelectedSurfaceProjection::new(ActiveSurface::Farmer),
-            radroots_studio_app_view::FarmerActivationProjection::active(radroots_studio_app_view::FarmId::new()),
+            radroots_studio_app_view::FarmerActivationProjection::active(
+                radroots_studio_app_view::FarmId::new(),
+            ),
         );
         sqlite_store
             .save_surface_activation(&activation)
@@ -648,7 +653,9 @@ mod tests {
         let activation = AccountSurfaceActivationProjection::new(
             first_account_id.as_str(),
             SelectedSurfaceProjection::new(ActiveSurface::Farmer),
-            radroots_studio_app_view::FarmerActivationProjection::active(radroots_studio_app_view::FarmId::new()),
+            radroots_studio_app_view::FarmerActivationProjection::active(
+                radroots_studio_app_view::FarmId::new(),
+            ),
         );
         sqlite_store
             .save_surface_activation(&activation)

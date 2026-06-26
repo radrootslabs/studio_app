@@ -1156,6 +1156,30 @@ mod tests {
                 [],
             )
             .expect("agreement-only workflow projection should insert");
+        connection
+            .execute(
+                "INSERT INTO orders (
+                    id,
+                    farm_id,
+                    order_number,
+                    customer_display_name,
+                    status,
+                    updated_at,
+                    workflow_agreement,
+                    workflow_inventory
+                 ) VALUES (
+                    'order_pending_rhi',
+                    'farm_schema',
+                    'pending rhi',
+                    'Buyer',
+                    'needs_action',
+                    '2026-01-01T00:00:00Z',
+                    'pending_rhi',
+                    'reserved'
+                 )",
+                [],
+            )
+            .expect("pending rhi workflow projection should insert");
 
         let invalid_result = connection.execute(
             "INSERT INTO orders (
@@ -1347,6 +1371,12 @@ mod tests {
             )
             .expect("status should load");
         assert_eq!(status, "needs_review");
+        connection
+            .execute(
+                "UPDATE orders SET workflow_agreement = 'pending_rhi' WHERE id = 'order_legacy'",
+                [],
+            )
+            .expect("pending rhi agreement should satisfy migrated check");
 
         drop(store);
         remove_database_artifacts(&path);

@@ -7,7 +7,7 @@ use radroots_studio_app_view::{
     PackDayOutputCustomerOrder, PackDayOutputOrderState, PackDayOutputPackListEntry,
     PackDayOutputProductTotal, PackDayOutputQuantity, PackDayOutputSource, PackDayOutputWindow,
     PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
-    PackDayScreenQueryState, ProductId, TradeWorkflowProjection,
+    PackDayScreenQueryState, ProductId, TradeAgreementStatus, TradeWorkflowProjection,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -1174,9 +1174,10 @@ fn summarize_orders(records: &[OrderRecord]) -> OrdersListSummary {
 
 fn primary_action_for_order(
     status: OrderStatus,
-    _workflow: &TradeWorkflowProjection,
+    workflow: &TradeWorkflowProjection,
 ) -> Option<OrderPrimaryAction> {
     match status {
+        OrderStatus::NeedsAction if workflow.agreement == TradeAgreementStatus::PendingRhi => None,
         OrderStatus::NeedsAction => Some(OrderPrimaryAction::Review),
         OrderStatus::Scheduled
         | OrderStatus::Packed

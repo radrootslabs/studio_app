@@ -39,7 +39,8 @@ impl RadrootsAppRemoteSignerTarget {
     }
 }
 
-pub fn radroots_studio_app_remote_signer_requested_permissions() -> RadrootsNostrConnectPermissions {
+pub fn radroots_studio_app_remote_signer_requested_permissions() -> RadrootsNostrConnectPermissions
+{
     vec![
         RadrootsNostrConnectPermission::with_parameter(
             RadrootsNostrConnectMethod::SignEvent,
@@ -138,7 +139,8 @@ mod tests {
 
     #[test]
     fn parses_direct_bunker_uri() {
-        let preview = radroots_studio_app_remote_signer_preview(bunker_uri().as_str()).expect("preview");
+        let preview =
+            radroots_studio_app_remote_signer_preview(bunker_uri().as_str()).expect("preview");
 
         assert_eq!(preview.source, RadrootsAppRemoteSignerSource::BunkerUri);
         assert_eq!(

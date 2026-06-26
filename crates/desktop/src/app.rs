@@ -150,7 +150,9 @@ mod tests {
         APP_PROJECTION_SOURCE, AppBuildIdentity, AppRuntimeCapture, AppRuntimeMode,
         AppRuntimeSnapshot,
     };
-    use radroots_studio_app_state::{AppShellProjection, FarmWorkspaceReadinessProjection, HomeRoute};
+    use radroots_studio_app_state::{
+        AppShellProjection, FarmWorkspaceReadinessProjection, HomeRoute,
+    };
     use radroots_studio_app_view::{
         AppStartupGate, LoggedOutStartupProjection, SettingsAccountProjection,
         TodayAgendaProjection,

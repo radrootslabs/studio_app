@@ -474,7 +474,9 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("radroots_studio_app_pack_day_export_{label}_{unique}"))
+        std::env::temp_dir().join(format!(
+            "radroots_studio_app_pack_day_export_{label}_{unique}"
+        ))
     }
 
     fn cleanup_temp_root(roots: &AppRuntimeRoots) {
