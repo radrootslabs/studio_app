@@ -11,6 +11,8 @@ use radroots_core::{
     RadrootsCoreQuantityPrice, RadrootsCoreUnit,
 };
 use radroots_events::{
+    RadrootsNostrEvent as SdkRadrootsNostrEvent, RadrootsNostrEventPtr,
+    farm::{RadrootsFarm, RadrootsFarmPublicLocation, RadrootsFarmRef},
     ids::{
         RadrootsDTag, RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress,
         RadrootsOrderId, RadrootsOrderRevisionId, RadrootsPublicKey,
@@ -19,6 +21,11 @@ use radroots_events::{
         KIND_FARM, KIND_LISTING, KIND_LISTING_DRAFT, KIND_ORDER_CANCELLATION, KIND_ORDER_DECISION,
         KIND_ORDER_REQUEST, KIND_ORDER_REVISION_DECISION, KIND_ORDER_REVISION_PROPOSAL,
         KIND_PROFILE,
+    },
+    listing::{
+        RadrootsListing, RadrootsListingAvailability, RadrootsListingBin,
+        RadrootsListingDeliveryMethod, RadrootsListingProduct, RadrootsListingPublicLocation,
+        RadrootsListingStatus,
     },
     order::{
         RadrootsOrderDecision, RadrootsOrderEconomics, RadrootsOrderEventType,
@@ -45,15 +52,6 @@ use radroots_nostr::prelude::{
     RadrootsNostrTimestamp, radroots_nostr_kind, radroots_nostr_parse_pubkey,
 };
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
-use radroots_sdk::protocol::events::{
-    RadrootsNostrEvent as SdkRadrootsNostrEvent, RadrootsNostrEventPtr,
-};
-use radroots_sdk::protocol::farm::{RadrootsFarm, RadrootsFarmPublicLocation, RadrootsFarmRef};
-use radroots_sdk::protocol::listing::{
-    RadrootsListing, RadrootsListingAvailability, RadrootsListingBin,
-    RadrootsListingDeliveryMethod, RadrootsListingProduct, RadrootsListingPublicLocation,
-    RadrootsListingStatus,
-};
 use radroots_sdk::{
     FARM_PUBLISH_OPERATION_KIND, LISTING_PUBLISH_OPERATION_KIND, TRADE_CANCELLATION_OPERATION_KIND,
     TRADE_DECISION_OPERATION_KIND, TRADE_REVISION_DECISION_OPERATION_KIND,
@@ -9742,6 +9740,7 @@ mod tests {
         RadrootsOrderItem, RadrootsOrderPricingBasis, RadrootsOrderRequest,
         RadrootsOrderRevisionOutcome, RadrootsOrderRevisionProposal,
     };
+    use radroots_events::{RadrootsNostrEvent as SdkRadrootsNostrEvent, RadrootsNostrEventPtr};
     use radroots_events_codec::{
         order::{
             order_cancellation_event_build, order_decision_event_build, order_request_event_build,
@@ -9763,9 +9762,6 @@ mod tests {
         RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
         RadrootsNostrMemoryAccountStore, RadrootsNostrSecretVaultMemory, RadrootsSecretVault,
         account_secret_slot,
-    };
-    use radroots_sdk::protocol::events::{
-        RadrootsNostrEvent as SdkRadrootsNostrEvent, RadrootsNostrEventPtr,
     };
     use radroots_sdk::{
         LISTING_PUBLISH_OPERATION_KIND, TRADE_CANCELLATION_OPERATION_KIND,
@@ -10787,9 +10783,8 @@ mod tests {
         let listing =
             super::listing_publish_payload_to_sdk_listing(&listing_payload, Some(&public_location))
                 .expect("listing payload should convert to SDK listing");
-        let parts = radroots_sdk::protocol::listing::build_draft(&listing)
-            .expect("listing draft should build")
-            .into_wire_parts();
+        let parts = radroots_events_codec::listing::encode::to_wire_parts(&listing)
+            .expect("listing draft should build");
         let event = radroots_nostr_build_event(parts.kind, parts.content, parts.tags)
             .expect("listing event builder should build")
             .sign_with_keys(identity.keys())
