@@ -2,10 +2,9 @@
 
 mod error;
 mod interop;
-mod migration_audit;
 mod migrations;
 mod repo;
-mod sdk_migration_receipts;
+mod sdk_workflow_receipts;
 mod sync;
 
 use std::{collections::BTreeSet, fs, path::PathBuf, time::Duration};
@@ -32,12 +31,6 @@ pub use interop::{
     AppLocalInteropImportReport, AppLocalInteropRepository, StoredLocalInteropRecord,
     projected_order_id_from_trade_request,
 };
-pub use migration_audit::{
-    APP_SDK_MIGRATION_AUDIT_DEFAULT_BATCH_SIZE, APP_SDK_MIGRATION_AUDIT_MAX_BATCH_SIZE,
-    AppSdkMigrationAuditClassification, AppSdkMigrationAuditCount,
-    AppSdkMigrationAuditDuplicateCandidate, AppSdkMigrationAuditIssue, AppSdkMigrationAuditReport,
-    AppSdkMigrationAuditRequest, AppSdkMigrationAuditSource, AppSdkMigrationAuditSourceReport,
-};
 pub use migrations::latest_schema_version;
 pub use repo::{
     APP_ACTIVITY_CONTEXT_LIMIT, APP_ACTIVITY_RETENTION_LIMIT, AppActivationRepository,
@@ -48,9 +41,9 @@ pub use repo::{
     SellerOrderDecisionExport, SellerOrderDecisionLineExport, TODAY_AGENDA_LIST_LIMIT,
     TODAY_AGENDA_LOW_STOCK_THRESHOLD, derive_farm_rules_readiness,
 };
-pub use sdk_migration_receipts::{
-    AppSdkMigrationReceipt, AppSdkMigrationReceiptInput, AppSdkMigrationReceiptRepository,
-    AppSdkMigrationReceiptSourceKind, AppSdkMigrationState,
+pub use sdk_workflow_receipts::{
+    AppSdkStoredWorkflowReceipt, AppSdkWorkflowReceiptInput, AppSdkWorkflowReceiptRepository,
+    AppSdkWorkflowReceiptSourceKind, AppSdkWorkflowReceiptState,
 };
 pub use sync::{
     AppSyncRepository, StoredPendingSyncOperation, StoredRelayIngestCursor, StoredSyncConflict,
@@ -124,8 +117,8 @@ impl AppSqliteStore {
         AppSyncRepository::new(&self.connection)
     }
 
-    pub fn sdk_migration_receipt_repository(&self) -> AppSdkMigrationReceiptRepository<'_> {
-        AppSdkMigrationReceiptRepository::new(&self.connection)
+    pub fn sdk_workflow_receipt_repository(&self) -> AppSdkWorkflowReceiptRepository<'_> {
+        AppSdkWorkflowReceiptRepository::new(&self.connection)
     }
 
     pub fn reminders_repository(&self) -> AppRemindersRepository<'_> {
@@ -837,7 +830,7 @@ mod tests {
         assert!(table_exists(connection, "reminder_log_entries"));
         assert!(table_exists(connection, "buyer_order_coordination_records"));
         assert!(table_exists(connection, "order_validation_receipts"));
-        assert!(table_exists(connection, "app_sdk_migration_receipts"));
+        assert!(table_exists(connection, "app_sdk_workflow_receipts"));
         assert!(column_exists(connection, "farms", "timezone"));
         assert!(column_exists(connection, "farms", "currency_code"));
         assert!(column_exists(connection, "local_outbox", "account_id"));
@@ -1005,47 +998,47 @@ mod tests {
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_migration_receipts",
+            "app_sdk_workflow_receipts",
             "source_record_id"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_migration_receipts",
+            "app_sdk_workflow_receipts",
             "source_kind"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_migration_receipts",
+            "app_sdk_workflow_receipts",
             "sdk_operation_kind"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_migration_receipts",
+            "app_sdk_workflow_receipts",
             "sdk_outbox_event_ids_json"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_migration_receipts",
+            "app_sdk_workflow_receipts",
             "expected_event_id"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_migration_receipts",
+            "app_sdk_workflow_receipts",
             "actor_pubkey"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_migration_receipts",
+            "app_sdk_workflow_receipts",
             "idempotency_digest_prefix"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_migration_receipts",
-            "migration_state"
+            "app_sdk_workflow_receipts",
+            "workflow_state"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_migration_receipts",
+            "app_sdk_workflow_receipts",
             "detail_json"
         ));
         connection

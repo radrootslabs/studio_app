@@ -5,12 +5,12 @@ use uuid::Uuid;
 use crate::AppSqliteError;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AppSdkMigrationReceiptSourceKind {
+pub enum AppSdkWorkflowReceiptSourceKind {
     LocalOutbox,
     SharedLocalEvent,
 }
 
-impl AppSdkMigrationReceiptSourceKind {
+impl AppSdkWorkflowReceiptSourceKind {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::LocalOutbox => "local_outbox",
@@ -23,7 +23,7 @@ impl AppSdkMigrationReceiptSourceKind {
             "local_outbox" => Ok(Self::LocalOutbox),
             "shared_local_event" => Ok(Self::SharedLocalEvent),
             _ => Err(AppSqliteError::DecodeEnum {
-                field: "app_sdk_migration_receipts.source_kind",
+                field: "app_sdk_workflow_receipts.source_kind",
                 value: value.to_owned(),
             }),
         }
@@ -31,7 +31,7 @@ impl AppSdkMigrationReceiptSourceKind {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AppSdkMigrationState {
+pub enum AppSdkWorkflowReceiptState {
     Pending,
     Prepared,
     Enqueued,
@@ -44,7 +44,7 @@ pub enum AppSdkMigrationState {
     Unknown,
 }
 
-impl AppSdkMigrationState {
+impl AppSdkWorkflowReceiptState {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -73,7 +73,7 @@ impl AppSdkMigrationState {
             "manual_review" => Ok(Self::ManualReview),
             "unknown" => Ok(Self::Unknown),
             _ => Err(AppSqliteError::DecodeEnum {
-                field: "app_sdk_migration_receipts.migration_state",
+                field: "app_sdk_workflow_receipts.workflow_state",
                 value: value.to_owned(),
             }),
         }
@@ -81,66 +81,66 @@ impl AppSdkMigrationState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AppSdkMigrationReceiptInput {
-    pub source_kind: AppSdkMigrationReceiptSourceKind,
+pub struct AppSdkWorkflowReceiptInput {
+    pub source_kind: AppSdkWorkflowReceiptSourceKind,
     pub source_record_id: String,
     pub sdk_operation_kind: String,
     pub sdk_outbox_event_ids: Vec<String>,
     pub expected_event_id: Option<String>,
     pub actor_pubkey: Option<String>,
     pub idempotency_digest_prefix: Option<String>,
-    pub migration_state: AppSdkMigrationState,
+    pub workflow_state: AppSdkWorkflowReceiptState,
     pub recorded_at: String,
     pub detail_json: Value,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AppSdkMigrationReceipt {
+pub struct AppSdkStoredWorkflowReceipt {
     pub id: String,
-    pub source_kind: AppSdkMigrationReceiptSourceKind,
+    pub source_kind: AppSdkWorkflowReceiptSourceKind,
     pub source_record_id: String,
     pub sdk_operation_kind: String,
     pub sdk_outbox_event_ids: Vec<String>,
     pub expected_event_id: Option<String>,
     pub actor_pubkey: Option<String>,
     pub idempotency_digest_prefix: Option<String>,
-    pub migration_state: AppSdkMigrationState,
+    pub workflow_state: AppSdkWorkflowReceiptState,
     pub created_at: String,
     pub updated_at: String,
     pub detail_json: Value,
 }
 
-pub struct AppSdkMigrationReceiptRepository<'a> {
+pub struct AppSdkWorkflowReceiptRepository<'a> {
     connection: &'a Connection,
 }
 
-impl<'a> AppSdkMigrationReceiptRepository<'a> {
+impl<'a> AppSdkWorkflowReceiptRepository<'a> {
     pub const fn new(connection: &'a Connection) -> Self {
         Self { connection }
     }
 
     pub fn record_receipt(
         &self,
-        input: &AppSdkMigrationReceiptInput,
-    ) -> Result<AppSdkMigrationReceipt, AppSqliteError> {
+        input: &AppSdkWorkflowReceiptInput,
+    ) -> Result<AppSdkStoredWorkflowReceipt, AppSqliteError> {
         let receipt_id = Uuid::now_v7().to_string();
         let outbox_ids_json =
             serde_json::to_string(&input.sdk_outbox_event_ids).map_err(|source| {
                 AppSqliteError::EncodeJson {
-                    field: "app_sdk_migration_receipts.sdk_outbox_event_ids_json",
+                    field: "app_sdk_workflow_receipts.sdk_outbox_event_ids_json",
                     source,
                 }
             })?;
         let detail_json = serde_json::to_string(&input.detail_json).map_err(|source| {
             AppSqliteError::EncodeJson {
-                field: "app_sdk_migration_receipts.detail_json",
+                field: "app_sdk_workflow_receipts.detail_json",
                 source,
             }
         })?;
 
         self.connection
             .execute(
-                "INSERT INTO app_sdk_migration_receipts (
+                "INSERT INTO app_sdk_workflow_receipts (
                     id,
                     source_kind,
                     source_record_id,
@@ -149,7 +149,7 @@ impl<'a> AppSdkMigrationReceiptRepository<'a> {
                     expected_event_id,
                     actor_pubkey,
                     idempotency_digest_prefix,
-                    migration_state,
+                    workflow_state,
                     created_at,
                     updated_at,
                     detail_json
@@ -161,7 +161,7 @@ impl<'a> AppSdkMigrationReceiptRepository<'a> {
                     expected_event_id = excluded.expected_event_id,
                     actor_pubkey = excluded.actor_pubkey,
                     idempotency_digest_prefix = excluded.idempotency_digest_prefix,
-                    migration_state = excluded.migration_state,
+                    workflow_state = excluded.workflow_state,
                     updated_at = excluded.updated_at,
                     detail_json = excluded.detail_json",
                 params![
@@ -173,27 +173,27 @@ impl<'a> AppSdkMigrationReceiptRepository<'a> {
                     input.expected_event_id.as_deref(),
                     input.actor_pubkey.as_deref(),
                     input.idempotency_digest_prefix.as_deref(),
-                    input.migration_state.storage_key(),
+                    input.workflow_state.storage_key(),
                     input.recorded_at.as_str(),
                     detail_json.as_str(),
                 ],
             )
             .map_err(|source| AppSqliteError::Query {
-                operation: "record app SDK migration receipt",
+                operation: "record app SDK workflow receipt",
                 source,
             })?;
 
         self.load_receipt(input.source_kind, input.source_record_id.as_str())?
             .ok_or(AppSqliteError::MissingColumn {
-                field: "app_sdk_migration_receipts.id",
+                field: "app_sdk_workflow_receipts.id",
             })
     }
 
     pub fn load_receipt(
         &self,
-        source_kind: AppSdkMigrationReceiptSourceKind,
+        source_kind: AppSdkWorkflowReceiptSourceKind,
         source_record_id: &str,
-    ) -> Result<Option<AppSdkMigrationReceipt>, AppSqliteError> {
+    ) -> Result<Option<AppSdkStoredWorkflowReceipt>, AppSqliteError> {
         self.connection
             .query_row(
                 "SELECT
@@ -205,11 +205,11 @@ impl<'a> AppSdkMigrationReceiptRepository<'a> {
                     expected_event_id,
                     actor_pubkey,
                     idempotency_digest_prefix,
-                    migration_state,
+                    workflow_state,
                     created_at,
                     updated_at,
                     detail_json
-                 FROM app_sdk_migration_receipts
+                 FROM app_sdk_workflow_receipts
                  WHERE source_kind = ?1
                     AND source_record_id = ?2
                  LIMIT 1",
@@ -218,39 +218,39 @@ impl<'a> AppSdkMigrationReceiptRepository<'a> {
             )
             .optional()
             .map_err(|source| AppSqliteError::Query {
-                operation: "load app SDK migration receipt",
+                operation: "load app SDK workflow receipt",
                 source,
             })
     }
 }
 
-fn decode_receipt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AppSdkMigrationReceipt> {
+fn decode_receipt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AppSdkStoredWorkflowReceipt> {
     let source_kind: String = row.get(1)?;
     let outbox_ids_json: String = row.get(4)?;
-    let migration_state: String = row.get(8)?;
+    let workflow_state: String = row.get(8)?;
     let detail_json: String = row.get(11)?;
-    Ok(AppSdkMigrationReceipt {
+    Ok(AppSdkStoredWorkflowReceipt {
         id: row.get(0)?,
-        source_kind: AppSdkMigrationReceiptSourceKind::parse(source_kind.as_str())
+        source_kind: AppSdkWorkflowReceiptSourceKind::parse(source_kind.as_str())
             .map_err(decode_app_error)?,
         source_record_id: row.get(2)?,
         sdk_operation_kind: row.get(3)?,
         sdk_outbox_event_ids: serde_json::from_str(outbox_ids_json.as_str()).map_err(|source| {
             decode_app_error(AppSqliteError::DecodeJson {
-                field: "app_sdk_migration_receipts.sdk_outbox_event_ids_json",
+                field: "app_sdk_workflow_receipts.sdk_outbox_event_ids_json",
                 source,
             })
         })?,
         expected_event_id: row.get(5)?,
         actor_pubkey: row.get(6)?,
         idempotency_digest_prefix: row.get(7)?,
-        migration_state: AppSdkMigrationState::parse(migration_state.as_str())
+        workflow_state: AppSdkWorkflowReceiptState::parse(workflow_state.as_str())
             .map_err(decode_app_error)?,
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
         detail_json: serde_json::from_str(detail_json.as_str()).map_err(|source| {
             decode_app_error(AppSqliteError::DecodeJson {
-                field: "app_sdk_migration_receipts.detail_json",
+                field: "app_sdk_workflow_receipts.detail_json",
                 source,
             })
         })?,
@@ -266,39 +266,39 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        AppSdkMigrationReceiptInput, AppSdkMigrationReceiptSourceKind, AppSdkMigrationState,
+        AppSdkWorkflowReceiptInput, AppSdkWorkflowReceiptSourceKind, AppSdkWorkflowReceiptState,
         AppSqliteStore, DatabaseTarget,
     };
 
     #[test]
-    fn migration_receipts_are_idempotent_by_source_record() {
+    fn workflow_receipts_are_idempotent_by_source_record() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app store");
         let first = store
-            .sdk_migration_receipt_repository()
-            .record_receipt(&AppSdkMigrationReceiptInput {
-                source_kind: AppSdkMigrationReceiptSourceKind::LocalOutbox,
+            .sdk_workflow_receipt_repository()
+            .record_receipt(&AppSdkWorkflowReceiptInput {
+                source_kind: AppSdkWorkflowReceiptSourceKind::LocalOutbox,
                 source_record_id: "source-record-a".to_owned(),
                 sdk_operation_kind: "farm.publish".to_owned(),
                 sdk_outbox_event_ids: vec!["outbox-a".to_owned()],
                 expected_event_id: Some("expected-a".to_owned()),
                 actor_pubkey: Some("actor-a".to_owned()),
                 idempotency_digest_prefix: Some("digest-a".to_owned()),
-                migration_state: AppSdkMigrationState::Enqueued,
+                workflow_state: AppSdkWorkflowReceiptState::Enqueued,
                 recorded_at: "2026-06-18T12:00:00Z".to_owned(),
                 detail_json: json!({"attempt": 1}),
             })
             .expect("record first receipt");
         let second = store
-            .sdk_migration_receipt_repository()
-            .record_receipt(&AppSdkMigrationReceiptInput {
-                source_kind: AppSdkMigrationReceiptSourceKind::LocalOutbox,
+            .sdk_workflow_receipt_repository()
+            .record_receipt(&AppSdkWorkflowReceiptInput {
+                source_kind: AppSdkWorkflowReceiptSourceKind::LocalOutbox,
                 source_record_id: "source-record-a".to_owned(),
                 sdk_operation_kind: "farm.publish".to_owned(),
                 sdk_outbox_event_ids: vec!["outbox-b".to_owned()],
                 expected_event_id: Some("expected-b".to_owned()),
                 actor_pubkey: Some("actor-b".to_owned()),
                 idempotency_digest_prefix: Some("digest-b".to_owned()),
-                migration_state: AppSdkMigrationState::Pushed,
+                workflow_state: AppSdkWorkflowReceiptState::Pushed,
                 recorded_at: "2026-06-18T12:05:00Z".to_owned(),
                 detail_json: json!({"attempt": 2}),
             })
@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(second.sdk_outbox_event_ids, vec!["outbox-b".to_owned()]);
         assert_eq!(second.expected_event_id.as_deref(), Some("expected-b"));
         assert_eq!(second.actor_pubkey.as_deref(), Some("actor-b"));
-        assert_eq!(second.migration_state, AppSdkMigrationState::Pushed);
+        assert_eq!(second.workflow_state, AppSdkWorkflowReceiptState::Pushed);
         assert_eq!(second.detail_json, json!({"attempt": 2}));
     }
 }

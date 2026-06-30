@@ -1,4 +1,4 @@
-CREATE TABLE app_sdk_migration_receipts (
+CREATE TABLE app_sdk_workflow_receipts (
     id TEXT PRIMARY KEY NOT NULL,
     source_kind TEXT NOT NULL CHECK (
         source_kind IN ('local_outbox', 'shared_local_event')
@@ -9,8 +9,8 @@ CREATE TABLE app_sdk_migration_receipts (
     expected_event_id TEXT,
     actor_pubkey TEXT,
     idempotency_digest_prefix TEXT,
-    migration_state TEXT NOT NULL CHECK (
-        migration_state IN (
+    workflow_state TEXT NOT NULL CHECK (
+        workflow_state IN (
             'pending',
             'prepared',
             'enqueued',
@@ -29,10 +29,10 @@ CREATE TABLE app_sdk_migration_receipts (
     UNIQUE(source_kind, source_record_id)
 );
 
-CREATE INDEX idx_app_sdk_migration_receipts_source_record ON app_sdk_migration_receipts(
+CREATE INDEX idx_app_sdk_workflow_receipts_source_record ON app_sdk_workflow_receipts(
     source_record_id
 );
-CREATE INDEX idx_app_sdk_migration_receipts_state ON app_sdk_migration_receipts(
-    migration_state,
+CREATE INDEX idx_app_sdk_workflow_receipts_state ON app_sdk_workflow_receipts(
+    workflow_state,
     updated_at
 );

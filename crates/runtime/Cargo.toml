@@ -17,6 +17,7 @@ radroots_local_events.workspace = true
 radroots_nostr.workspace = true
 radroots_runtime_paths.workspace = true
 radroots_sdk.workspace = true
+radroots_trade.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

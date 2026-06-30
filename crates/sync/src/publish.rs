@@ -1,10 +1,10 @@
-use radroots_sdk::protocol::order::{
+use radroots_events::order::{
     RadrootsOrderEconomics, RadrootsOrderItem, RadrootsOrderRevisionOutcome,
 };
 use radroots_sdk::{
-    FARM_PUBLISH_OPERATION_KIND, LISTING_PUBLISH_OPERATION_KIND, ORDER_CANCELLATION_OPERATION_KIND,
-    ORDER_DECISION_OPERATION_KIND, ORDER_REVISION_DECISION_OPERATION_KIND,
-    ORDER_REVISION_PROPOSAL_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND,
+    FARM_PUBLISH_OPERATION_KIND, LISTING_PUBLISH_OPERATION_KIND, TRADE_CANCELLATION_OPERATION_KIND,
+    TRADE_DECISION_OPERATION_KIND, TRADE_REVISION_DECISION_OPERATION_KIND,
+    TRADE_REVISION_PROPOSAL_OPERATION_KIND, TRADE_SUBMIT_OPERATION_KIND,
 };
 use radroots_studio_app_view::{
     FarmId, FarmReadiness, FulfillmentWindowId, OrderId, ProductId, ProductStatus,
@@ -43,11 +43,11 @@ impl AppPublishWorkKind {
         match self {
             Self::FarmProfile => FARM_PUBLISH_OPERATION_KIND,
             Self::Listing => LISTING_PUBLISH_OPERATION_KIND,
-            Self::OrderRequest => ORDER_SUBMIT_OPERATION_KIND,
-            Self::OrderDecision => ORDER_DECISION_OPERATION_KIND,
-            Self::OrderRevisionProposal => ORDER_REVISION_PROPOSAL_OPERATION_KIND,
-            Self::OrderRevisionDecision => ORDER_REVISION_DECISION_OPERATION_KIND,
-            Self::OrderCancellation => ORDER_CANCELLATION_OPERATION_KIND,
+            Self::OrderRequest => TRADE_SUBMIT_OPERATION_KIND,
+            Self::OrderDecision => TRADE_DECISION_OPERATION_KIND,
+            Self::OrderRevisionProposal => TRADE_REVISION_PROPOSAL_OPERATION_KIND,
+            Self::OrderRevisionDecision => TRADE_REVISION_DECISION_OPERATION_KIND,
+            Self::OrderCancellation => TRADE_CANCELLATION_OPERATION_KIND,
         }
     }
 }
@@ -186,7 +186,6 @@ pub struct AppOrderRevisionProposalPublishPayload {
     pub farm_id: FarmId,
     pub trade_order_id: String,
     pub request_event_id: String,
-    pub prev_event_id: String,
     pub revision_id: String,
     pub listing_addr: String,
     pub buyer_pubkey: String,
@@ -203,7 +202,6 @@ pub struct AppOrderRevisionDecisionPublishPayload {
     pub farm_id: FarmId,
     pub trade_order_id: String,
     pub request_event_id: String,
-    pub prev_event_id: String,
     pub revision_id: String,
     pub listing_addr: String,
     pub buyer_pubkey: String,
@@ -218,7 +216,6 @@ pub struct AppOrderCancellationPublishPayload {
     pub farm_id: FarmId,
     pub trade_order_id: String,
     pub request_event_id: String,
-    pub prev_event_id: String,
     pub listing_addr: String,
     pub buyer_pubkey: String,
     pub seller_pubkey: String,
@@ -433,7 +430,6 @@ impl AppPublishPayload {
                     &payload.context,
                     payload.trade_order_id.as_str(),
                     payload.request_event_id.as_str(),
-                    payload.prev_event_id.as_str(),
                     payload.listing_addr.as_str(),
                     payload.buyer_pubkey.as_str(),
                     payload.seller_pubkey.as_str(),
@@ -462,7 +458,6 @@ impl AppPublishPayload {
                     &payload.context,
                     payload.trade_order_id.as_str(),
                     payload.request_event_id.as_str(),
-                    payload.prev_event_id.as_str(),
                     payload.listing_addr.as_str(),
                     payload.buyer_pubkey.as_str(),
                     payload.seller_pubkey.as_str(),
@@ -480,7 +475,6 @@ impl AppPublishPayload {
                     &payload.context,
                     payload.trade_order_id.as_str(),
                     payload.request_event_id.as_str(),
-                    payload.prev_event_id.as_str(),
                     payload.listing_addr.as_str(),
                     payload.buyer_pubkey.as_str(),
                     payload.seller_pubkey.as_str(),
@@ -515,7 +509,6 @@ fn validate_lifecycle_order_fields(
     context: &AppPublishContext,
     trade_order_id: &str,
     request_event_id: &str,
-    prev_event_id: &str,
     listing_addr: &str,
     buyer_pubkey: &str,
     seller_pubkey: &str,
@@ -527,9 +520,6 @@ fn validate_lifecycle_order_fields(
     }
     if request_event_id.trim().is_empty() {
         failures.push(AppPublishValidationFailure::MissingOrderRequestEventId);
-    }
-    if prev_event_id.trim().is_empty() {
-        failures.push(AppPublishValidationFailure::MissingOrderPreviousEventId);
     }
     if listing_addr.trim().is_empty() {
         failures.push(AppPublishValidationFailure::MissingOrderListingAddress);
@@ -570,7 +560,6 @@ pub enum AppPublishValidationFailure {
     MissingOrderTotal,
     MissingOrderTradeOrderId,
     MissingOrderRequestEventId,
-    MissingOrderPreviousEventId,
     MissingOrderDecisionInventory,
     MissingOrderDeclineReason,
     MissingOrderRevisionId,
@@ -609,7 +598,6 @@ impl AppPublishValidationFailure {
             Self::MissingOrderTotal => "missing_order_total",
             Self::MissingOrderTradeOrderId => "missing_order_trade_order_id",
             Self::MissingOrderRequestEventId => "missing_order_request_event_id",
-            Self::MissingOrderPreviousEventId => "missing_order_previous_event_id",
             Self::MissingOrderDecisionInventory => "missing_order_decision_inventory",
             Self::MissingOrderDeclineReason => "missing_order_decline_reason",
             Self::MissingOrderRevisionId => "missing_order_revision_id",
@@ -674,13 +662,13 @@ mod tests {
         AppOrderRequestPublishPayload, AppOrderRevisionDecisionPublishPayload,
         AppOrderRevisionProposalPublishPayload, AppPublishContext, AppPublishPayload,
         AppPublishValidationFailure, AppPublishWorkKind, FARM_PUBLISH_OPERATION_KIND,
-        ORDER_CANCELLATION_OPERATION_KIND, ORDER_DECISION_OPERATION_KIND,
-        ORDER_REVISION_DECISION_OPERATION_KIND, ORDER_REVISION_PROPOSAL_OPERATION_KIND,
+        TRADE_CANCELLATION_OPERATION_KIND, TRADE_DECISION_OPERATION_KIND,
+        TRADE_REVISION_DECISION_OPERATION_KIND, TRADE_REVISION_PROPOSAL_OPERATION_KIND,
     };
     use crate::{
         PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind,
     };
-    use radroots_sdk::protocol::order::{
+    use radroots_events::order::{
         RadrootsOrderEconomics, RadrootsOrderItem, RadrootsOrderRevisionOutcome,
     };
     use radroots_studio_app_view::{FarmId, FarmReadiness, OrderId, ProductId, ProductStatus};
@@ -856,7 +844,7 @@ mod tests {
         assert_eq!(payload.work_kind().storage_key(), "order_decision");
         assert_eq!(
             payload.work_kind().sdk_operation(),
-            ORDER_DECISION_OPERATION_KIND
+            TRADE_DECISION_OPERATION_KIND
         );
         let reason_codes: Vec<&str> = payload
             .validation_failures()
@@ -890,7 +878,6 @@ mod tests {
                 farm_id,
                 trade_order_id: " ".to_owned(),
                 request_event_id: String::new(),
-                prev_event_id: String::new(),
                 listing_addr: String::new(),
                 buyer_pubkey: String::new(),
                 seller_pubkey: String::new(),
@@ -899,7 +886,7 @@ mod tests {
 
         assert_eq!(
             cancellation.work_kind().sdk_operation(),
-            ORDER_CANCELLATION_OPERATION_KIND
+            TRADE_CANCELLATION_OPERATION_KIND
         );
 
         let cancellation_reason_codes: Vec<&str> = cancellation
@@ -915,7 +902,6 @@ mod tests {
                 "missing_source",
                 "missing_order_trade_order_id",
                 "missing_order_request_event_id",
-                "missing_order_previous_event_id",
                 "missing_order_listing_address",
                 "missing_order_buyer_pubkey",
                 "missing_order_seller_pubkey",
@@ -930,7 +916,6 @@ mod tests {
                 farm_id,
                 trade_order_id: "order-1".to_owned(),
                 request_event_id: "request-event-1".to_owned(),
-                prev_event_id: "decision-event-1".to_owned(),
                 listing_addr: "30402:seller:listing".to_owned(),
                 buyer_pubkey: "buyer".to_owned(),
                 seller_pubkey: "seller".to_owned(),
@@ -951,7 +936,6 @@ mod tests {
                 farm_id,
                 trade_order_id: "order-1".to_owned(),
                 request_event_id: "request-event-1".to_owned(),
-                prev_event_id: "decision-event-1".to_owned(),
                 listing_addr: "30402:seller:listing".to_owned(),
                 buyer_pubkey: "buyer".to_owned(),
                 seller_pubkey: "seller".to_owned(),
@@ -972,7 +956,6 @@ mod tests {
                 farm_id,
                 trade_order_id: "order-1".to_owned(),
                 request_event_id: "request-event-1".to_owned(),
-                prev_event_id: "decision-event-1".to_owned(),
                 revision_id: "revision-1".to_owned(),
                 listing_addr: "30402:seller:listing".to_owned(),
                 buyer_pubkey: "buyer".to_owned(),
@@ -991,7 +974,6 @@ mod tests {
                 farm_id,
                 trade_order_id: " ".to_owned(),
                 request_event_id: String::new(),
-                prev_event_id: String::new(),
                 revision_id: String::new(),
                 listing_addr: String::new(),
                 buyer_pubkey: String::new(),
@@ -1007,7 +989,6 @@ mod tests {
                 farm_id,
                 trade_order_id: " ".to_owned(),
                 request_event_id: String::new(),
-                prev_event_id: String::new(),
                 revision_id: String::new(),
                 listing_addr: String::new(),
                 buyer_pubkey: String::new(),
@@ -1019,12 +1000,12 @@ mod tests {
 
         assert_eq!(
             valid_proposal.work_kind().sdk_operation(),
-            ORDER_REVISION_PROPOSAL_OPERATION_KIND
+            TRADE_REVISION_PROPOSAL_OPERATION_KIND
         );
         assert_eq!(valid_proposal.validation_failures(), Vec::new());
         assert_eq!(
             invalid_decision.work_kind().sdk_operation(),
-            ORDER_REVISION_DECISION_OPERATION_KIND
+            TRADE_REVISION_DECISION_OPERATION_KIND
         );
 
         let proposal_reason_codes: Vec<&str> = invalid_proposal
@@ -1045,7 +1026,6 @@ mod tests {
                 "missing_source",
                 "missing_order_trade_order_id",
                 "missing_order_request_event_id",
-                "missing_order_previous_event_id",
                 "missing_order_listing_address",
                 "missing_order_buyer_pubkey",
                 "missing_order_seller_pubkey",
@@ -1061,7 +1041,6 @@ mod tests {
                 "missing_source",
                 "missing_order_trade_order_id",
                 "missing_order_request_event_id",
-                "missing_order_previous_event_id",
                 "missing_order_listing_address",
                 "missing_order_buyer_pubkey",
                 "missing_order_seller_pubkey",
