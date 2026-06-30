@@ -1517,6 +1517,60 @@ fn app_production_sdk_boundary_usage_is_exception_scoped() {
 }
 
 #[test]
+fn app_store_current_schema_surfaces_reject_retired_terms() {
+    let app_root = app_root();
+    let mut paths = vec![
+        app_root.join("crates/store/src/lib.rs"),
+        app_root.join("crates/sync/src/publish.rs"),
+    ];
+    for entry in
+        fs::read_dir(app_root.join("crates/store/migrations")).expect("read store migrations")
+    {
+        let path = entry.expect("migration entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("sql") {
+            paths.push(path);
+        }
+    }
+
+    let offenders = paths
+        .iter()
+        .flat_map(|path| {
+            let source = read_source_path(path);
+            let relative_path = path
+                .strip_prefix(app_root.as_path())
+                .expect("app relative path")
+                .display()
+                .to_string();
+            APP_STORE_RETIRED_SCHEMA_TERMS
+                .iter()
+                .filter(move |term| source.contains(**term))
+                .map(move |term| (relative_path.clone(), *term))
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        offenders.is_empty(),
+        "app store current-schema surfaces retain retired terms: {offenders:?}"
+    );
+}
+
+const APP_STORE_RETIRED_SCHEMA_TERMS: &[&str] = &[
+    "legacy",
+    "compat",
+    "shim",
+    "deprecated",
+    "dual_read",
+    "dual_write",
+    "dual-read",
+    "dual-write",
+    "AppSdkMigration",
+    "sdk_migration",
+    "migration_receipt",
+    "migration_audit",
+    "migration_scaffold",
+];
+
+#[test]
 fn strict_sdk_boundary_scanner_rejects_unexcepted_new_production_paths() {
     let findings = unexcepted_sdk_boundary_patterns(
         "crates/desktop/src/new_workflow.rs",

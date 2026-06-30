@@ -1051,7 +1051,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_raw_payload_outbox_work_remains_local_save_compatible() {
+    fn existing_raw_payload_outbox_work_rejects_publish_payload() {
         let pending_operation = PendingSyncOperation {
             operation_key: "product:greens:upsert".to_owned(),
             aggregate: SyncAggregateRef::Product(ProductId::new()),

@@ -5,9 +5,9 @@ DROP INDEX IF EXISTS idx_orders_farm_status;
 DROP INDEX IF EXISTS idx_orders_farm_window_status_updated_at;
 DROP INDEX IF EXISTS idx_orders_buyer_context_updated_at;
 
-ALTER TABLE order_lines RENAME TO order_lines_legacy;
-ALTER TABLE buyer_order_coordination_records RENAME TO buyer_order_coordination_records_legacy;
-ALTER TABLE orders RENAME TO orders_legacy;
+ALTER TABLE order_lines RENAME TO order_lines_rebuild_source;
+ALTER TABLE buyer_order_coordination_records RENAME TO buyer_order_coordination_records_rebuild_source;
+ALTER TABLE orders RENAME TO orders_rebuild_source;
 
 CREATE TABLE orders (
     id TEXT PRIMARY KEY NOT NULL,
@@ -50,7 +50,7 @@ SELECT
     buyer_email,
     buyer_phone,
     buyer_order_note
-FROM orders_legacy;
+FROM orders_rebuild_source;
 
 CREATE TABLE order_lines (
     id TEXT PRIMARY KEY NOT NULL,
@@ -105,7 +105,7 @@ SELECT
     listing_event_id,
     seller_pubkey,
     listing_relays_json
-FROM order_lines_legacy;
+FROM order_lines_rebuild_source;
 
 CREATE TABLE buyer_order_coordination_records (
     order_id TEXT PRIMARY KEY NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
@@ -143,7 +143,7 @@ SELECT
     created_at,
     updated_at,
     synced_at
-FROM buyer_order_coordination_records_legacy;
+FROM buyer_order_coordination_records_rebuild_source;
 
 CREATE INDEX idx_orders_farm_status ON orders(farm_id, status);
 CREATE INDEX idx_orders_farm_window_status_updated_at
@@ -158,6 +158,6 @@ CREATE INDEX idx_buyer_order_coordination_context_state_updated_at
 CREATE INDEX idx_buyer_order_coordination_state_updated_at
     ON buyer_order_coordination_records(state, updated_at);
 
-DROP TABLE order_lines_legacy;
-DROP TABLE buyer_order_coordination_records_legacy;
-DROP TABLE orders_legacy;
+DROP TABLE order_lines_rebuild_source;
+DROP TABLE buyer_order_coordination_records_rebuild_source;
+DROP TABLE orders_rebuild_source;

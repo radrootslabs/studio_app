@@ -1,5 +1,5 @@
-ALTER TABLE local_outbox RENAME TO local_outbox_legacy;
-ALTER TABLE local_conflicts RENAME TO local_conflicts_legacy;
+ALTER TABLE local_outbox RENAME TO local_outbox_rebuild_source;
+ALTER TABLE local_conflicts RENAME TO local_conflicts_rebuild_source;
 DROP TABLE sync_checkpoints;
 
 CREATE TABLE local_outbox (
@@ -56,8 +56,8 @@ CREATE TABLE sync_checkpoints (
     last_error_message TEXT
 );
 
-DROP TABLE local_outbox_legacy;
-DROP TABLE local_conflicts_legacy;
+DROP TABLE local_outbox_rebuild_source;
+DROP TABLE local_conflicts_rebuild_source;
 
 CREATE INDEX idx_local_outbox_account_available_at ON local_outbox(
     account_id,

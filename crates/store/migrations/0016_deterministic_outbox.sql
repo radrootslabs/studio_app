@@ -1,4 +1,4 @@
-ALTER TABLE local_outbox RENAME TO local_outbox_legacy;
+ALTER TABLE local_outbox RENAME TO local_outbox_rebuild_source;
 
 CREATE TABLE local_outbox (
     id TEXT PRIMARY KEY NOT NULL,
@@ -59,10 +59,10 @@ SELECT
     attempt_count,
     'pending',
     NULL
-FROM local_outbox_legacy
+FROM local_outbox_rebuild_source
 ORDER BY available_at ASC, created_at ASC, id ASC;
 
-DROP TABLE local_outbox_legacy;
+DROP TABLE local_outbox_rebuild_source;
 
 CREATE INDEX idx_local_outbox_account_available_at ON local_outbox(
     account_id,

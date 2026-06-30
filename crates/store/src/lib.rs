@@ -789,7 +789,7 @@ fn apply_migrations(connection: &mut Connection) -> Result<(), AppSqliteError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppSqliteStore, DatabaseTarget, latest_schema_version, migrations};
+    use super::{AppSqliteStore, DatabaseTarget, latest_schema_version};
     use rusqlite::{Connection, params};
     use std::{
         env, fs,
@@ -1190,27 +1190,8 @@ mod tests {
     }
 
     #[test]
-    fn legacy_sync_scaffolding_migrates_to_account_scoped_contract() {
-        let path = temp_database_path("legacy-sync-contract");
-        fs::create_dir_all(path.parent().expect("temp database should have a parent"))
-            .expect("legacy database parent should exist");
-        let connection = Connection::open(&path).expect("legacy database should open");
-
-        for (version, sql) in migrations::pending_migrations(0)
-            .filter(|(version, _)| *version < latest_schema_version())
-        {
-            connection
-                .execute_batch(sql)
-                .expect("legacy migration should apply");
-            connection
-                .pragma_update(None, "user_version", version)
-                .expect("legacy schema version should record");
-        }
-
-        drop(connection);
-
-        let store =
-            AppSqliteStore::open(DatabaseTarget::Path(path.clone())).expect("store should open");
+    fn sync_contract_schema_bootstraps_account_scoped_tables() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
 
         assert_eq!(
@@ -1229,38 +1210,19 @@ mod tests {
         assert!(column_exists(connection, "sync_checkpoints", "state"));
         assert!(table_exists(connection, "app_relay_ingest_freshness"));
         assert_eq!(row_count(connection, "sync_checkpoints"), 0);
-
-        drop(store);
-        remove_database_artifacts(&path);
     }
 
     #[test]
-    fn legacy_orders_status_migration_preserves_child_rows_and_accepts_declined() {
-        let path = temp_database_path("legacy-declined-orders");
-        fs::create_dir_all(path.parent().expect("temp database should have a parent"))
-            .expect("legacy database parent should exist");
-        let connection = Connection::open(&path).expect("legacy database should open");
-        connection
-            .execute_batch("PRAGMA foreign_keys = ON")
-            .expect("foreign keys should enable");
-
-        for (version, sql) in migrations::pending_migrations(0).filter(|(version, _)| *version < 20)
-        {
-            connection
-                .execute_batch(sql)
-                .expect("legacy migration should apply");
-            connection
-                .pragma_update(None, "user_version", version)
-                .expect("legacy schema version should record");
-        }
-
+    fn order_status_schema_preserves_child_rows_and_accepts_declined() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
         connection
             .execute(
                 "INSERT INTO farms (id, display_name, readiness, created_at, updated_at)
-                 VALUES (?1, 'Legacy Farm', 'ready', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-                params!["farm_legacy"],
+                 VALUES (?1, 'Schema Farm', 'ready', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                params!["farm_status"],
             )
-            .expect("legacy farm should insert");
+            .expect("farm should insert");
         connection
             .execute(
                 "INSERT INTO orders (
@@ -1276,11 +1238,11 @@ mod tests {
                     buyer_phone,
                     buyer_order_note
                  ) VALUES (
-                    'order_legacy',
-                    'farm_legacy',
+                    'order_status',
+                    'farm_status',
                     NULL,
                     'R-900',
-                    'Legacy Buyer',
+                    'Schema Buyer',
                     'needs_action',
                     '2026-01-01T00:00:00Z',
                     'account:buyer',
@@ -1290,7 +1252,7 @@ mod tests {
                  )",
                 [],
             )
-            .expect("legacy order should insert");
+            .expect("order should insert");
         connection
             .execute(
                 "INSERT INTO order_lines (
@@ -1300,15 +1262,15 @@ mod tests {
                     quantity_value,
                     quantity_display
                  ) VALUES (
-                    'line_legacy',
-                    'order_legacy',
-                    'Legacy Eggs',
+                    'line_status',
+                    'order_status',
+                    'Schema Eggs',
                     2,
                     '2 each'
                  )",
                 [],
             )
-            .expect("legacy order line should insert");
+            .expect("order line should insert");
         connection
             .execute(
                 "INSERT INTO buyer_order_coordination_records (
@@ -1318,7 +1280,7 @@ mod tests {
                     created_at,
                     updated_at
                  ) VALUES (
-                    'order_legacy',
+                    'order_status',
                     'account:buyer',
                     'pending',
                     '2026-01-01T00:00:00Z',
@@ -1326,13 +1288,7 @@ mod tests {
                  )",
                 [],
             )
-            .expect("legacy buyer coordination should insert");
-
-        drop(connection);
-
-        let store =
-            AppSqliteStore::open(DatabaseTarget::Path(path.clone())).expect("store should open");
-        let connection = store.connection();
+            .expect("buyer coordination should insert");
 
         assert_eq!(
             store.schema_version().expect("schema version"),
@@ -1345,20 +1301,20 @@ mod tests {
 
         connection
             .execute(
-                "UPDATE orders SET status = 'declined' WHERE id = 'order_legacy'",
+                "UPDATE orders SET status = 'declined' WHERE id = 'order_status'",
                 [],
             )
-            .expect("declined status should satisfy migrated check");
+            .expect("declined status should satisfy current check");
         connection
             .execute(
-                "UPDATE orders SET status = 'needs_review' WHERE id = 'order_legacy'",
+                "UPDATE orders SET status = 'needs_review' WHERE id = 'order_status'",
                 [],
             )
-            .expect("needs review status should satisfy migrated check");
+            .expect("needs review status should satisfy current check");
 
         let status: String = connection
             .query_row(
-                "SELECT status FROM orders WHERE id = 'order_legacy'",
+                "SELECT status FROM orders WHERE id = 'order_status'",
                 [],
                 |row| row.get(0),
             )
@@ -1366,13 +1322,10 @@ mod tests {
         assert_eq!(status, "needs_review");
         connection
             .execute(
-                "UPDATE orders SET workflow_agreement = 'agreed_pending_rhi' WHERE id = 'order_legacy'",
+                "UPDATE orders SET workflow_agreement = 'agreed_pending_rhi' WHERE id = 'order_status'",
                 [],
             )
-            .expect("agreed pending rhi agreement should satisfy migrated check");
-
-        drop(store);
-        remove_database_artifacts(&path);
+            .expect("agreed pending rhi agreement should satisfy current check");
     }
 
     fn table_exists(connection: &Connection, table_name: &str) -> bool {

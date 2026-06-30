@@ -2,7 +2,7 @@ DROP INDEX IF EXISTS idx_local_interop_imports_seq;
 DROP INDEX IF EXISTS idx_local_interop_imports_owner_status;
 DROP INDEX IF EXISTS idx_local_interop_imports_projected;
 
-ALTER TABLE local_interop_imports RENAME TO local_interop_imports_validation_receipt_projection_kind_legacy;
+ALTER TABLE local_interop_imports RENAME TO local_interop_imports_validation_receipt_projection_kind_rebuild_source;
 
 CREATE TABLE local_interop_imports (
     record_id TEXT PRIMARY KEY NOT NULL,
@@ -89,7 +89,7 @@ SELECT
     event_content,
     event_sig,
     raw_event_json
-FROM local_interop_imports_validation_receipt_projection_kind_legacy;
+FROM local_interop_imports_validation_receipt_projection_kind_rebuild_source;
 
 CREATE INDEX idx_local_interop_imports_seq
     ON local_interop_imports(local_seq);
@@ -100,4 +100,4 @@ CREATE INDEX idx_local_interop_imports_owner_status
 CREATE INDEX idx_local_interop_imports_projected
     ON local_interop_imports(projected_kind, projected_id);
 
-DROP TABLE local_interop_imports_validation_receipt_projection_kind_legacy;
+DROP TABLE local_interop_imports_validation_receipt_projection_kind_rebuild_source;
