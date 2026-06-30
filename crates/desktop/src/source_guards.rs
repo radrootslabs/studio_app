@@ -1134,6 +1134,18 @@ const STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS: &[SdkBoundaryForbiddenPattern] = &
         reason: "app production sources must use AppSdkConfig-derived runtime construction",
     },
     SdkBoundaryForbiddenPattern {
+        pattern: "status_client(",
+        reason: "app production sources must use AppSdkRuntime trade status methods instead of removed SDK status clients",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "TradeStatusClient",
+        reason: "app production sources must use AppSdkRuntime trade status methods instead of removed SDK status handles",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "TradeValidationClient",
+        reason: "app production sources must use AppSdkRuntime DVM methods instead of removed SDK validation handles",
+    },
+    SdkBoundaryForbiddenPattern {
         pattern: "SdkTransportMode::RelayDirect",
         reason: "app production sources must not configure direct relay publish transport",
     },
@@ -1277,6 +1289,14 @@ const STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS: &[SdkBoundaryForbiddenPattern] = &
         pattern: "ORDER_CANCELLATION_OPERATION_KIND",
         reason: "app production sources must use trade workflow operation kinds",
     },
+];
+
+const FORBIDDEN_SDK_ROOT_TRADE_ALIAS_NAMES: &[&str] = &[
+    "trade_buyer",
+    "trade_seller",
+    "trade_status",
+    "trade_resync",
+    "trade_validation",
 ];
 
 const SDK_BOUNDARY_EXCEPTIONS: &[SdkBoundaryExceptionEntry] = &[
@@ -1513,6 +1533,15 @@ fn app_production_sdk_boundary_usage_is_exception_scoped() {
             findings.first().map_or("", |finding| finding.pattern),
             findings.first().map_or("", |finding| finding.reason)
         );
+
+        let root_alias_findings =
+            sdk_root_trade_alias_findings(relative_path.as_str(), production_source);
+        assert!(
+            root_alias_findings.is_empty(),
+            "{} contains removed SDK root trade alias usage:\n{}",
+            relative_path,
+            root_alias_findings.join("\n")
+        );
     }
 }
 
@@ -1585,6 +1614,21 @@ fn strict_sdk_boundary_scanner_rejects_unexcepted_new_production_paths() {
     );
     assert_eq!(runtime_findings.len(), 1);
     assert_eq!(runtime_findings[0].pattern, "RadrootsSdkClient");
+    let status_findings = unexcepted_sdk_boundary_patterns(
+        "crates/desktop/src/runtime.rs",
+        "fn status() { let _ = TradeStatusClient::new(root); root.status_client(); }",
+    );
+    assert_eq!(status_findings.len(), 2);
+    assert!(
+        status_findings
+            .iter()
+            .any(|finding| finding.pattern == "TradeStatusClient")
+    );
+    assert!(
+        status_findings
+            .iter()
+            .any(|finding| finding.pattern == "status_client(")
+    );
     assert!(
         unexcepted_sdk_boundary_patterns(
             "crates/desktop/src/accounts.rs",
@@ -1592,6 +1636,27 @@ fn strict_sdk_boundary_scanner_rejects_unexcepted_new_production_paths() {
         )
         .is_empty()
     );
+}
+
+#[test]
+fn strict_sdk_boundary_scanner_rejects_removed_root_trade_alias_calls() {
+    let allowed_findings = sdk_root_trade_alias_findings(
+        "crates/runtime/src/sdk.rs",
+        "pub fn trade_status(&self) {} fn trade_status_for_locator() {}",
+    );
+    assert!(allowed_findings.is_empty());
+
+    let findings = sdk_root_trade_alias_findings(
+        "crates/desktop/src/runtime.rs",
+        "sdk.trade_status (request); RadrootsClient::trade_resync(&sdk);",
+    );
+
+    for alias in ["trade_status", "trade_resync"] {
+        assert!(
+            findings.iter().any(|finding| finding.contains(alias)),
+            "strict SDK boundary scanner must reject `{alias}`"
+        );
+    }
 }
 
 #[test]
@@ -1692,6 +1757,42 @@ fn sdk_boundary_exception_contains(path: &str, pattern: &str) -> bool {
         .any(|entry| entry.path == path && entry.pattern == pattern)
 }
 
+fn sdk_root_trade_alias_findings(path: &str, production_source: &str) -> Vec<String> {
+    let mut findings = Vec::new();
+
+    for alias in FORBIDDEN_SDK_ROOT_TRADE_ALIAS_NAMES {
+        for (index, _) in production_source.match_indices(alias) {
+            let before = production_source[..index].chars().next_back();
+            let after_index = index + alias.len();
+            let after = production_source[after_index..].chars().next();
+
+            if before.is_some_and(is_rust_identifier_character)
+                || after.is_some_and(is_rust_identifier_character)
+            {
+                continue;
+            }
+
+            if production_source[after_index..]
+                .chars()
+                .find(|character| !character.is_whitespace())
+                != Some('(')
+            {
+                continue;
+            }
+
+            let prefix = production_source[..index].trim_end();
+            if prefix.ends_with('.') || prefix.ends_with("::") {
+                findings.push(format!(
+                    "{path}:{} uses removed SDK root trade alias `{alias}`",
+                    line_number(production_source, index)
+                ));
+            }
+        }
+    }
+
+    findings
+}
+
 fn read_source_path(path: &Path) -> String {
     fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("failed to read source {}: {error}", path.display()))
@@ -1741,6 +1842,18 @@ fn contains_numeric_token(source: &str, literal: &str) -> bool {
 
 fn is_rust_identifier_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+fn is_rust_identifier_character(character: char) -> bool {
+    character == '_' || character.is_ascii_alphanumeric()
+}
+
+fn line_number(source: &str, index: usize) -> usize {
+    source[..index]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count()
+        + 1
 }
 
 fn contains_reserved_payment_action_term(value: &str, term: &str) -> bool {
