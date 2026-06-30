@@ -1258,7 +1258,6 @@ fn run_app_sdk_worker(
                         Some(sdk) => runtime
                             .block_on(
                                 sdk.trades()
-                                    .status_client()
                                     .status(TradeStatusRequest::new(request.locator)),
                             )
                             .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error)),
