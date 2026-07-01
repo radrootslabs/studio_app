@@ -37,10 +37,9 @@ use radroots_sdk::{
     TRADE_REVISION_PROPOSAL_OPERATION_KIND, TRADE_SUBMIT_OPERATION_KIND, TradeAcceptRequest,
     TradeCancelRequest, TradeCancellationPlan, TradeCancellationReceipt, TradeDecisionPlan,
     TradeDecisionReceipt, TradeDeclineRequest, TradeEvidenceIngestRequest, TradeMutationOutcome,
-    TradeProposeRequest, TradeResyncReceipt, TradeResyncRequest, TradeRevisionDecisionPlan,
-    TradeRevisionDecisionReceipt, TradeRevisionDecisionRequest, TradeRevisionProposalPlan,
-    TradeRevisionProposalReceipt, TradeRevisionProposalRequest, TradeStatusReceipt,
-    TradeStatusRequest, TradeSubmitPlan, TradeSubmitReceipt,
+    TradeProposeRequest, TradeRevisionDecisionPlan, TradeRevisionDecisionReceipt,
+    TradeRevisionDecisionRequest, TradeRevisionProposalPlan, TradeRevisionProposalReceipt,
+    TradeRevisionProposalRequest, TradeSubmitPlan, TradeSubmitReceipt,
 };
 use radroots_sdk::{SdkMutationState, SdkRelayTargetPolicy};
 use radroots_trade::identity::RadrootsTradeLocator;
@@ -307,15 +306,6 @@ pub struct AppSdkTradeCancellationRequest {
     pub idempotency_key: Option<String>,
 }
 
-pub struct AppSdkTradeStatusRequest {
-    pub locator: RadrootsTradeLocator,
-}
-
-pub struct AppSdkTradeResyncRequest {
-    pub locator: RadrootsTradeLocator,
-    pub limit: u32,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppSdkWorkflowReceipt {
     pub operation_kind: String,
@@ -440,14 +430,6 @@ enum AppSdkWorkerCommand {
         AppSdkTradeCancellationRequest,
         mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
     ),
-    TradeStatus(
-        AppSdkTradeStatusRequest,
-        mpsc::Sender<Result<TradeStatusReceipt, AppSdkRuntimeIssue>>,
-    ),
-    TradeResync(
-        AppSdkTradeResyncRequest,
-        mpsc::Sender<Result<TradeResyncReceipt, AppSdkRuntimeIssue>>,
-    ),
     BeginProjectionRebuild(
         mpsc::Sender<Result<AppSdkProjectionLifecycleStatus, AppSdkRuntimeIssue>>,
     ),
@@ -472,8 +454,6 @@ impl fmt::Debug for AppSdkWorkerCommand {
             Self::TradeRevisionProposal(_, _) => formatter.write_str("TradeRevisionProposal"),
             Self::TradeRevisionDecision(_, _) => formatter.write_str("TradeRevisionDecision"),
             Self::TradeCancellation(_, _) => formatter.write_str("TradeCancellation"),
-            Self::TradeStatus(_, _) => formatter.write_str("TradeStatus"),
-            Self::TradeResync(_, _) => formatter.write_str("TradeResync"),
             Self::BeginProjectionRebuild(_) => formatter.write_str("BeginProjectionRebuild"),
             Self::CompleteProjectionRebuild(_) => formatter.write_str("CompleteProjectionRebuild"),
         }
@@ -664,24 +644,6 @@ impl AppSdkRuntime {
     ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
         self.run_command(|response_sender| {
             AppSdkWorkerCommand::TradeCancellation(request, response_sender)
-        })
-    }
-
-    pub fn trade_status(
-        &self,
-        request: AppSdkTradeStatusRequest,
-    ) -> Result<TradeStatusReceipt, AppSdkRuntimeError> {
-        self.run_command(|response_sender| {
-            AppSdkWorkerCommand::TradeStatus(request, response_sender)
-        })
-    }
-
-    pub fn trade_resync(
-        &self,
-        request: AppSdkTradeResyncRequest,
-    ) -> Result<TradeResyncReceipt, AppSdkRuntimeError> {
-        self.run_command(|response_sender| {
-            AppSdkWorkerCommand::TradeResync(request, response_sender)
         })
     }
 
@@ -1250,37 +1212,6 @@ fn run_app_sdk_worker(
                 };
                 send_worker_result(&shared, response_sender, result);
             }
-            AppSdkWorkerCommand::TradeStatus(request, response_sender) => {
-                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
-                    Err(issue)
-                } else {
-                    match sdk.as_ref() {
-                        Some(sdk) => runtime
-                            .block_on(
-                                sdk.trades()
-                                    .status(TradeStatusRequest::new(request.locator)),
-                            )
-                            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error)),
-                        None => Err(runtime_unavailable_issue(&shared)),
-                    }
-                };
-                send_worker_result(&shared, response_sender, result);
-            }
-            AppSdkWorkerCommand::TradeResync(request, response_sender) => {
-                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
-                    Err(issue)
-                } else {
-                    match sdk.as_ref() {
-                        Some(sdk) => runtime
-                            .block_on(sdk.trades().resync().resync(
-                                TradeResyncRequest::new(request.locator).with_limit(request.limit),
-                            ))
-                            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error)),
-                        None => Err(runtime_unavailable_issue(&shared)),
-                    }
-                };
-                send_worker_result(&shared, response_sender, result);
-            }
             AppSdkWorkerCommand::BeginProjectionRebuild(response_sender) => {
                 let result = match sdk.as_ref() {
                     Some(_) => Ok(begin_projection_rebuild(&shared)),
@@ -1398,20 +1329,6 @@ fn run_degraded_worker(
                 );
             }
             AppSdkWorkerCommand::TradeCancellation(_, response_sender) => {
-                send_worker_result(
-                    &shared,
-                    response_sender,
-                    Err(runtime_unavailable_issue(&shared)),
-                );
-            }
-            AppSdkWorkerCommand::TradeStatus(_, response_sender) => {
-                send_worker_result(
-                    &shared,
-                    response_sender,
-                    Err(runtime_unavailable_issue(&shared)),
-                );
-            }
-            AppSdkWorkerCommand::TradeResync(_, response_sender) => {
                 send_worker_result(
                     &shared,
                     response_sender,

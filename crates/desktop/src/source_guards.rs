@@ -1135,11 +1135,11 @@ const STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS: &[SdkBoundaryForbiddenPattern] = &
     },
     SdkBoundaryForbiddenPattern {
         pattern: "status_client(",
-        reason: "app production sources must use AppSdkRuntime trade status methods instead of removed SDK status clients",
+        reason: "app production sources must use canonical grouped SDK trade status workflows instead of removed SDK status clients",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "TradeStatusClient",
-        reason: "app production sources must use AppSdkRuntime trade status methods instead of removed SDK status handles",
+        reason: "app production sources must use canonical grouped SDK trade status workflows instead of removed SDK status handles",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "TradeValidationClient",
@@ -1642,7 +1642,7 @@ fn strict_sdk_boundary_scanner_rejects_unexcepted_new_production_paths() {
 fn strict_sdk_boundary_scanner_rejects_removed_root_trade_alias_calls() {
     let allowed_findings = sdk_root_trade_alias_findings(
         "crates/runtime/src/sdk.rs",
-        "pub fn trade_status(&self) {} fn trade_status_for_locator() {}",
+        "fn trade_status_for_locator() {}",
     );
     assert!(allowed_findings.is_empty());
 
