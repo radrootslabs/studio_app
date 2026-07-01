@@ -11,6 +11,7 @@ members = [
     "crates/ui",
     "crates/desktop",
 ]
+exclude = ["vendor/block"]
 resolver = "2"
 
 [workspace.package]

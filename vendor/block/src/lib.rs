@@ -56,11 +56,15 @@ struct Class {
     _private: [u8; 0],
 }
 
-#[cfg_attr(any(target_os = "macos", target_os = "ios"),
-           link(name = "System", kind = "dylib"))]
-#[cfg_attr(not(any(target_os = "macos", target_os = "ios")),
-           link(name = "BlocksRuntime", kind = "dylib"))]
-extern "C" {
+#[cfg_attr(
+    any(target_os = "macos", target_os = "ios"),
+    link(name = "System", kind = "dylib")
+)]
+#[cfg_attr(
+    not(any(target_os = "macos", target_os = "ios")),
+    link(name = "BlocksRuntime", kind = "dylib")
+)]
+unsafe extern "C" {
     static _NSConcreteStackBlock: Class;
 
     fn _Block_copy(block: *const c_void) -> *mut c_void;
@@ -80,12 +84,14 @@ macro_rules! block_args_impl {
     ($($a:ident : $t:ident),*) => (
         impl<$($t),*> BlockArguments for ($($t,)*) {
             unsafe fn call_block<R>(self, block: *mut Block<Self, R>) -> R {
-                let invoke: unsafe extern "C" fn(*mut Block<Self, R> $(, $t)*) -> R = {
+                let invoke: unsafe extern "C" fn(*mut Block<Self, R> $(, $t)*) -> R = unsafe {
                     let base = block as *mut BlockBase<Self, R>;
                     mem::transmute((*base).invoke)
                 };
                 let ($($a,)*) = self;
-                invoke(block $(, $a)*)
+                unsafe {
+                    invoke(block $(, $a)*)
+                }
             }
         }
     );
@@ -120,7 +126,10 @@ pub struct Block<A, R> {
     _base: PhantomData<BlockBase<A, R>>,
 }
 
-impl<A: BlockArguments, R> Block<A, R> where A: BlockArguments {
+impl<A: BlockArguments, R> Block<A, R>
+where
+    A: BlockArguments,
+{
     /// Call self with the given arguments.
     ///
     /// Unsafe because this invokes foreign code that the caller must verify
@@ -128,7 +137,7 @@ impl<A: BlockArguments, R> Block<A, R> where A: BlockArguments {
     /// is shared with multiple references, the caller must ensure that calling
     /// it will not cause a data race.
     pub unsafe fn call(&self, args: A) -> R {
-        args.call_block(self as *const _ as *mut _)
+        unsafe { args.call_block(self as *const _ as *mut _) }
     }
 }
 
@@ -152,16 +161,14 @@ impl<A, R> RcBlock<A, R> {
     ///
     /// Unsafe because `ptr` must point to a valid `Block`.
     pub unsafe fn copy(ptr: *mut Block<A, R>) -> Self {
-        let ptr = _Block_copy(ptr as *const c_void) as *mut Block<A, R>;
+        let ptr = unsafe { _Block_copy(ptr as *const c_void) } as *mut Block<A, R>;
         RcBlock { ptr: ptr }
     }
 }
 
 impl<A, R> Clone for RcBlock<A, R> {
     fn clone(&self) -> RcBlock<A, R> {
-        unsafe {
-            RcBlock::copy(self.ptr)
-        }
+        unsafe { RcBlock::copy(self.ptr) }
     }
 }
 
@@ -182,7 +189,10 @@ impl<A, R> Drop for RcBlock<A, R> {
 }
 
 /// Types that may be converted into a `ConcreteBlock`.
-pub trait IntoConcreteBlock<A>: Sized where A: BlockArguments {
+pub trait IntoConcreteBlock<A>: Sized
+where
+    A: BlockArguments,
+{
     /// The return type of the resulting `ConcreteBlock`.
     type Ret;
 
@@ -204,7 +214,7 @@ macro_rules! concrete_block_impl {
                         block_ptr: *mut ConcreteBlock<($($t,)*), R, X>
                         $(, $a: $t)*) -> R
                         where X: Fn($($t,)*) -> R {
-                    let block = &*block_ptr;
+                    let block = unsafe { &*block_ptr };
                     (block.closure)($($a),*)
                 }
 
@@ -241,7 +251,10 @@ pub struct ConcreteBlock<A, R, F> {
 }
 
 impl<A, R, F> ConcreteBlock<A, R, F>
-        where A: BlockArguments, F: IntoConcreteBlock<A, Ret=R> {
+where
+    A: BlockArguments,
+    F: IntoConcreteBlock<A, Ret = R>,
+{
     /// Constructs a `ConcreteBlock` with the given closure.
     /// When the block is called, it will return the value that results from
     /// calling the closure.
@@ -254,15 +267,14 @@ impl<A, R, F> ConcreteBlock<A, R, F> {
     /// Constructs a `ConcreteBlock` with the given invoke function and closure.
     /// Unsafe because the caller must ensure the invoke function takes the
     /// correct arguments.
-    unsafe fn with_invoke(invoke: unsafe extern "C" fn(*mut Self, ...) -> R,
-            closure: F) -> Self {
+    unsafe fn with_invoke(invoke: unsafe extern "C" fn(*mut Self, ...) -> R, closure: F) -> Self {
         ConcreteBlock {
             base: BlockBase {
-                isa: &_NSConcreteStackBlock,
+                isa: unsafe { &_NSConcreteStackBlock },
                 // 1 << 25 = BLOCK_HAS_COPY_DISPOSE
                 flags: 1 << 25,
                 _reserved: 0,
-                invoke: mem::transmute(invoke),
+                invoke: unsafe { mem::transmute(invoke) },
             },
             descriptor: Box::new(BlockDescriptor::new()),
             closure: closure,
@@ -270,7 +282,10 @@ impl<A, R, F> ConcreteBlock<A, R, F> {
     }
 }
 
-impl<A, R, F> ConcreteBlock<A, R, F> where F: 'static {
+impl<A, R, F> ConcreteBlock<A, R, F>
+where
+    F: 'static,
+{
     /// Copy self onto the heap as an `RcBlock`.
     pub fn copy(self) -> RcBlock<A, R> {
         unsafe {
@@ -285,11 +300,13 @@ impl<A, R, F> ConcreteBlock<A, R, F> where F: 'static {
     }
 }
 
-impl<A, R, F> Clone for ConcreteBlock<A, R, F> where F: Clone {
+impl<A, R, F> Clone for ConcreteBlock<A, R, F>
+where
+    F: Clone,
+{
     fn clone(&self) -> Self {
         unsafe {
-            ConcreteBlock::with_invoke(mem::transmute(self.base.invoke),
-                self.closure.clone())
+            ConcreteBlock::with_invoke(mem::transmute(self.base.invoke), self.closure.clone())
         }
     }
 }
@@ -310,7 +327,9 @@ impl<A, R, F> DerefMut for ConcreteBlock<A, R, F> {
 
 unsafe extern "C" fn block_context_dispose<B>(block: &mut B) {
     // Read the block onto the stack and let it drop
-    ptr::read(block);
+    unsafe {
+        ptr::read(block);
+    }
 }
 
 unsafe extern "C" fn block_context_copy<B>(_dst: &mut B, _src: &B) {
