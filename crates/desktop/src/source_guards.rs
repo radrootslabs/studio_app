@@ -1118,6 +1118,12 @@ struct SdkBoundaryExceptionEntry {
     removal_condition: &'static str,
 }
 
+struct SdkBoundaryFinding {
+    pattern: &'static str,
+    reason: &'static str,
+    line: usize,
+}
+
 const STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS: &[SdkBoundaryForbiddenPattern] = &[
     SdkBoundaryForbiddenPattern {
         pattern: "SdkDirectRelayAppSyncTransport",
@@ -1333,27 +1339,6 @@ const SDK_BOUNDARY_EXCEPTIONS: &[SdkBoundaryExceptionEntry] = &[
         reason: "store facade accepts app local_outbox publish operations for deferred workflows",
         removal_condition: "remove when app local_outbox enqueue is replaced by SDK canonical outbox enqueue APIs",
     },
-    SdkBoundaryExceptionEntry {
-        path: "crates/store/src/sync.rs",
-        pattern: "INSERT INTO local_outbox",
-        owner: "rpv1-app-sdk-refactor.07",
-        reason: "store sync implementation writes app local_outbox rows for deferred workflows",
-        removal_condition: "remove when app local_outbox storage is retired in favor of SDK canonical outbox APIs",
-    },
-    SdkBoundaryExceptionEntry {
-        path: "crates/store/src/sync.rs",
-        pattern: "UPDATE local_outbox",
-        owner: "rpv1-app-sdk-refactor.07",
-        reason: "store sync implementation updates app local_outbox rows for deferred workflows",
-        removal_condition: "remove when app local_outbox storage is retired in favor of SDK canonical outbox APIs",
-    },
-    SdkBoundaryExceptionEntry {
-        path: "crates/store/src/sync.rs",
-        pattern: "DELETE FROM local_outbox",
-        owner: "rpv1-app-sdk-refactor.07",
-        reason: "store sync implementation deletes app local_outbox rows for deferred workflows",
-        removal_condition: "remove when app local_outbox storage is retired in favor of SDK canonical outbox APIs",
-    },
 ];
 
 #[test]
@@ -1521,16 +1506,20 @@ fn app_production_trade_event_kinds_use_shared_constants() {
 #[test]
 fn app_production_sdk_boundary_usage_is_exception_scoped() {
     for (relative_path, source) in app_rust_source_files() {
-        let production_source = production_source_without_tests(&source);
+        let production_source = production_source_without_tests(relative_path.as_str(), &source)
+            .unwrap_or_else(|error| {
+                panic!("{} source classification failed: {error}", relative_path)
+            });
         let findings =
             unexcepted_sdk_boundary_patterns(relative_path.as_str(), production_source.as_str());
 
         assert!(
             findings.is_empty(),
-            "{} contains unexcepted SDK boundary pattern `{}`: {}",
+            "{}:{} contains unexcepted SDK boundary pattern `{}`: {}",
             relative_path,
+            findings.first().map_or(0, |finding| finding.line),
             findings.first().map_or("", |finding| finding.pattern),
-            findings.first().map_or("", |finding| finding.reason)
+            findings.first().map_or("", |finding| finding.reason),
         );
 
         let root_alias_findings =
@@ -1665,7 +1654,8 @@ fn production_source_scanner_strips_inline_cfg_test_modules() {
         "#[cfg(test)] mod tests { fn test_only() { sdk.trade_status(request); } }\n",
         "fn after_tests() {}\n",
     );
-    let production_source = production_source_without_tests(source);
+    let production_source =
+        production_source_without_tests("fixture.rs", source).expect("production source");
 
     assert!(!production_source.contains("sdk.trade_status"));
     assert!(production_source.contains("fn production()"));
@@ -1684,11 +1674,80 @@ fn production_source_scanner_strips_multiline_cfg_test_modules() {
         "    const BRACE: &str = \"}\";\n",
         "}\n",
     );
-    let production_source = production_source_without_tests(source);
+    let production_source =
+        production_source_without_tests("fixture.rs", source).expect("production source");
 
     assert!(!production_source.contains("TradeStatusClient"));
     assert!(production_source.contains("fn production()"));
     assert!(unexcepted_sdk_boundary_patterns("fixture.rs", production_source.as_str()).is_empty());
+}
+
+#[test]
+fn production_source_scanner_strips_cfg_test_functions() {
+    let source = concat!(
+        "fn production() {}\n",
+        "#[cfg(test)]\n",
+        "fn test_only() { let _ = TradeValidationClient::new(root); }\n",
+        "fn after_tests() {}\n",
+    );
+    let production_source =
+        production_source_without_tests("fixture.rs", source).expect("production source");
+
+    assert!(!production_source.contains("TradeValidationClient"));
+    assert!(production_source.contains("fn production()"));
+    assert!(production_source.contains("fn after_tests()"));
+    assert!(unexcepted_sdk_boundary_patterns("fixture.rs", production_source.as_str()).is_empty());
+}
+
+#[test]
+fn production_source_scanner_strips_cfg_test_fragments() {
+    let source = concat!(
+        "enum Provider {",
+        "#[cfg(test)] TestOnly,",
+        "Production",
+        "}\n",
+        "fn production(provider: Provider) { match provider {",
+        "#[cfg(test)] Provider::TestOnly => sdk.trade_status(request),",
+        "Provider::Production => {}",
+        "} }\n",
+    );
+    let production_source =
+        production_source_without_tests("fixture.rs", source).expect("production source");
+
+    assert!(!production_source.contains("TestOnly"));
+    assert!(sdk_root_trade_alias_findings("fixture.rs", production_source.as_str()).is_empty());
+}
+
+#[test]
+fn production_source_scanner_reports_malformed_cfg_test_items() {
+    let source = concat!(
+        "fn production() {}\n",
+        "#[cfg(test)]\n",
+        "mod tests { fn hidden() { let _ = TradeValidationClient::new(root); }\n",
+        "fn after_tests() { sdk.trade_status(request); }\n",
+    );
+    let error = production_source_without_tests("fixture.rs", source).expect_err("classification");
+
+    assert!(error.contains("fixture.rs:2"));
+    assert!(error.contains("cfg(test) item is not closed"));
+}
+
+#[test]
+fn production_surface_scanners_ignore_comments_and_literals() {
+    let source = concat!(
+        "fn production() {\n",
+        "    let literal = \"TradeStatusClient\";\n",
+        "    let raw = r#\"RadrootsClient::trade_resync(&sdk)\"#;\n",
+        "    let character = 'x';\n",
+        "}\n",
+        "// RadrootsSdkClient::from_config(config)\n",
+        "/* sdk.trade_validation(request) */\n",
+    );
+    let production_source =
+        production_source_without_tests("fixture.rs", source).expect("production source");
+
+    assert!(unexcepted_sdk_boundary_patterns("fixture.rs", production_source.as_str()).is_empty());
+    assert!(sdk_root_trade_alias_findings("fixture.rs", production_source.as_str()).is_empty());
 }
 
 #[test]
@@ -1698,7 +1757,8 @@ fn production_source_scanner_keeps_production_violations() {
         "#[cfg(test)]\n",
         "mod tests { fn test_only() { sdk.trade_status(request); } }\n",
     );
-    let production_source = production_source_without_tests(source);
+    let production_source =
+        production_source_without_tests("fixture.rs", source).expect("production source");
     let findings = sdk_root_trade_alias_findings("fixture.rs", production_source.as_str());
 
     assert!(
@@ -1746,7 +1806,8 @@ fn app_sdk_boundary_exception_entries_are_complete_and_current() {
 
         let source_path = app_root.join(entry.path);
         let source = read_source_path(source_path.as_path());
-        let production_source = production_source_without_tests(&source);
+        let production_source = production_source_without_tests(entry.path, &source)
+            .unwrap_or_else(|error| panic!("{} source classification failed: {error}", entry.path));
         assert!(
             production_source.as_str().contains(entry.pattern),
             "{} declares SDK boundary exception pattern `{}` that is no longer present",
@@ -1779,7 +1840,8 @@ fn extract_string_literals(source: &str) -> BTreeSet<&str> {
 }
 
 fn assert_production_source_omits_event_kind_literals(path: &str, source: &str) {
-    let production_source = production_source_without_tests(source);
+    let production_source =
+        production_source_without_tests(path, source).expect("production source");
     for (literal, constant_name) in FORBIDDEN_PRODUCTION_EVENT_KIND_LITERALS {
         assert!(
             !contains_numeric_token(production_source.as_str(), literal),
@@ -1788,28 +1850,95 @@ fn assert_production_source_omits_event_kind_literals(path: &str, source: &str) 
     }
 }
 
-fn production_source_without_tests(source: &str) -> String {
-    let mut production_source = String::with_capacity(source.len());
+fn production_source_without_tests(path: &str, source: &str) -> Result<String, String> {
+    let code_source = rust_code_without_non_code(path, source)?;
+    let mut production_source = String::with_capacity(code_source.len());
     let mut cursor = 0;
 
-    while let Some((attribute_start, attribute_end)) = find_cfg_test_attribute(source, cursor) {
-        let Some(module_end) = find_cfg_test_module_end(source, attribute_end) else {
-            production_source.push_str(&source[cursor..attribute_end]);
-            cursor = attribute_end;
-            continue;
-        };
+    while let Some((attribute_start, attribute_end)) =
+        find_cfg_test_attribute(code_source.as_str(), cursor)
+    {
+        let item_end =
+            find_cfg_test_item_end(path, code_source.as_str(), attribute_start, attribute_end)?;
 
-        production_source.push_str(&source[cursor..attribute_start]);
-        for character in source[attribute_start..module_end].chars() {
-            if character == '\n' {
-                production_source.push('\n');
-            }
-        }
-        cursor = module_end;
+        production_source.push_str(&code_source[cursor..attribute_start]);
+        push_masked_source(
+            &mut production_source,
+            &code_source[attribute_start..item_end],
+        );
+        cursor = item_end;
     }
 
-    production_source.push_str(&source[cursor..]);
-    production_source
+    production_source.push_str(&code_source[cursor..]);
+    Ok(production_source)
+}
+
+fn rust_code_without_non_code(path: &str, source: &str) -> Result<String, String> {
+    let bytes = source.as_bytes();
+    let mut code = String::with_capacity(source.len());
+    let mut cursor = 0;
+
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'"' => {
+                let end = skip_quoted_rust_literal(source, cursor, b'"').ok_or_else(|| {
+                    classification_error(path, source, cursor, "unterminated string literal")
+                })?;
+                push_masked_source(&mut code, &source[cursor..end]);
+                cursor = end;
+            }
+            b'\'' => {
+                if let Some(end) = skip_rust_char_literal(source, cursor) {
+                    push_masked_source(&mut code, &source[cursor..end]);
+                    cursor = end;
+                } else {
+                    let character = source[cursor..].chars().next().expect("quote");
+                    code.push(character);
+                    cursor += character.len_utf8();
+                }
+            }
+            b'/' if bytes.get(cursor + 1) == Some(&b'/') => {
+                let end = source[cursor..]
+                    .find('\n')
+                    .map_or(source.len(), |newline| cursor + newline);
+                push_masked_source(&mut code, &source[cursor..end]);
+                cursor = end;
+            }
+            b'/' if bytes.get(cursor + 1) == Some(&b'*') => {
+                let end = skip_rust_block_comment(source, cursor).ok_or_else(|| {
+                    classification_error(path, source, cursor, "unterminated block comment")
+                })?;
+                push_masked_source(&mut code, &source[cursor..end]);
+                cursor = end;
+            }
+            b'r' => {
+                if let Some(end) = skip_raw_rust_string(source, cursor) {
+                    push_masked_source(&mut code, &source[cursor..end]);
+                    cursor = end;
+                } else {
+                    code.push('r');
+                    cursor += 1;
+                }
+            }
+            _ => {
+                let character = source[cursor..].chars().next().expect("source character");
+                code.push(character);
+                cursor += character.len_utf8();
+            }
+        }
+    }
+
+    Ok(code)
+}
+
+fn push_masked_source(output: &mut String, source: &str) {
+    for character in source.chars() {
+        if character == '\n' {
+            output.push('\n');
+        } else {
+            output.push(' ');
+        }
+    }
 }
 
 fn find_cfg_test_attribute(source: &str, start: usize) -> Option<(usize, usize)> {
@@ -1833,42 +1962,97 @@ fn find_cfg_test_attribute(source: &str, start: usize) -> Option<(usize, usize)>
     None
 }
 
-fn find_cfg_test_module_end(source: &str, attribute_end: usize) -> Option<usize> {
+fn find_cfg_test_item_end(
+    path: &str,
+    source: &str,
+    attribute_start: usize,
+    attribute_end: usize,
+) -> Result<usize, String> {
     let mut cursor = skip_rust_whitespace(source, attribute_end);
     while source[cursor..].starts_with("#[") {
-        let attribute_end = source[cursor..].find(']').map(|end| cursor + end + 1)?;
+        let attribute_end = source[cursor..]
+            .find(']')
+            .map(|end| cursor + end + 1)
+            .ok_or_else(|| classification_error(path, source, cursor, "unterminated attribute"))?;
         cursor = skip_rust_whitespace(source, attribute_end);
     }
 
-    cursor = skip_optional_visibility(source, cursor);
-    if !starts_with_rust_keyword(source, cursor, "mod") {
-        return None;
-    }
-    cursor = skip_rust_whitespace(source, cursor + "mod".len());
-    cursor = skip_rust_identifier(source, cursor)?;
-    cursor = skip_rust_whitespace(source, cursor);
-
-    if source[cursor..].starts_with(';') {
-        return Some(cursor + 1);
-    }
-    if !source[cursor..].starts_with('{') {
-        return None;
-    }
-
-    find_matching_rust_brace(source, cursor).or(Some(source.len()))
+    cursor = skip_optional_visibility(path, source, cursor)?;
+    find_rust_item_end(path, source, attribute_start, cursor)
 }
 
-fn skip_optional_visibility(source: &str, cursor: usize) -> usize {
+fn skip_optional_visibility(path: &str, source: &str, cursor: usize) -> Result<usize, String> {
     if !starts_with_rust_keyword(source, cursor, "pub") {
-        return cursor;
+        return Ok(cursor);
     }
 
     let mut cursor = skip_rust_whitespace(source, cursor + "pub".len());
     if source[cursor..].starts_with('(') {
-        cursor = skip_balanced_parentheses(source, cursor).unwrap_or(cursor);
+        cursor = skip_balanced_parentheses(source, cursor)
+            .ok_or_else(|| classification_error(path, source, cursor, "malformed visibility"))?;
         cursor = skip_rust_whitespace(source, cursor);
     }
-    cursor
+    Ok(cursor)
+}
+
+fn find_rust_item_end(
+    path: &str,
+    source: &str,
+    attribute_start: usize,
+    item_start: usize,
+) -> Result<usize, String> {
+    let bytes = source.as_bytes();
+    let mut cursor = item_start;
+    let mut brace_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut paren_depth = 0usize;
+    let mut saw_brace = false;
+
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'(' => paren_depth += 1,
+            b')' => {
+                paren_depth = paren_depth.checked_sub(1).ok_or_else(|| {
+                    classification_error(path, source, cursor, "unbalanced closing parenthesis")
+                })?;
+            }
+            b'[' => bracket_depth += 1,
+            b']' => {
+                bracket_depth = bracket_depth.checked_sub(1).ok_or_else(|| {
+                    classification_error(path, source, cursor, "unbalanced closing bracket")
+                })?;
+            }
+            b'{' if paren_depth == 0 && bracket_depth == 0 => {
+                brace_depth += 1;
+                saw_brace = true;
+            }
+            b'}' if paren_depth == 0 && bracket_depth == 0 => {
+                brace_depth = brace_depth.checked_sub(1).ok_or_else(|| {
+                    classification_error(path, source, cursor, "unbalanced closing brace")
+                })?;
+                cursor += 1;
+                if saw_brace && brace_depth == 0 {
+                    return Ok(cursor);
+                }
+                continue;
+            }
+            b';' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                return Ok(cursor + 1);
+            }
+            b',' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                return Ok(cursor + 1);
+            }
+            _ => {}
+        }
+        cursor += 1;
+    }
+
+    Err(classification_error(
+        path,
+        source,
+        attribute_start,
+        "cfg(test) item is not closed",
+    ))
 }
 
 fn skip_balanced_parentheses(source: &str, open_index: usize) -> Option<usize> {
@@ -1901,23 +2085,6 @@ fn skip_rust_whitespace(source: &str, mut cursor: usize) -> usize {
     cursor
 }
 
-fn skip_rust_identifier(source: &str, cursor: usize) -> Option<usize> {
-    let mut end = cursor;
-    let mut chars = source[cursor..].char_indices();
-    let (_, first) = chars.next()?;
-    if first != '_' && !first.is_ascii_alphabetic() {
-        return None;
-    }
-    end += first.len_utf8();
-    for (relative_index, character) in chars {
-        if character != '_' && !character.is_ascii_alphanumeric() {
-            return Some(cursor + relative_index);
-        }
-        end = cursor + relative_index + character.len_utf8();
-    }
-    Some(end)
-}
-
 fn starts_with_rust_keyword(source: &str, cursor: usize, keyword: &str) -> bool {
     source[cursor..].starts_with(keyword)
         && source[cursor + keyword.len()..]
@@ -1926,47 +2093,26 @@ fn starts_with_rust_keyword(source: &str, cursor: usize, keyword: &str) -> bool 
             .is_none_or(|character| !is_rust_identifier_character(character))
 }
 
-fn find_matching_rust_brace(source: &str, open_index: usize) -> Option<usize> {
+fn skip_rust_block_comment(source: &str, start: usize) -> Option<usize> {
     let bytes = source.as_bytes();
-    let mut cursor = open_index;
+    let mut cursor = start;
     let mut depth = 0usize;
 
-    while cursor < bytes.len() {
-        match bytes[cursor] {
-            b'{' => {
-                depth += 1;
-                cursor += 1;
-            }
-            b'}' => {
-                depth = depth.checked_sub(1)?;
-                cursor += 1;
-                if depth == 0 {
-                    return Some(cursor);
-                }
-            }
-            b'"' => cursor = skip_quoted_rust_literal(source, cursor, b'"')?,
-            b'\''
-                if bytes
-                    .get(cursor + 1)
-                    .is_none_or(|byte| !byte.is_ascii_alphabetic() && *byte != b'_') =>
-            {
-                cursor = skip_quoted_rust_literal(source, cursor, b'\'')?
-            }
-            b'/' if bytes.get(cursor + 1) == Some(&b'/') => {
-                cursor = source[cursor..]
-                    .find('\n')
-                    .map_or(source.len(), |newline| cursor + newline + 1);
-            }
-            b'/' if bytes.get(cursor + 1) == Some(&b'*') => {
-                cursor = source[cursor + 2..]
-                    .find("*/")
-                    .map(|end| cursor + 2 + end + 2)?;
-            }
-            b'r' => {
-                cursor = skip_raw_rust_string(source, cursor).unwrap_or(cursor + 1);
-            }
-            _ => cursor += 1,
+    while cursor + 1 < bytes.len() {
+        if bytes[cursor] == b'/' && bytes[cursor + 1] == b'*' {
+            depth += 1;
+            cursor += 2;
+            continue;
         }
+        if bytes[cursor] == b'*' && bytes[cursor + 1] == b'/' {
+            depth = depth.checked_sub(1)?;
+            cursor += 2;
+            if depth == 0 {
+                return Some(cursor);
+            }
+            continue;
+        }
+        cursor += 1;
     }
 
     None
@@ -1988,6 +2134,16 @@ fn skip_quoted_rust_literal(source: &str, start: usize, delimiter: u8) -> Option
         cursor += 1;
     }
     None
+}
+
+fn skip_rust_char_literal(source: &str, start: usize) -> Option<usize> {
+    let end = skip_quoted_rust_literal(source, start, b'\'')?;
+    let literal = &source[start + 1..end - 1];
+    if literal.starts_with('\\') || literal.chars().count() == 1 {
+        Some(end)
+    } else {
+        None
+    }
 }
 
 fn skip_raw_rust_string(source: &str, start: usize) -> Option<usize> {
@@ -2027,11 +2183,20 @@ fn skip_raw_rust_string(source: &str, start: usize) -> Option<usize> {
 fn unexcepted_sdk_boundary_patterns(
     path: &str,
     production_source: &str,
-) -> Vec<&'static SdkBoundaryForbiddenPattern> {
+) -> Vec<SdkBoundaryFinding> {
     STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS
         .iter()
-        .filter(|forbidden| production_source.contains(forbidden.pattern))
-        .filter(|forbidden| !sdk_boundary_exception_contains(path, forbidden.pattern))
+        .flat_map(|forbidden| {
+            production_source
+                .match_indices(forbidden.pattern)
+                .map(move |(index, _)| (forbidden, index))
+        })
+        .filter(|(forbidden, _)| !sdk_boundary_exception_contains(path, forbidden.pattern))
+        .map(|(forbidden, index)| SdkBoundaryFinding {
+            pattern: forbidden.pattern,
+            reason: forbidden.reason,
+            line: line_number(production_source, index),
+        })
         .collect()
 }
 
@@ -2138,6 +2303,13 @@ fn line_number(source: &str, index: usize) -> usize {
         .filter(|byte| *byte == b'\n')
         .count()
         + 1
+}
+
+fn classification_error(path: &str, source: &str, index: usize, reason: &str) -> String {
+    format!(
+        "{path}:{} source classification failed: {reason}",
+        line_number(source, index)
+    )
 }
 
 fn contains_reserved_payment_action_term(value: &str, term: &str) -> bool {
