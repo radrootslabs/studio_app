@@ -1024,7 +1024,7 @@ impl DesktopAppRuntime {
         self.lock_state_mut().reset_local_device_state()
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn replace_today_agenda(&self, projection: TodayAgendaProjection) -> bool {
         self.lock_state_mut()
             .state_store

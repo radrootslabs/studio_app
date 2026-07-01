@@ -1534,6 +1534,24 @@ fn app_production_sdk_boundary_usage_is_exception_scoped() {
 }
 
 #[test]
+fn app_production_sources_do_not_suppress_dead_code() {
+    let forbidden = ["#[allow(", "dead_code", ")]"].concat();
+
+    for (relative_path, source) in app_rust_source_files() {
+        let production_source = production_source_without_tests(relative_path.as_str(), &source)
+            .unwrap_or_else(|error| {
+                panic!("{} source classification failed: {error}", relative_path)
+            });
+
+        assert!(
+            !production_source.contains(forbidden.as_str()),
+            "{} contains production dead-code suppression",
+            relative_path
+        );
+    }
+}
+
+#[test]
 fn app_store_current_schema_surfaces_reject_retired_terms() {
     let app_root = app_root();
     let mut paths = vec![
