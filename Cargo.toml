@@ -67,3 +67,6 @@ uuid = { version = "1", features = ["serde", "v5", "v7"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+[patch.crates-io]
+block = { path = "vendor/block" }
