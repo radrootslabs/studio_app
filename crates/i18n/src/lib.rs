@@ -52,8 +52,8 @@ fn normalize_host_locale(host_locale: &str) -> String {
         return DEFAULT_LOCALE_ID.to_owned();
     }
 
-    let without_fallbacks = trimmed.split(':').next().unwrap_or(DEFAULT_LOCALE_ID);
-    let without_encoding = without_fallbacks
+    let primary_locale_segment = trimmed.split(':').next().unwrap_or(DEFAULT_LOCALE_ID);
+    let without_encoding = primary_locale_segment
         .split('.')
         .next()
         .unwrap_or(DEFAULT_LOCALE_ID)

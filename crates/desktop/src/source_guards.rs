@@ -1274,6 +1274,10 @@ const STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS: &[SdkBoundaryForbiddenPattern] = &
         reason: "app production sources must not keep retired SDK audit scaffolding",
     },
     SdkBoundaryForbiddenPattern {
+        pattern: "fallback",
+        reason: "app production sources must use explicit default or seed terminology",
+    },
+    SdkBoundaryForbiddenPattern {
         pattern: "ORDER_SUBMIT_OPERATION_KIND",
         reason: "app production sources must use trade workflow operation kinds",
     },
@@ -1594,6 +1598,7 @@ const APP_STORE_RETIRED_SCHEMA_TERMS: &[&str] = &[
     "compat",
     "shim",
     "deprecated",
+    "fallback",
     "dual_read",
     "dual_write",
     "dual-read",
@@ -1635,6 +1640,12 @@ fn strict_sdk_boundary_scanner_rejects_unexcepted_new_production_paths() {
             .iter()
             .any(|finding| finding.pattern == "status_client(")
     );
+    let default_term_findings = unexcepted_sdk_boundary_patterns(
+        "crates/desktop/src/runtime.rs",
+        "fn project() { let fallback_profile = profile; }",
+    );
+    assert_eq!(default_term_findings.len(), 1);
+    assert_eq!(default_term_findings[0].pattern, "fallback");
     assert!(
         unexcepted_sdk_boundary_patterns(
             "crates/desktop/src/accounts.rs",

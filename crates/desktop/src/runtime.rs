@@ -3602,13 +3602,11 @@ impl DesktopAppRuntimeState {
         let farm_id = self
             .selected_farm_id()
             .ok_or(DesktopAppRuntimeFarmRulesError::FarmRequired)?;
-        let fallback_profile = self.fallback_farm_profile(farm_id);
+        let seed_profile = self.seed_farm_profile(farm_id);
         let projection = self
             .sqlite_store_for_farm_rules()?
             .load_farm_rules(farm_id)
-            .map(|projection| {
-                prepare_loaded_farm_rules_projection(projection, &fallback_profile)
-            })?;
+            .map(|projection| prepare_loaded_farm_rules_projection(projection, &seed_profile))?;
 
         Ok(projection)
     }
@@ -3621,14 +3619,14 @@ impl DesktopAppRuntimeState {
         let farm_id = self
             .selected_farm_id()
             .ok_or(DesktopAppRuntimeFarmRulesError::FarmRequired)?;
-        let fallback_profile = self.fallback_farm_profile(farm_id);
-        let normalized = normalize_farm_rules_projection(projection, &fallback_profile);
+        let seed_profile = self.seed_farm_profile(farm_id);
+        let normalized = normalize_farm_rules_projection(projection, &seed_profile);
         let saved_projection = {
             let sqlite_store = self.sqlite_store_for_farm_rules()?;
             sqlite_store.save_farm_rules(&normalized)?;
 
             let mut refreshed = sqlite_store.load_farm_rules(farm_id)?;
-            refreshed = prepare_loaded_farm_rules_projection(refreshed, &fallback_profile);
+            refreshed = prepare_loaded_farm_rules_projection(refreshed, &seed_profile);
 
             let saved_farm = FarmSummary {
                 farm_id,
@@ -5413,8 +5411,8 @@ impl DesktopAppRuntimeState {
         state
     }
 
-    fn fallback_farm_profile(&self, farm_id: FarmId) -> FarmProfileRecord {
-        fallback_farm_profile_for_projection(farm_id, self.state_store.farm_setup_projection())
+    fn seed_farm_profile(&self, farm_id: FarmId) -> FarmProfileRecord {
+        seed_farm_profile_for_projection(farm_id, self.state_store.farm_setup_projection())
     }
 
     fn load_products_list_for_query(
@@ -8384,11 +8382,10 @@ fn load_selected_account_context_with_options(
         product_editor_draft,
     ) = match today_farm_id {
         Some(farm_id) => {
-            let fallback_profile =
-                fallback_farm_profile_for_projection(farm_id, &farm_setup_projection);
+            let seed_profile = seed_farm_profile_for_projection(farm_id, &farm_setup_projection);
             let farm_rules_projection =
                 sqlite_store.load_farm_rules(farm_id).map(|projection| {
-                    prepare_loaded_farm_rules_projection(projection, &fallback_profile)
+                    prepare_loaded_farm_rules_projection(projection, &seed_profile)
                 })?;
             let today_projection = sqlite_store.load_today_agenda(Some(farm_id))?;
             let products_query = continuity_state.seller.products_query.clone();
@@ -9210,7 +9207,7 @@ fn selected_farm_id_from_context(
         })
 }
 
-fn fallback_farm_profile_for_projection(
+fn seed_farm_profile_for_projection(
     farm_id: FarmId,
     farm_setup_projection: &FarmSetupProjection,
 ) -> FarmProfileRecord {
@@ -9234,10 +9231,10 @@ fn fallback_farm_profile_for_projection(
 
 fn prepare_loaded_farm_rules_projection(
     mut projection: FarmRulesProjection,
-    fallback_profile: &FarmProfileRecord,
+    seed_profile: &FarmProfileRecord,
 ) -> FarmRulesProjection {
     if projection.farm_profile.is_none() {
-        projection.farm_profile = Some(fallback_profile.clone());
+        projection.farm_profile = Some(seed_profile.clone());
     }
 
     normalize_pickup_location_defaults(&mut projection.pickup_locations);
@@ -9247,20 +9244,20 @@ fn prepare_loaded_farm_rules_projection(
 
 fn normalize_farm_rules_projection(
     mut projection: FarmRulesProjection,
-    fallback_profile: &FarmProfileRecord,
+    seed_profile: &FarmProfileRecord,
 ) -> FarmRulesProjection {
     let mut farm_profile = projection
         .farm_profile
         .take()
-        .unwrap_or_else(|| fallback_profile.clone());
-    farm_profile.farm_id = fallback_profile.farm_id;
+        .unwrap_or_else(|| seed_profile.clone());
+    farm_profile.farm_id = seed_profile.farm_id;
     farm_profile.display_name = farm_profile.display_name.trim().to_owned();
     farm_profile.timezone = farm_profile.timezone.trim().to_owned();
     farm_profile.currency_code = farm_profile.currency_code.trim().to_uppercase();
     projection.farm_profile = Some(farm_profile);
 
     for pickup_location in &mut projection.pickup_locations {
-        pickup_location.farm_id = fallback_profile.farm_id;
+        pickup_location.farm_id = seed_profile.farm_id;
         pickup_location.label = pickup_location.label.trim().to_owned();
         pickup_location.address_line = pickup_location.address_line.trim().to_owned();
         pickup_location.directions = pickup_location
@@ -9271,12 +9268,12 @@ fn normalize_farm_rules_projection(
     }
 
     if let Some(operating_rules) = projection.operating_rules.as_mut() {
-        operating_rules.farm_id = fallback_profile.farm_id;
+        operating_rules.farm_id = seed_profile.farm_id;
         operating_rules.substitution_policy = operating_rules.substitution_policy.trim().to_owned();
     }
 
     for fulfillment_window in &mut projection.fulfillment_windows {
-        fulfillment_window.farm_id = fallback_profile.farm_id;
+        fulfillment_window.farm_id = seed_profile.farm_id;
         fulfillment_window.label = fulfillment_window.label.trim().to_owned();
         fulfillment_window.starts_at = fulfillment_window.starts_at.trim().to_owned();
         fulfillment_window.ends_at = fulfillment_window.ends_at.trim().to_owned();
@@ -9284,7 +9281,7 @@ fn normalize_farm_rules_projection(
     }
 
     for blackout_period in &mut projection.blackout_periods {
-        blackout_period.farm_id = fallback_profile.farm_id;
+        blackout_period.farm_id = seed_profile.farm_id;
         blackout_period.label = blackout_period.label.trim().to_owned();
         blackout_period.starts_at = blackout_period.starts_at.trim().to_owned();
         blackout_period.ends_at = blackout_period.ends_at.trim().to_owned();

@@ -8800,7 +8800,7 @@ mod tests {
     }
 
     #[test]
-    fn app_authored_records_with_non_uuid_tags_do_not_fallback_to_cli_identity() {
+    fn app_authored_records_with_non_uuid_tags_do_not_rebind_to_cli_identity() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
         let events = local_events_store();

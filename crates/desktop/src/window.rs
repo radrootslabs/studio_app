@@ -16634,7 +16634,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_account_display_uses_label_before_npub_fallback() {
+    fn settings_account_display_uses_label_before_npub_default() {
         let labeled = AccountSummary {
             account_id: "account_1".to_owned(),
             npub: "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq".to_owned(),
@@ -16651,7 +16651,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_account_npub_fallback_stays_compact() {
+    fn settings_account_npub_default_stays_compact() {
         assert_eq!(
             abbreviated_npub("npub1sxczrq2dp4jtehcm8mtemj975u5ytf2d7mc6dpuuq3rzkjzr76ls5lkheq"),
             "npub1sxczr...5lkheq"
