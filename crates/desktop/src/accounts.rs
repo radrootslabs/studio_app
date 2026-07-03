@@ -196,7 +196,6 @@ fn ensure_directory(path: &Path) -> Result<(), DesktopAccountsBootstrapError> {
 fn local_account_secret_backend_selection() -> RadrootsSecretBackendSelection {
     RadrootsSecretBackendSelection {
         primary: RadrootsSecretBackend::EncryptedFile,
-        fallback: None,
     }
 }
 
