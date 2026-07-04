@@ -1502,8 +1502,8 @@ impl<'a> AppLocalInteropRepository<'a> {
         };
         let (status, agreement, inventory) = match result.as_str() {
             "valid" => (
-                OrderStatus::Scheduled.storage_key(),
-                TradeAgreementStatus::Committed.storage_key(),
+                OrderStatus::NeedsAction.storage_key(),
+                TradeAgreementStatus::AgreedPendingRhi.storage_key(),
                 TradeInventoryStatus::Reserved.storage_key(),
             ),
             "needs_review" => (
@@ -5453,8 +5453,8 @@ mod tests {
     }
 
     #[test]
-    fn valid_validation_receipt_commits_buyer_and_seller_order_details() {
-        let fixture = validation_receipt_order_fixture("validation-receipt-valid-commit");
+    fn valid_validation_receipt_keeps_buyer_and_seller_order_pending_rhi() {
+        let fixture = validation_receipt_order_fixture("validation-receipt-valid-pending-rhi");
         let valid_event = validation_receipt_event(
             hex_event_id(29).as_str(),
             fixture.seller_pubkey.as_str(),
@@ -5468,7 +5468,7 @@ mod tests {
         fixture
             .events
             .append_record(&signed_order_event_record(
-                "cli:signed_event:validation-receipt:valid-commit",
+                "cli:signed_event:validation-receipt:valid-pending-rhi",
                 &valid_event,
                 fixture.listing_addr.as_str(),
                 SourceRuntime::Cli,
@@ -5483,23 +5483,23 @@ mod tests {
         let buyer_detail = fixture
             .app_store
             .load_buyer_order_detail(&fixture.buyer_context, fixture.order_id)
-            .expect("load buyer committed validation receipt detail")
-            .expect("buyer committed validation receipt detail");
+            .expect("load buyer pending-rhi validation receipt detail")
+            .expect("buyer pending-rhi validation receipt detail");
         let seller_detail = fixture
             .app_store
             .load_order_detail(fixture.seller_farm_id, fixture.order_id)
-            .expect("load seller committed validation receipt detail")
-            .expect("seller committed validation receipt detail");
+            .expect("load seller pending-rhi validation receipt detail")
+            .expect("seller pending-rhi validation receipt detail");
 
-        assert_eq!(buyer_detail.status, BuyerOrderStatus::Scheduled);
-        assert_eq!(seller_detail.status, OrderStatus::Scheduled);
+        assert_eq!(buyer_detail.status, BuyerOrderStatus::Placed);
+        assert_eq!(seller_detail.status, OrderStatus::NeedsAction);
         assert_eq!(
             buyer_detail.workflow.agreement,
-            TradeAgreementStatus::Committed
+            TradeAgreementStatus::AgreedPendingRhi
         );
         assert_eq!(
             seller_detail.workflow.agreement,
-            TradeAgreementStatus::Committed
+            TradeAgreementStatus::AgreedPendingRhi
         );
         assert_eq!(
             buyer_detail.workflow.inventory,

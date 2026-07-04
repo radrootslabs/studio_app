@@ -1524,6 +1524,26 @@ fn app_production_trade_event_kinds_use_shared_constants() {
 }
 
 #[test]
+fn app_store_validation_receipts_do_not_commit_without_trust_policy() {
+    let source = read_source_path(app_root().join("crates/store/src/interop.rs").as_path());
+    let valid_result_branch = "\"valid\" => (";
+    let start = source
+        .find(valid_result_branch)
+        .expect("store interop should project valid validation receipt results");
+    let end = source[start..]
+        .find("\"needs_review\" => (")
+        .map(|offset| start + offset)
+        .expect("store interop should project invalid validation receipt results");
+    let branch = &source[start..end];
+
+    assert!(branch.contains("OrderStatus::NeedsAction.storage_key()"));
+    assert!(branch.contains("TradeAgreementStatus::AgreedPendingRhi.storage_key()"));
+    assert!(branch.contains("TradeInventoryStatus::Reserved.storage_key()"));
+    assert!(!branch.contains("OrderStatus::Scheduled.storage_key()"));
+    assert!(!branch.contains("TradeAgreementStatus::Committed.storage_key()"));
+}
+
+#[test]
 fn app_production_sdk_boundary_usage_is_exception_scoped() {
     for (relative_path, source) in app_rust_source_files() {
         let production_source = production_source_without_tests(relative_path.as_str(), &source)
