@@ -1027,6 +1027,7 @@ pub struct BuyerOrderReviewDraft {
     pub email: String,
     pub phone: String,
     pub order_note: String,
+    pub confirm_public_note: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -1045,6 +1046,7 @@ pub enum BuyerOrderReviewDisabledReason {
     MissingFulfillment,
     MissingName,
     MissingEmail,
+    PublicNoteConfirmationRequired,
     AccountRequired,
 }
 
@@ -1055,6 +1057,7 @@ impl BuyerOrderReviewDisabledReason {
             Self::MissingFulfillment => "missing_fulfillment",
             Self::MissingName => "missing_name",
             Self::MissingEmail => "missing_email",
+            Self::PublicNoteConfirmationRequired => "public_note_confirmation_required",
             Self::AccountRequired => "account_required",
         }
     }
@@ -2648,6 +2651,10 @@ mod tests {
             "missing_email"
         );
         assert_eq!(
+            BuyerOrderReviewDisabledReason::PublicNoteConfirmationRequired.storage_key(),
+            "public_note_confirmation_required"
+        );
+        assert_eq!(
             BuyerOrderReviewDisabledReason::AccountRequired.storage_key(),
             "account_required"
         );
@@ -3586,6 +3593,7 @@ mod tests {
                 email: "casey@example.com".to_owned(),
                 phone: String::new(),
                 order_note: "Leave by the cooler".to_owned(),
+                confirm_public_note: true,
             },
             summary: BuyerOrderReviewSummaryProjection {
                 farm_display_name: Some("Cedar Grove Farm".to_owned()),

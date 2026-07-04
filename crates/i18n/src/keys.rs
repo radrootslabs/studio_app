@@ -378,6 +378,7 @@ define_app_text_keys! {
     PersonalOrderReviewFieldEmail => "personal.order_review.field.email",
     PersonalOrderReviewFieldPhone => "personal.order_review.field.phone",
     PersonalOrderReviewFieldOrderNote => "personal.order_review.field.order_note",
+    PersonalOrderReviewConfirmPublicNote => "personal.order_review.confirm_public_note",
     PersonalOrderReviewLocalOnlyBody => "personal.order_review.local_only.body",
     PersonalOrderReviewPlaceOrderAction => "personal.order_review.place_order.action",
     OrdersTitle => "orders.title",

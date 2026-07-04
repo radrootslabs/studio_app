@@ -2092,6 +2092,35 @@ impl HomeView {
         }
     }
 
+    fn set_buyer_order_review_public_note_confirmation(
+        &mut self,
+        confirmed: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(form) = self.buyer_order_review_form.as_mut() else {
+            return;
+        };
+        if form.confirm_public_note == confirmed {
+            return;
+        }
+        form.confirm_public_note = confirmed;
+        match self
+            .runtime
+            .save_personal_order_review_draft(form.current_draft(cx))
+        {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "buyer",
+                    event = "buyer.order_review_confirmation_save_failed",
+                    error = %runtime_error,
+                    "failed to save buyer order review public note confirmation"
+                );
+            }
+        }
+    }
+
     fn toggle_personal_search_fulfillment_method(
         &mut self,
         method: FarmOrderMethod,
@@ -2866,7 +2895,7 @@ impl HomeView {
     }
 
     fn cancel_buyer_order(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
-        match self.runtime.publish_buyer_order_cancel(order_id) {
+        match self.runtime.publish_buyer_order_cancel(order_id, false) {
             Ok(true) => cx.notify(),
             Ok(false) => {}
             Err(runtime_error) => {
@@ -2898,7 +2927,10 @@ impl HomeView {
     }
 
     fn decline_buyer_order_revision(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
-        match self.runtime.publish_buyer_order_revision_decline(order_id) {
+        match self
+            .runtime
+            .publish_buyer_order_revision_decline(order_id, false)
+        {
             Ok(true) => cx.notify(),
             Ok(false) => {}
             Err(runtime_error) => {
@@ -3618,6 +3650,9 @@ impl HomeView {
                         form,
                         &runtime.personal_projection.cart.order_review,
                         cx.listener(|this, _, _, cx| this.close_personal_order_review(cx)),
+                        cx.listener(|this, checked: &bool, _, cx| {
+                            this.set_buyer_order_review_public_note_confirmation(*checked, cx)
+                        }),
                         cx.listener(|this, _, _, cx| this.place_personal_order(cx)),
                         cx,
                     )
@@ -5339,6 +5374,7 @@ struct BuyerOrderReviewFormState {
     email_input: Entity<InputState>,
     phone_input: Entity<InputState>,
     order_note_input: Entity<InputState>,
+    confirm_public_note: bool,
     _name_subscription: Subscription,
     _email_subscription: Subscription,
     _phone_subscription: Subscription,
@@ -5386,6 +5422,7 @@ impl BuyerOrderReviewFormState {
             email_input,
             phone_input,
             order_note_input,
+            confirm_public_note: draft.confirm_public_note,
             _name_subscription: name_subscription,
             _email_subscription: email_subscription,
             _phone_subscription: phone_subscription,
@@ -5408,6 +5445,7 @@ impl BuyerOrderReviewFormState {
             window,
             cx,
         );
+        self.confirm_public_note = draft.confirm_public_note;
     }
 
     fn current_draft(&self, cx: &App) -> BuyerOrderReviewDraft {
@@ -5416,6 +5454,7 @@ impl BuyerOrderReviewFormState {
             email: self.email_input.read(cx).value().to_string(),
             phone: self.phone_input.read(cx).value().to_string(),
             order_note: self.order_note_input.read(cx).value().to_string(),
+            confirm_public_note: self.confirm_public_note,
         }
     }
 }
@@ -11388,6 +11427,7 @@ fn buyer_order_review_card(
     form: &BuyerOrderReviewFormState,
     order_review: &radroots_studio_app_view::BuyerOrderReviewProjection,
     on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_confirm_public_note_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
     on_place_order: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
@@ -11478,6 +11518,18 @@ fn buyer_order_review_card(
                         ),
                         &form.order_note_input,
                         false,
+                    ))
+                    .child(app_checkbox_field(
+                        AppCheckboxFieldSpec::new(
+                            "buyer-order-review-confirm-public-note",
+                            app_shared_text(AppTextKey::PersonalOrderReviewConfirmPublicNote),
+                            Option::<SharedString>::None,
+                        ),
+                        form.confirm_public_note,
+                        cx,
+                        move |checked, window, cx| {
+                            on_confirm_public_note_change(&checked, window, cx)
+                        },
                     )),
             ))
             .child(if order_review.can_place_order {

@@ -78,6 +78,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "buyer-cart-open-order-review",
     "buyer-cart-remove-line",
     "buyer-order-review-back",
+    "buyer-order-review-confirm-public-note",
     "buyer-order-review-place-order",
     "buyer-listing-open",
     "buyer-order-accept-change",
@@ -91,6 +92,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "personal_orders",
     "buyer.add_to_cart_failed",
     "buyer.cart_remove_failed",
+    "buyer.order_review_confirmation_save_failed",
     "buyer.order_review_place_failed",
     "buyer.order_review_save_failed",
     "buyer.detail_open_failed",
@@ -123,6 +125,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "failed to remove buyer cart line",
     "failed to reorder buyer order",
     "failed to save buyer order review draft",
+    "failed to save buyer order review public note confirmation",
     "failed to select buyer section",
     "failed to open buyer product detail",
     "failed to update buyer fulfillment filter",
@@ -671,6 +674,7 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::PersonalOrderReviewFieldEmail",
     "AppTextKey::PersonalOrderReviewFieldPhone",
     "AppTextKey::PersonalOrderReviewFieldOrderNote",
+    "AppTextKey::PersonalOrderReviewConfirmPublicNote",
     "AppTextKey::PersonalOrderReviewLocalOnlyBody",
     "AppTextKey::PersonalOrderReviewPlaceOrderAction",
     "AppTextKey::HomeTodayOpenInOrdersAction",
@@ -1550,6 +1554,41 @@ fn app_production_sdk_boundary_usage_is_exception_scoped() {
 }
 
 #[test]
+fn app_sdk_trade_propose_request_stays_product_shaped() {
+    let source = read_source_path(app_root().join("crates/runtime/src/sdk.rs").as_path());
+    let request = struct_block(source.as_str(), "AppSdkTradeProposeRequest");
+
+    assert!(
+        !request.contains("RadrootsOrderRequest"),
+        "AppSdkTradeProposeRequest must not expose protocol-shaped order requests"
+    );
+    for required_field in [
+        "pub order_id: RadrootsOrderId",
+        "pub listing_addr: RadrootsListingAddress",
+        "pub seller_pubkey: RadrootsPublicKey",
+        "pub items: Vec<RadrootsOrderItem>",
+        "pub economics: RadrootsOrderEconomics",
+        "pub public_note: Option<String>",
+        "pub confirm_public_note: bool",
+    ] {
+        assert!(
+            request.contains(required_field),
+            "AppSdkTradeProposeRequest is missing product field `{required_field}`"
+        );
+    }
+    assert!(source.contains("fn app_trade_privacy_confirmation(confirm_public_note: bool)"));
+    assert!(source.contains("if confirm_public_note"));
+    assert!(source.contains(".with_optional_public_note(request.public_note)"));
+    assert!(source.contains(
+        ".with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note))"
+    ));
+    assert!(
+        !source.contains("fn app_trade_privacy_confirmation()"),
+        "public-sensitive note confirmation must not become ambient"
+    );
+}
+
+#[test]
 fn app_production_sources_do_not_suppress_dead_code() {
     let forbidden = ["#[allow(", "dead_code", ")]"].concat();
 
@@ -2310,6 +2349,30 @@ fn sdk_root_trade_alias_findings(path: &str, production_source: &str) -> Vec<Str
 fn read_source_path(path: &Path) -> String {
     fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("failed to read source {}: {error}", path.display()))
+}
+
+fn struct_block<'source>(source: &'source str, struct_name: &str) -> &'source str {
+    let start = source
+        .find(format!("struct {struct_name}").as_str())
+        .unwrap_or_else(|| panic!("missing struct `{struct_name}`"));
+    let open = source[start..]
+        .find('{')
+        .map(|index| start + index)
+        .unwrap_or_else(|| panic!("missing struct `{struct_name}` body"));
+    let mut depth = 0usize;
+    for (offset, character) in source[open..].char_indices() {
+        match character {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &source[start..=open + offset];
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("struct `{struct_name}` body is not closed");
 }
 
 fn app_root() -> PathBuf {

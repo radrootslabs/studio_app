@@ -215,7 +215,10 @@ struct AppDirectRelayFetchedRelay {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AppSellerOrderDecisionCommand {
     Accept,
-    Decline { reason: String },
+    Decline {
+        reason: String,
+        confirm_public_note: bool,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -814,11 +817,13 @@ impl DesktopAppRuntime {
         &self,
         order_id: OrderId,
         reason: &str,
+        confirm_public_note: bool,
     ) -> Result<AppOrderDecisionPublishPayload, AppSqliteError> {
         self.lock_state_mut().prepare_seller_order_decision(
             order_id,
             AppSellerOrderDecisionCommand::Decline {
                 reason: reason.to_owned(),
+                confirm_public_note,
             },
         )
     }
@@ -832,11 +837,13 @@ impl DesktopAppRuntime {
         &self,
         order_id: OrderId,
         reason: &str,
+        confirm_public_note: bool,
     ) -> Result<bool, AppSqliteError> {
         self.lock_state_mut().publish_seller_order_decision(
             order_id,
             AppSellerOrderDecisionCommand::Decline {
                 reason: reason.to_owned(),
+                confirm_public_note,
             },
         )
     }
@@ -847,14 +854,25 @@ impl DesktopAppRuntime {
         items: Vec<RadrootsOrderItem>,
         economics: RadrootsOrderEconomics,
         reason: &str,
+        confirm_public_note: bool,
     ) -> Result<bool, AppSqliteError> {
         self.lock_state_mut()
-            .publish_seller_order_revision_proposal(order_id, items, economics, reason)
+            .publish_seller_order_revision_proposal(
+                order_id,
+                items,
+                economics,
+                reason,
+                confirm_public_note,
+            )
     }
 
-    pub fn publish_buyer_order_cancel(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
+    pub fn publish_buyer_order_cancel(
+        &self,
+        order_id: OrderId,
+        confirm_public_note: bool,
+    ) -> Result<bool, AppSqliteError> {
         self.lock_state_mut()
-            .publish_buyer_order_cancellation(order_id)
+            .publish_buyer_order_cancellation(order_id, confirm_public_note)
     }
 
     pub fn publish_buyer_order_revision_accept(
@@ -868,9 +886,10 @@ impl DesktopAppRuntime {
     pub fn publish_buyer_order_revision_decline(
         &self,
         order_id: OrderId,
+        confirm_public_note: bool,
     ) -> Result<bool, AppSqliteError> {
         self.lock_state_mut()
-            .publish_buyer_order_revision_decline(order_id)
+            .publish_buyer_order_revision_decline(order_id, confirm_public_note)
     }
 
     pub fn open_pack_day(
@@ -2611,11 +2630,18 @@ impl DesktopAppRuntimeState {
             });
         }
 
+        let confirm_public_note = match &command {
+            AppSellerOrderDecisionCommand::Accept => false,
+            AppSellerOrderDecisionCommand::Decline {
+                confirm_public_note,
+                ..
+            } => *confirm_public_note,
+        };
         let decision = match command {
             AppSellerOrderDecisionCommand::Accept => AppOrderDecisionPayload::Accepted {
                 inventory_commitments: seller_order_inventory_commitments(&order_export)?,
             },
-            AppSellerOrderDecisionCommand::Decline { reason } => {
+            AppSellerOrderDecisionCommand::Decline { reason, .. } => {
                 let reason = reason.trim();
                 if reason.is_empty() {
                     return Err(AppSqliteError::InvalidProjection {
@@ -2638,6 +2664,7 @@ impl DesktopAppRuntimeState {
             buyer_pubkey: request.payload.buyer_pubkey.to_string(),
             seller_pubkey: request.payload.seller_pubkey.to_string(),
             decision,
+            confirm_public_note,
         };
         AppPublishPayload::OrderDecision(payload.clone())
             .validate()
@@ -2692,6 +2719,7 @@ impl DesktopAppRuntimeState {
         items: Vec<RadrootsOrderItem>,
         economics: RadrootsOrderEconomics,
         reason: &str,
+        confirm_public_note: bool,
     ) -> Result<AppOrderRevisionProposalPublishPayload, AppSqliteError> {
         let _ = self.import_shared_local_events()?;
         let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
@@ -2792,6 +2820,7 @@ impl DesktopAppRuntimeState {
             items,
             economics,
             reason: reason.to_owned(),
+            confirm_public_note,
         };
         AppPublishPayload::OrderRevisionProposal(payload.clone())
             .validate()
@@ -2807,9 +2836,15 @@ impl DesktopAppRuntimeState {
         items: Vec<RadrootsOrderItem>,
         economics: RadrootsOrderEconomics,
         reason: &str,
+        confirm_public_note: bool,
     ) -> Result<bool, AppSqliteError> {
-        let payload =
-            self.prepare_seller_order_revision_proposal(order_id, items, economics, reason)?;
+        let payload = self.prepare_seller_order_revision_proposal(
+            order_id,
+            items,
+            economics,
+            reason,
+            confirm_public_note,
+        )?;
         let source_record_id = order_revision_proposal_sdk_source_record_id(&payload);
         self.enqueue_order_revision_proposal_payload_via_sdk(
             &payload,
@@ -2824,6 +2859,7 @@ impl DesktopAppRuntimeState {
         &mut self,
         order_id: OrderId,
         decision: RadrootsOrderRevisionOutcome,
+        confirm_public_note: bool,
     ) -> Result<AppOrderRevisionDecisionPublishPayload, AppSqliteError> {
         let _ = self.import_shared_local_events()?;
         let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
@@ -2913,6 +2949,7 @@ impl DesktopAppRuntimeState {
             buyer_pubkey: request.payload.buyer_pubkey.to_string(),
             seller_pubkey: request.payload.seller_pubkey.to_string(),
             decision,
+            confirm_public_note,
         };
         AppPublishPayload::OrderRevisionDecision(payload.clone())
             .validate()
@@ -2926,18 +2963,24 @@ impl DesktopAppRuntimeState {
         &mut self,
         order_id: OrderId,
     ) -> Result<bool, AppSqliteError> {
-        self.publish_buyer_order_revision_decision(order_id, RadrootsOrderRevisionOutcome::Accepted)
+        self.publish_buyer_order_revision_decision(
+            order_id,
+            RadrootsOrderRevisionOutcome::Accepted,
+            false,
+        )
     }
 
     fn publish_buyer_order_revision_decline(
         &mut self,
         order_id: OrderId,
+        confirm_public_note: bool,
     ) -> Result<bool, AppSqliteError> {
         self.publish_buyer_order_revision_decision(
             order_id,
             RadrootsOrderRevisionOutcome::Declined {
                 reason: "buyer kept order as placed".to_owned(),
             },
+            confirm_public_note,
         )
     }
 
@@ -2945,8 +2988,10 @@ impl DesktopAppRuntimeState {
         &mut self,
         order_id: OrderId,
         decision: RadrootsOrderRevisionOutcome,
+        confirm_public_note: bool,
     ) -> Result<bool, AppSqliteError> {
-        let payload = self.prepare_buyer_order_revision_decision(order_id, decision)?;
+        let payload =
+            self.prepare_buyer_order_revision_decision(order_id, decision, confirm_public_note)?;
         let source_record_id = order_revision_decision_sdk_source_record_id(&payload);
         self.enqueue_order_revision_decision_payload_via_sdk(
             &payload,
@@ -2960,6 +3005,7 @@ impl DesktopAppRuntimeState {
     fn prepare_buyer_order_cancellation(
         &mut self,
         order_id: OrderId,
+        confirm_public_note: bool,
     ) -> Result<AppOrderCancellationPublishPayload, AppSqliteError> {
         let _ = self.import_shared_local_events()?;
         let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
@@ -3052,6 +3098,7 @@ impl DesktopAppRuntimeState {
             buyer_pubkey: request.payload.buyer_pubkey.to_string(),
             seller_pubkey: request.payload.seller_pubkey.to_string(),
             reason: "buyer cancelled order".to_owned(),
+            confirm_public_note,
         };
         AppPublishPayload::OrderCancellation(payload.clone())
             .validate()
@@ -3064,8 +3111,9 @@ impl DesktopAppRuntimeState {
     fn publish_buyer_order_cancellation(
         &mut self,
         order_id: OrderId,
+        confirm_public_note: bool,
     ) -> Result<bool, AppSqliteError> {
-        let payload = self.prepare_buyer_order_cancellation(order_id)?;
+        let payload = self.prepare_buyer_order_cancellation(order_id, confirm_public_note)?;
         let source_record_id = order_cancellation_sdk_source_record_id(&payload);
         self.enqueue_order_cancellation_payload_via_sdk(
             &payload,
@@ -4662,6 +4710,7 @@ impl DesktopAppRuntimeState {
             currency_code: Some(currency_code),
             total_minor_units: Some(total_minor_units),
             note: non_empty_string(order.buyer_order_note.as_str()),
+            confirm_public_note: order.buyer_order_note_public_confirmed,
         };
         if AppPublishPayload::OrderRequest(payload.clone())
             .validate()
@@ -4793,12 +4842,19 @@ impl DesktopAppRuntimeState {
             ))
             .and_then(|identity| {
                 let actor_pubkey = identity.public_key_hex();
+                let order_parts = order_request_publish_payload_to_sdk_product_parts(payload)?;
                 let request = AppSdkTradeProposeRequest {
                     actor_account_id: payload.context.account_id.clone(),
                     actor_pubkey: actor_pubkey.clone(),
                     signer_keys: identity.into_keys(),
                     listing_event: order_request_sdk_listing_event_ptr(payload)?,
-                    order: order_request_publish_payload_to_sdk_order(payload)?,
+                    order_id: order_parts.order_id,
+                    listing_addr: order_parts.listing_addr,
+                    seller_pubkey: order_parts.seller_pubkey,
+                    items: order_parts.items,
+                    economics: order_parts.economics,
+                    public_note: payload.note.clone(),
+                    confirm_public_note: payload.confirm_public_note,
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
                 };
                 self.enqueue_app_sdk_trade_propose(request)
@@ -4842,6 +4898,7 @@ impl DesktopAppRuntimeState {
                     signer_keys: identity.into_keys(),
                     locator: trade_locator_from_decision_payload(payload)?,
                     decision: trade_decision_from_publish_payload(payload)?,
+                    confirm_public_note: payload.confirm_public_note,
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
                 };
                 self.enqueue_app_sdk_trade_decision(request)
@@ -4888,6 +4945,7 @@ impl DesktopAppRuntimeState {
                     items: payload.items.clone(),
                     economics: payload.economics.clone(),
                     reason: payload.reason.clone(),
+                    confirm_public_note: payload.confirm_public_note,
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
                 };
                 self.enqueue_app_sdk_trade_revision_proposal(request)
@@ -4932,6 +4990,7 @@ impl DesktopAppRuntimeState {
                     locator: trade_locator_from_revision_decision_payload(payload)?,
                     revision_id: publish_revision_id(payload.revision_id.as_str())?,
                     decision: payload.decision.clone(),
+                    confirm_public_note: payload.confirm_public_note,
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
                 };
                 self.enqueue_app_sdk_trade_revision_decision(request)
@@ -4975,6 +5034,7 @@ impl DesktopAppRuntimeState {
                     signer_keys: identity.into_keys(),
                     locator: trade_locator_from_cancellation_payload(payload)?,
                     reason: payload.reason.clone(),
+                    confirm_public_note: payload.confirm_public_note,
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
                 };
                 self.enqueue_app_sdk_trade_cancellation(request)
@@ -7735,20 +7795,47 @@ fn missing_listing_provenance_relay_error(known_relays: &[String]) -> AppSyncTra
     )
 }
 
-fn order_request_publish_payload_to_sdk_order(
+struct SdkOrderRequestProductParts {
+    order_id: RadrootsOrderId,
+    listing_addr: RadrootsListingAddress,
+    seller_pubkey: RadrootsPublicKey,
+    items: Vec<RadrootsOrderItem>,
+    economics: RadrootsOrderEconomics,
+}
+
+fn order_request_publish_payload_to_sdk_product_parts(
     payload: &AppOrderRequestPublishPayload,
-) -> Result<RadrootsOrderRequest, AppSyncTransportError> {
+) -> Result<SdkOrderRequestProductParts, AppSyncTransportError> {
     let Some(document_json) = payload.order_document_json.as_ref() else {
         return Err(AppSyncTransportError::failed(
             "order request publish requires order document",
         ));
     };
-    let order_json = document_json
-        .pointer("/document/order")
-        .or_else(|| document_json.get("order"))
-        .unwrap_or(document_json);
-    serde_json::from_value::<RadrootsOrderRequest>(order_json.clone())
-        .map_err(|error| AppSyncTransportError::failed(error.to_string()))
+    let order_json = document_json.pointer("/document/order").ok_or_else(|| {
+        AppSyncTransportError::failed("order request publish document is missing order")
+    })?;
+    let items_json = order_json.get("items").ok_or_else(|| {
+        AppSyncTransportError::failed("order request publish document is missing order items")
+    })?;
+    let economics_json = order_json.get("economics").ok_or_else(|| {
+        AppSyncTransportError::failed("order request publish document is missing order economics")
+    })?;
+    let listing_addr = payload.listing_addr.as_deref().ok_or_else(|| {
+        AppSyncTransportError::failed("order request publish requires listing address")
+    })?;
+    let seller_pubkey = payload.seller_pubkey.as_deref().ok_or_else(|| {
+        AppSyncTransportError::failed("order request publish requires seller pubkey")
+    })?;
+
+    Ok(SdkOrderRequestProductParts {
+        order_id: publish_order_id(payload.order_id.to_string().as_str())?,
+        listing_addr: publish_listing_addr(listing_addr)?,
+        seller_pubkey: publish_pubkey(seller_pubkey)?,
+        items: serde_json::from_value::<Vec<RadrootsOrderItem>>(items_json.clone())
+            .map_err(|error| AppSyncTransportError::failed(error.to_string()))?,
+        economics: serde_json::from_value::<RadrootsOrderEconomics>(economics_json.clone())
+            .map_err(|error| AppSyncTransportError::failed(error.to_string()))?,
+    })
 }
 
 fn d_tag_from_uuid(uuid: Uuid) -> String {
@@ -8029,6 +8116,7 @@ fn buyer_order_request_local_work_payload(
             "buyer_email": order.buyer_email,
             "buyer_phone": order.buyer_phone,
             "buyer_order_note": order.buyer_order_note,
+            "buyer_order_note_public_confirmed": order.buyer_order_note_public_confirmed,
             "fulfillment": {
                 "window_id": order.fulfillment_window_id.map(|id| id.to_string()),
                 "label": order.fulfillment_window_label,
@@ -10454,6 +10542,7 @@ mod tests {
             currency_code: Some("USD".to_owned()),
             total_minor_units: Some(500),
             note: Some("coordinate pickup".to_owned()),
+            confirm_public_note: true,
         });
         let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
             .expect("typed order request publish work should serialize");
@@ -10501,6 +10590,7 @@ mod tests {
                     bin_count: 2,
                 }],
             },
+            confirm_public_note: false,
         });
         let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
             .expect("typed order decision publish work should serialize");
@@ -10597,6 +10687,7 @@ mod tests {
                 }],
                 economics: revision_economics,
                 reason: "harvest count updated".to_owned(),
+                confirm_public_note: false,
             });
         let revision_decision =
             AppPublishPayload::OrderRevisionDecision(AppOrderRevisionDecisionPublishPayload {
@@ -10613,6 +10704,7 @@ mod tests {
                 buyer_pubkey: common.5.clone(),
                 seller_pubkey: common.6.clone(),
                 decision: RadrootsOrderRevisionOutcome::Accepted,
+                confirm_public_note: false,
             });
         let cancellation =
             AppPublishPayload::OrderCancellation(AppOrderCancellationPublishPayload {
@@ -10628,6 +10720,7 @@ mod tests {
                 buyer_pubkey: common.5.clone(),
                 seller_pubkey: common.6.clone(),
                 reason: "buyer cancelled order".to_owned(),
+                confirm_public_note: false,
             });
         let operations = [revision_proposal, revision_decision, cancellation]
             .into_iter()
@@ -11182,6 +11275,7 @@ mod tests {
             currency_code: Some("USD".to_owned()),
             total_minor_units: Some(450),
             note: None,
+            confirm_public_note: false,
         });
         let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-25T07:00:00Z")
             .expect("order publish payload should serialize");
@@ -15084,6 +15178,7 @@ mod tests {
                     email: "casey@example.com".to_owned(),
                     phone: "555-0101".to_owned(),
                     order_note: "Leave by the cooler".to_owned(),
+                    confirm_public_note: true,
                 })
                 .expect("buyer order review draft should save")
         );
@@ -15216,6 +15311,7 @@ mod tests {
                     email: "casey@example.com".to_owned(),
                     phone: "555-0101".to_owned(),
                     order_note: "Leave by the cooler".to_owned(),
+                    confirm_public_note: true,
                 })
                 .expect("buyer order review draft should save")
         );
@@ -15328,7 +15424,7 @@ mod tests {
         configure_runtime_relay_ingest(&runtime, &relay);
 
         let payload = runtime
-            .prepare_order_decline(order_id, "  out of stock  ")
+            .prepare_order_decline(order_id, "  out of stock  ", true)
             .expect("seller order decline payload should prepare");
         let decision = trade_decision_from_publish_payload(&payload)
             .expect("order decline payload should convert to SDK trade decision");
@@ -15341,6 +15437,7 @@ mod tests {
                 reason: "out of stock".to_owned()
             }
         );
+        assert!(payload.confirm_public_note);
         let AppSdkTradeDecision::Decline { reason } = decision else {
             panic!("expected declined decision");
         };
@@ -15528,7 +15625,7 @@ mod tests {
 
         assert!(
             runtime
-                .publish_order_decline(order_id, "not available")
+                .publish_order_decline(order_id, "not available", true)
                 .expect("seller order decline should publish")
         );
 
@@ -15584,6 +15681,7 @@ mod tests {
                 revision_test_order_items(),
                 revision_test_order_economics(),
                 "harvest count updated",
+                false,
             )
             .expect_err("seller revision proposal should reject reducer-invalid parent evidence");
 
@@ -15655,6 +15753,7 @@ mod tests {
                     email: "casey@example.com".to_owned(),
                     phone: "555-0101".to_owned(),
                     order_note: "Leave by the cooler".to_owned(),
+                    confirm_public_note: true,
                 })
                 .expect("buyer order review draft should save")
         );
@@ -15792,6 +15891,10 @@ mod tests {
         assert_eq!(
             payload["app_order"]["buyer_order_note"],
             "Leave by the cooler"
+        );
+        assert_eq!(
+            payload["app_order"]["buyer_order_note_public_confirmed"],
+            true
         );
         assert_eq!(
             payload["app_order"]["lines"][0]["listing_bin_id"],
@@ -16081,6 +16184,7 @@ mod tests {
                     email: "casey@example.com".to_owned(),
                     phone: String::new(),
                     order_note: String::new(),
+                    confirm_public_note: false,
                 })
                 .expect("buyer order review draft should save")
         );
@@ -16191,7 +16295,7 @@ mod tests {
         assert!(
             fixture
                 .runtime
-                .publish_buyer_order_cancel(fixture.order_id)
+                .publish_buyer_order_cancel(fixture.order_id, true)
                 .expect("linked buyer cancellation should publish")
         );
 
@@ -16241,7 +16345,7 @@ mod tests {
 
         let error = fixture
             .runtime
-            .publish_buyer_order_cancel(fixture.order_id)
+            .publish_buyer_order_cancel(fixture.order_id, false)
             .expect_err("linked buyer cancellation should reject from pending proposal");
 
         assert_invalid_projection_reason(
@@ -16274,7 +16378,7 @@ mod tests {
 
         let error = fixture
             .runtime
-            .publish_buyer_order_cancel(fixture.order_id)
+            .publish_buyer_order_cancel(fixture.order_id, false)
             .expect_err("post-agreement buyer cancellation should reject");
 
         assert_invalid_projection_reason(
@@ -16327,7 +16431,7 @@ mod tests {
 
         let error = fixture
             .runtime
-            .publish_buyer_order_cancel(fixture.order_id)
+            .publish_buyer_order_cancel(fixture.order_id, false)
             .expect_err("linked buyer cancellation should reject reducer-invalid evidence");
 
         assert_order_lifecycle_evidence_invalid(error);
@@ -16464,6 +16568,7 @@ mod tests {
                     email: "casey@example.com".to_owned(),
                     phone: String::new(),
                     order_note: String::new(),
+                    confirm_public_note: false,
                 })
                 .expect("buyer order review draft should save")
         );
@@ -19954,6 +20059,7 @@ mod tests {
                     bin_count: 2,
                 }],
             },
+            confirm_public_note: false,
         });
         let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
             .expect("prior order decision publish work should serialize");
@@ -21032,6 +21138,7 @@ mod tests {
                     email: "casey@example.com".to_owned(),
                     phone: String::new(),
                     order_note: String::new(),
+                    confirm_public_note: false,
                 })
                 .expect("buyer order review draft should save")
         );

@@ -7311,6 +7311,7 @@ mod tests {
                     email: "casey@example.test".to_owned(),
                     phone: String::new(),
                     order_note: String::new(),
+                    confirm_public_note: false,
                 },
             )
             .expect("order review draft should save");

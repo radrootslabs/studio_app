@@ -358,6 +358,7 @@
   "personal.order_review.field.email": "Email",
   "personal.order_review.field.phone": "Phone",
   "personal.order_review.field.order_note": "Order note",
+  "personal.order_review.confirm_public_note": "Publish this order note with the request",
   "personal.order_review.local_only.body": "Review the details before placing the order.",
   "personal.order_review.place_order.action": "Place order",
   "orders.title": "Orders",

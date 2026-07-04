@@ -137,6 +137,7 @@ pub struct AppOrderRequestPublishPayload {
     pub currency_code: Option<String>,
     pub total_minor_units: Option<u32>,
     pub note: Option<String>,
+    pub confirm_public_note: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -177,6 +178,7 @@ pub struct AppOrderDecisionPublishPayload {
     pub buyer_pubkey: String,
     pub seller_pubkey: String,
     pub decision: AppOrderDecisionPayload,
+    pub confirm_public_note: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -193,6 +195,7 @@ pub struct AppOrderRevisionProposalPublishPayload {
     pub items: Vec<RadrootsOrderItem>,
     pub economics: RadrootsOrderEconomics,
     pub reason: String,
+    pub confirm_public_note: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -207,6 +210,7 @@ pub struct AppOrderRevisionDecisionPublishPayload {
     pub buyer_pubkey: String,
     pub seller_pubkey: String,
     pub decision: RadrootsOrderRevisionOutcome,
+    pub confirm_public_note: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -220,6 +224,7 @@ pub struct AppOrderCancellationPublishPayload {
     pub buyer_pubkey: String,
     pub seller_pubkey: String,
     pub reason: String,
+    pub confirm_public_note: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -800,6 +805,7 @@ mod tests {
             currency_code: None,
             total_minor_units: None,
             note: None,
+            confirm_public_note: false,
         });
 
         let reason_codes: Vec<&str> = payload
@@ -839,6 +845,7 @@ mod tests {
             decision: AppOrderDecisionPayload::Declined {
                 reason: " ".to_owned(),
             },
+            confirm_public_note: false,
         });
 
         assert_eq!(payload.work_kind().storage_key(), "order_decision");
@@ -882,6 +889,7 @@ mod tests {
                 buyer_pubkey: String::new(),
                 seller_pubkey: String::new(),
                 reason: " ".to_owned(),
+                confirm_public_note: false,
             });
 
         assert_eq!(
@@ -920,6 +928,7 @@ mod tests {
                 buyer_pubkey: "buyer".to_owned(),
                 seller_pubkey: "seller".to_owned(),
                 reason: "buyer cancelled order".to_owned(),
+                confirm_public_note: false,
             }),
             "2026-04-20T18:00:00Z",
         )
@@ -940,6 +949,7 @@ mod tests {
                 buyer_pubkey: "buyer".to_owned(),
                 seller_pubkey: "seller".to_owned(),
                 reason: "buyer cancelled order".to_owned(),
+                confirm_public_note: false,
             })
         );
     }
@@ -966,6 +976,7 @@ mod tests {
                 }],
                 economics: economics.clone(),
                 reason: "harvest count updated".to_owned(),
+                confirm_public_note: false,
             });
         let invalid_proposal =
             AppPublishPayload::OrderRevisionProposal(AppOrderRevisionProposalPublishPayload {
@@ -981,6 +992,7 @@ mod tests {
                 items: Vec::new(),
                 economics: economics.clone(),
                 reason: " ".to_owned(),
+                confirm_public_note: false,
             });
         let invalid_decision =
             AppPublishPayload::OrderRevisionDecision(AppOrderRevisionDecisionPublishPayload {
@@ -996,6 +1008,7 @@ mod tests {
                 decision: RadrootsOrderRevisionOutcome::Declined {
                     reason: " ".to_owned(),
                 },
+                confirm_public_note: false,
             });
 
         assert_eq!(

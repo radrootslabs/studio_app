@@ -122,6 +122,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 29,
         sql: include_str!("../migrations/0029_order_workflow_validation_receipt_agreement.sql"),
     },
+    Migration {
+        version: 30,
+        sql: include_str!("../migrations/0030_buyer_order_public_note_confirmation.sql"),
+    },
 ];
 
 pub fn latest_schema_version() -> u32 {

@@ -15,12 +15,15 @@ use radroots_events::{
     RadrootsNostrEventPtr,
     contract::RadrootsActorRole,
     farm::RadrootsFarm,
-    ids::{RadrootsAddressableCoordinate, RadrootsOrderRevisionId},
+    ids::{
+        RadrootsAddressableCoordinate, RadrootsListingAddress, RadrootsOrderId,
+        RadrootsOrderRevisionId, RadrootsPublicKey,
+    },
     kinds::KIND_FARM,
     listing::RadrootsListing,
     order::{
         RadrootsOrderEconomics, RadrootsOrderInventoryCommitment, RadrootsOrderItem,
-        RadrootsOrderRequest, RadrootsOrderRevisionOutcome,
+        RadrootsOrderRevisionOutcome,
     },
 };
 use radroots_nostr::prelude::RadrootsNostrKeys;
@@ -249,7 +252,13 @@ pub struct AppSdkTradeProposeRequest {
     pub actor_pubkey: String,
     pub signer_keys: RadrootsNostrKeys,
     pub listing_event: RadrootsNostrEventPtr,
-    pub order: RadrootsOrderRequest,
+    pub order_id: RadrootsOrderId,
+    pub listing_addr: RadrootsListingAddress,
+    pub seller_pubkey: RadrootsPublicKey,
+    pub items: Vec<RadrootsOrderItem>,
+    pub economics: RadrootsOrderEconomics,
+    pub public_note: Option<String>,
+    pub confirm_public_note: bool,
     pub idempotency_key: Option<String>,
 }
 
@@ -268,6 +277,7 @@ pub struct AppSdkTradeDecisionRequest {
     pub signer_keys: RadrootsNostrKeys,
     pub locator: RadrootsTradeLocator,
     pub decision: AppSdkTradeDecision,
+    pub confirm_public_note: bool,
     pub idempotency_key: Option<String>,
 }
 
@@ -280,6 +290,7 @@ pub struct AppSdkTradeRevisionProposalRequest {
     pub items: Vec<RadrootsOrderItem>,
     pub economics: RadrootsOrderEconomics,
     pub reason: String,
+    pub confirm_public_note: bool,
     pub idempotency_key: Option<String>,
 }
 
@@ -290,6 +301,7 @@ pub struct AppSdkTradeRevisionDecisionRequest {
     pub locator: RadrootsTradeLocator,
     pub revision_id: RadrootsOrderRevisionId,
     pub decision: RadrootsOrderRevisionOutcome,
+    pub confirm_public_note: bool,
     pub idempotency_key: Option<String>,
 }
 
@@ -299,6 +311,7 @@ pub struct AppSdkTradeCancellationRequest {
     pub signer_keys: RadrootsNostrKeys,
     pub locator: RadrootsTradeLocator,
     pub reason: String,
+    pub confirm_public_note: bool,
     pub idempotency_key: Option<String>,
 }
 
@@ -1396,8 +1409,13 @@ fn app_trade_relay_resolution_policy() -> RelayResolutionPolicy {
     RelayResolutionPolicy::configured_relays()
 }
 
-fn app_trade_privacy_confirmation() -> PrivacyPreflightConfirmation {
-    PrivacyPreflightConfirmation::new().confirm(ProductSensitivityField::PublicButSensitiveNotes)
+fn app_trade_privacy_confirmation(confirm_public_note: bool) -> PrivacyPreflightConfirmation {
+    if confirm_public_note {
+        PrivacyPreflightConfirmation::new()
+            .confirm(ProductSensitivityField::PublicButSensitiveNotes)
+    } else {
+        PrivacyPreflightConfirmation::new()
+    }
 }
 
 fn run_restore_preflight(
@@ -1541,12 +1559,17 @@ fn trade_propose_with_sdk(
     let mut sdk_request = TradeProposeRequest::new(
         actor,
         request.listing_event,
-        request.order,
+        request.order_id,
+        request.listing_addr,
+        request.seller_pubkey,
+        request.items,
+        request.economics,
         app_trade_relay_resolution_policy(),
         app_trade_publish_mode(),
         app_trade_ack_policy(),
     )
-    .with_privacy_confirmation(app_trade_privacy_confirmation());
+    .with_optional_public_note(request.public_note)
+    .with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note));
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
         sdk_request = sdk_request
             .try_with_idempotency_key(idempotency_key)
@@ -1584,7 +1607,7 @@ fn trade_decision_with_sdk(
                 ack_policy,
                 TradeEvidenceMode::ResyncBeforeMutation,
             )
-            .with_privacy_confirmation(app_trade_privacy_confirmation());
+            .with_privacy_confirmation(app_trade_privacy_confirmation(false));
             if let Some(idempotency_key) = request.idempotency_key.as_deref() {
                 sdk_request = sdk_request
                     .try_with_idempotency_key(idempotency_key)
@@ -1604,7 +1627,7 @@ fn trade_decision_with_sdk(
                 ack_policy,
                 TradeEvidenceMode::ResyncBeforeMutation,
             )
-            .with_privacy_confirmation(app_trade_privacy_confirmation());
+            .with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note));
             if let Some(idempotency_key) = request.idempotency_key.as_deref() {
                 sdk_request = sdk_request
                     .try_with_idempotency_key(idempotency_key)
@@ -1641,7 +1664,7 @@ fn trade_revision_propose_with_sdk(
         app_trade_ack_policy(),
         TradeEvidenceMode::ResyncBeforeMutation,
     )
-    .with_privacy_confirmation(app_trade_privacy_confirmation());
+    .with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note));
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
         sdk_request = sdk_request
             .try_with_idempotency_key(idempotency_key)
@@ -1674,7 +1697,7 @@ fn trade_revision_decide_with_sdk(
         app_trade_ack_policy(),
         TradeEvidenceMode::ResyncBeforeMutation,
     )
-    .with_privacy_confirmation(app_trade_privacy_confirmation());
+    .with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note));
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
         sdk_request = sdk_request
             .try_with_idempotency_key(idempotency_key)
@@ -1711,7 +1734,7 @@ fn trade_cancel_with_sdk(
         app_trade_ack_policy(),
         TradeEvidenceMode::ResyncBeforeMutation,
     )
-    .with_privacy_confirmation(app_trade_privacy_confirmation());
+    .with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note));
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
         sdk_request = sdk_request
             .try_with_idempotency_key(idempotency_key)

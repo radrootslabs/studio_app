@@ -91,6 +91,7 @@ pub struct BuyerOrderLocalEventExport {
     pub buyer_email: String,
     pub buyer_phone: String,
     pub buyer_order_note: String,
+    pub buyer_order_note_public_confirmed: bool,
     pub updated_at: String,
     pub fulfillment_window_id: Option<FulfillmentWindowId>,
     pub fulfillment_window_label: Option<String>,
@@ -382,6 +383,7 @@ impl<'a> AppBuyerRepository<'a> {
                     buyer_email = ?3,
                     buyer_phone = ?4,
                     buyer_order_note = ?5,
+                    buyer_order_note_public_confirmed = ?6,
                     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  where buyer_context_key = ?1",
                 params![
@@ -390,6 +392,7 @@ impl<'a> AppBuyerRepository<'a> {
                     draft.email.trim(),
                     draft.phone.trim(),
                     draft.order_note.trim(),
+                    draft.confirm_public_note,
                 ],
             )
             .map_err(|source| AppSqliteError::Query {
@@ -445,7 +448,8 @@ impl<'a> AppBuyerRepository<'a> {
                         buyer_context_key,
                         buyer_email,
                         buyer_phone,
-                        buyer_order_note
+                        buyer_order_note,
+                        buyer_order_note_public_confirmed
                      ) values (
                         ?1,
                         ?2,
@@ -457,7 +461,8 @@ impl<'a> AppBuyerRepository<'a> {
                         ?6,
                         ?7,
                         ?8,
-                        ?9
+                        ?9,
+                        ?10
                      )",
                     params![
                         order_id.to_string(),
@@ -469,6 +474,7 @@ impl<'a> AppBuyerRepository<'a> {
                         order_review.draft.email.trim(),
                         order_review.draft.phone.trim(),
                         order_review.draft.order_note.trim(),
+                        order_review.draft.confirm_public_note,
                     ],
                 )
                 .map_err(|source| AppSqliteError::Query {
@@ -536,6 +542,7 @@ impl<'a> AppBuyerRepository<'a> {
                      set
                         farm_id = null,
                         buyer_order_note = '',
+                        buyer_order_note_public_confirmed = 0,
                         updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                      where buyer_context_key = ?1",
                     params![context_key.as_str()],
@@ -1069,6 +1076,7 @@ impl<'a> AppBuyerRepository<'a> {
                     o.buyer_email,
                     o.buyer_phone,
                     o.buyer_order_note,
+                    o.buyer_order_note_public_confirmed,
                     o.updated_at,
                     f.display_name,
                     fw.id,
@@ -1092,12 +1100,13 @@ impl<'a> AppBuyerRepository<'a> {
                         row.get::<_, String>(6)?,
                         row.get::<_, String>(7)?,
                         row.get::<_, String>(8)?,
-                        row.get::<_, String>(9)?,
+                        row.get::<_, bool>(9)?,
                         row.get::<_, String>(10)?,
-                        row.get::<_, Option<String>>(11)?,
+                        row.get::<_, String>(11)?,
                         row.get::<_, Option<String>>(12)?,
                         row.get::<_, Option<String>>(13)?,
                         row.get::<_, Option<String>>(14)?,
+                        row.get::<_, Option<String>>(15)?,
                     ))
                 },
             )
@@ -1119,6 +1128,7 @@ impl<'a> AppBuyerRepository<'a> {
             buyer_email,
             buyer_phone,
             buyer_order_note,
+            buyer_order_note_public_confirmed,
             updated_at,
             farm_display_name,
             fulfillment_window_id,
@@ -1141,6 +1151,7 @@ impl<'a> AppBuyerRepository<'a> {
             buyer_email,
             buyer_phone,
             buyer_order_note,
+            buyer_order_note_public_confirmed,
             updated_at,
             fulfillment_window_id: parse_optional_typed_id(
                 "orders.fulfillment_window_id",
@@ -1566,7 +1577,8 @@ impl<'a> AppBuyerRepository<'a> {
                     buyer_name,
                     buyer_email,
                     buyer_phone,
-                    buyer_order_note
+                    buyer_order_note,
+                    buyer_order_note_public_confirmed
                  from buyer_carts
                  where buyer_context_key = ?1
                  limit 1",
@@ -1578,6 +1590,7 @@ impl<'a> AppBuyerRepository<'a> {
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
+                        row.get::<_, bool>(5)?,
                     ))
                 },
             )
@@ -1587,13 +1600,21 @@ impl<'a> AppBuyerRepository<'a> {
                 source,
             })?
             .map(
-                |(farm_id, buyer_name, buyer_email, buyer_phone, buyer_order_note)| {
+                |(
+                    farm_id,
+                    buyer_name,
+                    buyer_email,
+                    buyer_phone,
+                    buyer_order_note,
+                    buyer_order_note_public_confirmed,
+                )| {
                     Ok(BuyerCartHeader {
                         farm_id: parse_optional_typed_id("buyer_carts.farm_id", farm_id)?,
                         buyer_name,
                         buyer_email,
                         buyer_phone,
                         buyer_order_note,
+                        buyer_order_note_public_confirmed,
                     })
                 },
             )
@@ -2204,6 +2225,7 @@ struct BuyerCartHeader {
     buyer_email: String,
     buyer_phone: String,
     buyer_order_note: String,
+    buyer_order_note_public_confirmed: bool,
 }
 
 impl BuyerCartHeader {
@@ -2213,6 +2235,7 @@ impl BuyerCartHeader {
             email: self.buyer_email,
             phone: self.buyer_phone,
             order_note: self.buyer_order_note,
+            confirm_public_note: self.buyer_order_note_public_confirmed,
         }
     }
 }
@@ -2650,6 +2673,9 @@ fn buyer_order_review_disabled_reason(
     if draft.email.trim().is_empty() {
         return Some(BuyerOrderReviewDisabledReason::MissingEmail);
     }
+    if !draft.order_note.trim().is_empty() && !draft.confirm_public_note {
+        return Some(BuyerOrderReviewDisabledReason::PublicNoteConfirmationRequired);
+    }
     if matches!(context, BuyerContext::Guest) {
         return Some(BuyerOrderReviewDisabledReason::AccountRequired);
     }
@@ -2664,6 +2690,9 @@ fn buyer_order_review_disabled_error(reason: BuyerOrderReviewDisabledReason) -> 
         }
         BuyerOrderReviewDisabledReason::MissingName => "buyer order review buyer name is missing",
         BuyerOrderReviewDisabledReason::MissingEmail => "buyer order review buyer email is missing",
+        BuyerOrderReviewDisabledReason::PublicNoteConfirmationRequired => {
+            "buyer order review public note confirmation is required"
+        }
         BuyerOrderReviewDisabledReason::AccountRequired => {
             "buyer order review requires a selected account"
         }
@@ -2944,8 +2973,9 @@ mod tests {
     use std::collections::BTreeSet;
 
     use radroots_studio_app_view::{
-        BuyerContext, BuyerOrderReviewDisabledReason, BuyerOrderStatus, FarmId, FarmOrderMethod,
-        FulfillmentWindowId, OrderId, PickupLocationId, ProductId, TradeAgreementStatus,
+        BuyerCartLineProjection, BuyerCartProjection, BuyerContext, BuyerOrderReviewDisabledReason,
+        BuyerOrderReviewDraft, BuyerOrderStatus, FarmId, FarmOrderMethod, FulfillmentWindowId,
+        OrderId, PickupLocationId, ProductId, ProductPricePresentation, TradeAgreementStatus,
         TradeInventoryStatus, TradeRevisionStatus, TradeWorkflowSource,
     };
     use rusqlite::{Connection, params};
@@ -2960,6 +2990,60 @@ mod tests {
 
     const LINKED_BUYER_PUBKEY: &str =
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn buyer_order_review_requires_public_note_confirmation() {
+        let cart = BuyerCartProjection {
+            farm_id: Some(FarmId::new()),
+            farm_display_name: Some("Willow Farm".to_owned()),
+            lines: vec![BuyerCartLineProjection {
+                product_id: ProductId::new(),
+                farm_id: FarmId::new(),
+                farm_display_name: "Willow Farm".to_owned(),
+                title: "Salad mix".to_owned(),
+                quantity: 1,
+                unit_price: ProductPricePresentation {
+                    amount_minor_units: 650,
+                    currency_code: "USD".to_owned(),
+                    unit_label: "bag".to_owned(),
+                },
+                line_total_minor_units: 650,
+                fulfillment_summary: "Friday pickup".to_owned(),
+            }],
+            subtotal_minor_units: Some(650),
+            currency_code: Some("USD".to_owned()),
+            replace_confirmation: None,
+        };
+        let draft = BuyerOrderReviewDraft {
+            name: "Casey Buyer".to_owned(),
+            email: "casey@example.com".to_owned(),
+            phone: String::new(),
+            order_note: "Leave by the cooler".to_owned(),
+            confirm_public_note: false,
+        };
+
+        assert_eq!(
+            super::buyer_order_review_disabled_reason(
+                &BuyerContext::account("acct_buyer"),
+                &cart,
+                Some(&"Friday pickup".to_owned()),
+                &draft,
+            ),
+            Some(BuyerOrderReviewDisabledReason::PublicNoteConfirmationRequired)
+        );
+        assert_eq!(
+            super::buyer_order_review_disabled_reason(
+                &BuyerContext::account("acct_buyer"),
+                &cart,
+                Some(&"Friday pickup".to_owned()),
+                &BuyerOrderReviewDraft {
+                    confirm_public_note: true,
+                    ..draft
+                },
+            ),
+            None
+        );
+    }
 
     #[test]
     fn selected_buyer_order_scope_uses_only_valid_context_keys() {
@@ -3265,6 +3349,7 @@ mod tests {
                     email: "casey@example.com".to_owned(),
                     phone: "555-0101".to_owned(),
                     order_note: "Leave by the cooler".to_owned(),
+                    confirm_public_note: true,
                 },
             )
             .expect("buyer order review draft should save");
@@ -3395,6 +3480,7 @@ mod tests {
                     email: "casey@example.com".to_owned(),
                     phone: String::new(),
                     order_note: String::new(),
+                    confirm_public_note: false,
                 },
             )
             .expect("buyer order review draft should save");
@@ -3521,6 +3607,7 @@ mod tests {
                     email: "casey@example.com".to_owned(),
                     phone: String::new(),
                     order_note: String::new(),
+                    confirm_public_note: false,
                 },
             )
             .expect("buyer order review draft should save");
@@ -3635,6 +3722,7 @@ mod tests {
                     email: "casey@example.com".to_owned(),
                     phone: String::new(),
                     order_note: String::new(),
+                    confirm_public_note: false,
                 },
             )
             .expect("buyer order review draft should save");

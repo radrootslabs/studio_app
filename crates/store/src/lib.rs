@@ -903,6 +903,11 @@ mod tests {
         assert!(column_exists(connection, "buyer_carts", "buyer_order_note"));
         assert!(column_exists(
             connection,
+            "buyer_carts",
+            "buyer_order_note_public_confirmed"
+        ));
+        assert!(column_exists(
+            connection,
             "buyer_cart_lines",
             "listing_bin_id"
         ));
@@ -931,6 +936,11 @@ mod tests {
         assert!(column_exists(connection, "orders", "buyer_email"));
         assert!(column_exists(connection, "orders", "buyer_phone"));
         assert!(column_exists(connection, "orders", "buyer_order_note"));
+        assert!(column_exists(
+            connection,
+            "orders",
+            "buyer_order_note_public_confirmed"
+        ));
         assert!(column_exists(
             connection,
             "reminder_schedules",
