@@ -12,7 +12,7 @@ use std::{
 
 use radroots_authority::{RadrootsActorContext, RadrootsLocalEventSigner};
 use radroots_events::{
-    RadrootsNostrEvent, RadrootsNostrEventPtr,
+    RadrootsNostrEventPtr,
     contract::RadrootsActorRole,
     farm::RadrootsFarm,
     ids::{RadrootsAddressableCoordinate, RadrootsOrderRevisionId},
@@ -36,7 +36,7 @@ use radroots_sdk::{
     TRADE_DECISION_OPERATION_KIND, TRADE_REVISION_DECISION_OPERATION_KIND,
     TRADE_REVISION_PROPOSAL_OPERATION_KIND, TRADE_SUBMIT_OPERATION_KIND, TradeAcceptRequest,
     TradeCancelRequest, TradeCancellationPlan, TradeCancellationReceipt, TradeDecisionPlan,
-    TradeDecisionReceipt, TradeDeclineRequest, TradeEvidenceIngestRequest, TradeMutationOutcome,
+    TradeDecisionReceipt, TradeDeclineRequest, TradeEvidenceMode, TradeMutationOutcome,
     TradeProposeRequest, TradeRevisionDecisionPlan, TradeRevisionDecisionReceipt,
     TradeRevisionDecisionRequest, TradeRevisionProposalPlan, TradeRevisionProposalReceipt,
     TradeRevisionProposalRequest, TradeSubmitPlan, TradeSubmitReceipt,
@@ -266,7 +266,6 @@ pub struct AppSdkTradeDecisionRequest {
     pub actor_account_id: String,
     pub actor_pubkey: String,
     pub signer_keys: RadrootsNostrKeys,
-    pub evidence_events: Vec<RadrootsNostrEvent>,
     pub locator: RadrootsTradeLocator,
     pub decision: AppSdkTradeDecision,
     pub idempotency_key: Option<String>,
@@ -276,7 +275,6 @@ pub struct AppSdkTradeRevisionProposalRequest {
     pub actor_account_id: String,
     pub actor_pubkey: String,
     pub signer_keys: RadrootsNostrKeys,
-    pub evidence_events: Vec<RadrootsNostrEvent>,
     pub locator: RadrootsTradeLocator,
     pub revision_id: RadrootsOrderRevisionId,
     pub items: Vec<RadrootsOrderItem>,
@@ -289,7 +287,6 @@ pub struct AppSdkTradeRevisionDecisionRequest {
     pub actor_account_id: String,
     pub actor_pubkey: String,
     pub signer_keys: RadrootsNostrKeys,
-    pub evidence_events: Vec<RadrootsNostrEvent>,
     pub locator: RadrootsTradeLocator,
     pub revision_id: RadrootsOrderRevisionId,
     pub decision: RadrootsOrderRevisionOutcome,
@@ -300,7 +297,6 @@ pub struct AppSdkTradeCancellationRequest {
     pub actor_account_id: String,
     pub actor_pubkey: String,
     pub signer_keys: RadrootsNostrKeys,
-    pub evidence_events: Vec<RadrootsNostrEvent>,
     pub locator: RadrootsTradeLocator,
     pub reason: String,
     pub idempotency_key: Option<String>,
@@ -1567,14 +1563,12 @@ fn trade_decision_with_sdk(
     config: &AppSdkConfig,
     request: AppSdkTradeDecisionRequest,
 ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
-    let evidence_events = request.evidence_events.clone();
     let actor = sdk_actor_context(
         request.actor_pubkey.as_str(),
         request.actor_account_id.as_str(),
         RadrootsActorRole::Seller,
     )?;
     let sdk = runtime.block_on(build_sdk_runtime_with_signer(config, request.signer_keys))?;
-    ingest_trade_evidence_events(runtime, &sdk, evidence_events)?;
     let publish_mode = app_trade_publish_mode();
     let ack_policy = app_trade_ack_policy();
     let outcome = match request.decision {
@@ -1588,6 +1582,7 @@ fn trade_decision_with_sdk(
                 app_trade_relay_resolution_policy(),
                 publish_mode,
                 ack_policy,
+                TradeEvidenceMode::ResyncBeforeMutation,
             )
             .with_privacy_confirmation(app_trade_privacy_confirmation());
             if let Some(idempotency_key) = request.idempotency_key.as_deref() {
@@ -1607,6 +1602,7 @@ fn trade_decision_with_sdk(
                 app_trade_relay_resolution_policy(),
                 publish_mode,
                 ack_policy,
+                TradeEvidenceMode::ResyncBeforeMutation,
             )
             .with_privacy_confirmation(app_trade_privacy_confirmation());
             if let Some(idempotency_key) = request.idempotency_key.as_deref() {
@@ -1627,14 +1623,12 @@ fn trade_revision_propose_with_sdk(
     config: &AppSdkConfig,
     request: AppSdkTradeRevisionProposalRequest,
 ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
-    let evidence_events = request.evidence_events.clone();
     let actor = sdk_actor_context(
         request.actor_pubkey.as_str(),
         request.actor_account_id.as_str(),
         RadrootsActorRole::Seller,
     )?;
     let sdk = runtime.block_on(build_sdk_runtime_with_signer(config, request.signer_keys))?;
-    ingest_trade_evidence_events(runtime, &sdk, evidence_events)?;
     let mut sdk_request = TradeRevisionProposalRequest::new(
         actor,
         request.locator,
@@ -1645,6 +1639,7 @@ fn trade_revision_propose_with_sdk(
         app_trade_relay_resolution_policy(),
         app_trade_publish_mode(),
         app_trade_ack_policy(),
+        TradeEvidenceMode::ResyncBeforeMutation,
     )
     .with_privacy_confirmation(app_trade_privacy_confirmation());
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
@@ -1663,14 +1658,12 @@ fn trade_revision_decide_with_sdk(
     config: &AppSdkConfig,
     request: AppSdkTradeRevisionDecisionRequest,
 ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
-    let evidence_events = request.evidence_events.clone();
     let actor = sdk_actor_context(
         request.actor_pubkey.as_str(),
         request.actor_account_id.as_str(),
         RadrootsActorRole::Buyer,
     )?;
     let sdk = runtime.block_on(build_sdk_runtime_with_signer(config, request.signer_keys))?;
-    ingest_trade_evidence_events(runtime, &sdk, evidence_events)?;
     let mut sdk_request = TradeRevisionDecisionRequest::new(
         actor,
         request.locator,
@@ -1679,6 +1672,7 @@ fn trade_revision_decide_with_sdk(
         app_trade_relay_resolution_policy(),
         app_trade_publish_mode(),
         app_trade_ack_policy(),
+        TradeEvidenceMode::ResyncBeforeMutation,
     )
     .with_privacy_confirmation(app_trade_privacy_confirmation());
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
@@ -1702,14 +1696,12 @@ fn trade_cancel_with_sdk(
     config: &AppSdkConfig,
     request: AppSdkTradeCancellationRequest,
 ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
-    let evidence_events = request.evidence_events.clone();
     let actor = sdk_actor_context(
         request.actor_pubkey.as_str(),
         request.actor_account_id.as_str(),
         RadrootsActorRole::Buyer,
     )?;
     let sdk = runtime.block_on(build_sdk_runtime_with_signer(config, request.signer_keys))?;
-    ingest_trade_evidence_events(runtime, &sdk, evidence_events)?;
     let mut sdk_request = TradeCancelRequest::new(
         actor,
         request.locator,
@@ -1717,6 +1709,7 @@ fn trade_cancel_with_sdk(
         app_trade_relay_resolution_policy(),
         app_trade_publish_mode(),
         app_trade_ack_policy(),
+        TradeEvidenceMode::ResyncBeforeMutation,
     )
     .with_privacy_confirmation(app_trade_privacy_confirmation());
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
@@ -1728,23 +1721,6 @@ fn trade_cancel_with_sdk(
         .block_on(sdk.trades().buyer().cancel_trade(sdk_request))
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     app_sdk_trade_cancellation_receipt(outcome, request.actor_pubkey)
-}
-
-fn ingest_trade_evidence_events(
-    runtime: &tokio::runtime::Runtime,
-    sdk: &RadrootsClient,
-    evidence_events: Vec<RadrootsNostrEvent>,
-) -> Result<(), AppSdkRuntimeIssue> {
-    runtime
-        .block_on(async {
-            for event in evidence_events {
-                sdk.trades()
-                    .ingest_evidence(TradeEvidenceIngestRequest::new(event))
-                    .await?;
-            }
-            Ok::<(), RadrootsSdkError>(())
-        })
-        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))
 }
 
 fn sdk_actor_context(

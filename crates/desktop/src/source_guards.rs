@@ -1150,6 +1150,18 @@ const STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS: &[SdkBoundaryForbiddenPattern] = &
         reason: "app production sources must use AppSdkRuntime DVM methods instead of removed SDK validation handles",
     },
     SdkBoundaryForbiddenPattern {
+        pattern: "TradeEvidenceIngestRequest",
+        reason: "app production sources must use SDK mutation evidence modes instead of raw trade evidence ingestion",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: ".ingest_evidence(",
+        reason: "app production sources must use SDK mutation evidence modes instead of raw trade evidence ingestion",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "accept_trade_with_fetch_adapter",
+        reason: "app production sources must not inject relay fetch adapters around SDK mutation workflows",
+    },
+    SdkBoundaryForbiddenPattern {
         pattern: "SdkTransportMode::RelayDirect",
         reason: "app production sources must not configure direct relay publish transport",
     },
@@ -1639,6 +1651,30 @@ fn strict_sdk_boundary_scanner_rejects_unexcepted_new_production_paths() {
         status_findings
             .iter()
             .any(|finding| finding.pattern == "status_client(")
+    );
+    let evidence_findings = unexcepted_sdk_boundary_patterns(
+        "crates/runtime/src/sdk.rs",
+        "fn mutate() { sdk.trades().ingest_evidence(TradeEvidenceIngestRequest::new(event)); }",
+    );
+    assert_eq!(evidence_findings.len(), 2);
+    assert!(
+        evidence_findings
+            .iter()
+            .any(|finding| finding.pattern == "TradeEvidenceIngestRequest")
+    );
+    assert!(
+        evidence_findings
+            .iter()
+            .any(|finding| finding.pattern == ".ingest_evidence(")
+    );
+    let adapter_hook_findings = unexcepted_sdk_boundary_patterns(
+        "crates/runtime/src/sdk.rs",
+        "fn mutate() { sdk.trades().seller().accept_trade_with_fetch_adapter(request, adapter); }",
+    );
+    assert_eq!(adapter_hook_findings.len(), 1);
+    assert_eq!(
+        adapter_hook_findings[0].pattern,
+        "accept_trade_with_fetch_adapter"
     );
     let default_term_findings = unexcepted_sdk_boundary_patterns(
         "crates/desktop/src/runtime.rs",

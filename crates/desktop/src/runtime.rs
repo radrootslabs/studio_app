@@ -247,7 +247,6 @@ struct ResolvedAppOrderRevisionDecisionEvidence {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ResolvedAppOrderLifecycleEvidence {
-    evidence_events: Vec<SdkRadrootsNostrEvent>,
     request_event_id: String,
     status: RadrootsTradeWorkflowState,
     agreement_event_id: Option<String>,
@@ -4830,7 +4829,6 @@ impl DesktopAppRuntimeState {
         source_kind: AppSdkWorkflowReceiptSourceKind,
         source_record_id: &str,
     ) -> Result<(), AppSqliteError> {
-        let evidence_events = self.sdk_trade_request_evidence_events(payload.app_order_id)?;
         let operation_kind = TRADE_DECISION_OPERATION_KIND;
         let actor_pubkey = self
             .local_signing_identity_for_publish_payload(&AppPublishPayload::OrderDecision(
@@ -4842,7 +4840,6 @@ impl DesktopAppRuntimeState {
                     actor_account_id: payload.context.account_id.clone(),
                     actor_pubkey: actor_pubkey.clone(),
                     signer_keys: identity.into_keys(),
-                    evidence_events: evidence_events.clone(),
                     locator: trade_locator_from_decision_payload(payload)?,
                     decision: trade_decision_from_publish_payload(payload)?,
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
@@ -4875,7 +4872,6 @@ impl DesktopAppRuntimeState {
         source_kind: AppSdkWorkflowReceiptSourceKind,
         source_record_id: &str,
     ) -> Result<(), AppSqliteError> {
-        let evidence_events = self.sdk_trade_lifecycle_evidence_events(payload.app_order_id)?;
         let operation_kind = TRADE_REVISION_PROPOSAL_OPERATION_KIND;
         let actor_pubkey = self
             .local_signing_identity_for_publish_payload(&AppPublishPayload::OrderRevisionProposal(
@@ -4887,7 +4883,6 @@ impl DesktopAppRuntimeState {
                     actor_account_id: payload.context.account_id.clone(),
                     actor_pubkey: actor_pubkey.clone(),
                     signer_keys: identity.into_keys(),
-                    evidence_events: evidence_events.clone(),
                     locator: trade_locator_from_revision_proposal_payload(payload)?,
                     revision_id: publish_revision_id(payload.revision_id.as_str())?,
                     items: payload.items.clone(),
@@ -4923,7 +4918,6 @@ impl DesktopAppRuntimeState {
         source_kind: AppSdkWorkflowReceiptSourceKind,
         source_record_id: &str,
     ) -> Result<(), AppSqliteError> {
-        let evidence_events = self.sdk_trade_lifecycle_evidence_events(payload.app_order_id)?;
         let operation_kind = TRADE_REVISION_DECISION_OPERATION_KIND;
         let actor_pubkey = self
             .local_signing_identity_for_publish_payload(&AppPublishPayload::OrderRevisionDecision(
@@ -4935,7 +4929,6 @@ impl DesktopAppRuntimeState {
                     actor_account_id: payload.context.account_id.clone(),
                     actor_pubkey: actor_pubkey.clone(),
                     signer_keys: identity.into_keys(),
-                    evidence_events: evidence_events.clone(),
                     locator: trade_locator_from_revision_decision_payload(payload)?,
                     revision_id: publish_revision_id(payload.revision_id.as_str())?,
                     decision: payload.decision.clone(),
@@ -4969,7 +4962,6 @@ impl DesktopAppRuntimeState {
         source_kind: AppSdkWorkflowReceiptSourceKind,
         source_record_id: &str,
     ) -> Result<(), AppSqliteError> {
-        let evidence_events = self.sdk_trade_lifecycle_evidence_events(payload.app_order_id)?;
         let operation_kind = TRADE_CANCELLATION_OPERATION_KIND;
         let actor_pubkey = self
             .local_signing_identity_for_publish_payload(&AppPublishPayload::OrderCancellation(
@@ -4981,7 +4973,6 @@ impl DesktopAppRuntimeState {
                     actor_account_id: payload.context.account_id.clone(),
                     actor_pubkey: actor_pubkey.clone(),
                     signer_keys: identity.into_keys(),
-                    evidence_events: evidence_events.clone(),
                     locator: trade_locator_from_cancellation_payload(payload)?,
                     reason: payload.reason.clone(),
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
@@ -5578,7 +5569,6 @@ impl DesktopAppRuntimeState {
                 .then_with(|| left.id.cmp(&right.id))
         });
 
-        let mut evidence_events = vec![request.request_event.clone()];
         let mut buckets = AppActiveOrderEvidenceBuckets::default();
         let request_event_id =
             active_order_event_id(request.request_event_id.as_str(), "request_event_id")?;
@@ -5597,7 +5587,6 @@ impl DesktopAppRuntimeState {
             {
                 continue;
             }
-            evidence_events.push(event.clone());
             let event_id = active_order_event_id(event.id.as_str(), "event_id")?;
             let author_pubkey = active_order_pubkey(event.author.as_str(), "author_pubkey")?;
             match event.kind {
@@ -5713,7 +5702,6 @@ impl DesktopAppRuntimeState {
             })
             .transpose()?;
         Ok(ResolvedAppOrderLifecycleEvidence {
-            evidence_events,
             request_event_id: request.request_event_id.clone(),
             status: projection.status,
             agreement_event_id: projection
@@ -5743,23 +5731,6 @@ impl DesktopAppRuntimeState {
                 .cancellation_event_id
                 .map(|event_id| event_id.to_string()),
         })
-    }
-
-    fn sdk_trade_request_evidence_events(
-        &self,
-        order_id: OrderId,
-    ) -> Result<Vec<SdkRadrootsNostrEvent>, AppSqliteError> {
-        let request = self.resolve_seller_order_request_evidence(order_id)?;
-        Ok(vec![request.request_event])
-    }
-
-    fn sdk_trade_lifecycle_evidence_events(
-        &self,
-        order_id: OrderId,
-    ) -> Result<Vec<SdkRadrootsNostrEvent>, AppSqliteError> {
-        let request = self.resolve_seller_order_request_evidence(order_id)?;
-        let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
-        Ok(lifecycle.evidence_events)
     }
 
     fn collect_order_lifecycle_signed_events(
@@ -9990,6 +9961,10 @@ mod tests {
         fn event_count(&self) -> usize {
             self.events.lock().expect("relay events lock").len()
         }
+
+        fn seed_event(&self, event: serde_json::Value) {
+            self.events.lock().expect("relay events lock").push(event);
+        }
     }
 
     fn relay_event_matches_filters(
@@ -10100,6 +10075,47 @@ mod tests {
                 "test event publish should be acknowledged"
             );
         });
+    }
+
+    fn seed_relay_with_sdk_event(relay: &ThreadedAckRelay, event: &SdkRadrootsNostrEvent) {
+        relay.seed_event(json!({
+            "id": event.id,
+            "pubkey": event.author,
+            "created_at": event.created_at,
+            "kind": event.kind,
+            "tags": event.tags,
+            "content": event.content,
+            "sig": event.sig,
+        }));
+    }
+
+    fn seed_relay_with_order_request(
+        runtime: &DesktopAppRuntime,
+        relay: &ThreadedAckRelay,
+        order_id: OrderId,
+    ) {
+        let request_event = runtime
+            .lock_state()
+            .resolve_seller_order_request_evidence(order_id)
+            .expect("order request evidence should resolve")
+            .request_event;
+        seed_relay_with_sdk_event(relay, &request_event);
+    }
+
+    fn seed_relay_with_shared_event_id(
+        relay: &ThreadedAckRelay,
+        paths: &AppDesktopRuntimePaths,
+        event_id: &str,
+    ) {
+        let event = shared_local_event_records(paths)
+            .into_iter()
+            .find(|record| record.event_id.as_deref() == Some(event_id))
+            .and_then(|record| {
+                signed_event_from_local_record(&record)
+                    .expect("shared signed event record should decode")
+            })
+            .expect("shared signed event should exist");
+        seed_relay_with_sdk_event(relay, &event);
     }
 
     impl Drop for ThreadedAckRelay {
@@ -15476,6 +15492,8 @@ mod tests {
         let (runtime, paths, order_id, _product_id, seller_pubkey, _buyer_pubkey) =
             seller_order_decision_sdk_runtime("seller_order_accept_publish", 6, 2);
         install_direct_relay_sync_transport(&runtime, &relay);
+        restore_sdk_runtime_with_relays(&runtime, &paths, vec![relay.url().to_owned()]);
+        seed_relay_with_order_request(&runtime, &relay, order_id);
 
         assert!(
             runtime
@@ -15484,7 +15502,7 @@ mod tests {
         );
 
         assert_eq!(persisted_order_status(&runtime, order_id), "needs_action");
-        assert_eq!(relay.event_count(), 0);
+        assert_eq!(relay.event_count(), 1);
         assert!(!shared_local_event_records(&paths).iter().any(|record| {
             record.family == LocalRecordFamily::SignedEvent
                 && record.event_kind == Some(3423)
@@ -15505,6 +15523,8 @@ mod tests {
         let (runtime, paths, order_id, _product_id, seller_pubkey, _buyer_pubkey) =
             seller_order_decision_sdk_runtime("seller_order_decline_publish", 6, 2);
         install_direct_relay_sync_transport(&runtime, &relay);
+        restore_sdk_runtime_with_relays(&runtime, &paths, vec![relay.url().to_owned()]);
+        seed_relay_with_order_request(&runtime, &relay, order_id);
 
         assert!(
             runtime
@@ -15513,7 +15533,7 @@ mod tests {
         );
 
         assert_eq!(persisted_order_status(&runtime, order_id), "needs_action");
-        assert_eq!(relay.event_count(), 0);
+        assert_eq!(relay.event_count(), 1);
         assert!(!shared_local_event_records(&paths).iter().any(|record| {
             record.family == LocalRecordFamily::SignedEvent
                 && record.event_kind == Some(3423)
@@ -16151,6 +16171,11 @@ mod tests {
         let relay = ThreadedAckRelay::spawn();
         let fixture = linked_buyer_request_runtime("linked_buyer_order_cancel");
         install_direct_relay_sync_transport(&fixture.runtime, &relay);
+        restore_sdk_runtime_with_relays(
+            &fixture.runtime,
+            &fixture.paths,
+            vec![relay.url().to_owned()],
+        );
         fixture
             .runtime
             .refresh_shared_local_events()
@@ -16161,6 +16186,7 @@ mod tests {
                 .open_personal_order_detail(fixture.order_id)
                 .expect("linked buyer order detail should open")
         );
+        seed_relay_with_shared_event_id(&relay, &fixture.paths, fixture.request_event_id.as_str());
 
         assert!(
             fixture
@@ -16173,7 +16199,7 @@ mod tests {
             persisted_order_status(&fixture.runtime, fixture.order_id),
             "needs_action"
         );
-        assert_eq!(relay.event_count(), 0);
+        assert_eq!(relay.event_count(), 1);
         let cancellation_events =
             shared_order_events_by_kind(&fixture.paths, 3432, fixture.buyer_pubkey.as_str());
         assert!(cancellation_events.is_empty());
@@ -16314,7 +16340,7 @@ mod tests {
         let relay = ThreadedAckRelay::spawn();
         let fixture = linked_buyer_request_runtime("linked_buyer_order_revision");
         let proposal_key = "linked-buyer-order-revision-proposal";
-        let _proposal_event_id = append_signed_order_revision_proposal_record_with_prev(
+        let proposal_event_id = append_signed_order_revision_proposal_record_with_prev(
             &fixture.paths,
             fixture.trade_order_id.as_str(),
             proposal_key,
@@ -16326,6 +16352,11 @@ mod tests {
         );
         let revision_id = format!("revision-{proposal_key}");
         install_direct_relay_sync_transport(&fixture.runtime, &relay);
+        restore_sdk_runtime_with_relays(
+            &fixture.runtime,
+            &fixture.paths,
+            vec![relay.url().to_owned()],
+        );
         fixture
             .runtime
             .refresh_shared_local_events()
@@ -16336,6 +16367,8 @@ mod tests {
                 .open_personal_order_detail(fixture.order_id)
                 .expect("linked buyer order detail should open")
         );
+        seed_relay_with_shared_event_id(&relay, &fixture.paths, fixture.request_event_id.as_str());
+        seed_relay_with_shared_event_id(&relay, &fixture.paths, proposal_event_id.as_str());
 
         assert!(
             fixture
@@ -16344,7 +16377,7 @@ mod tests {
                 .expect("linked buyer revision decision should publish")
         );
 
-        assert_eq!(relay.event_count(), 0);
+        assert_eq!(relay.event_count(), 2);
         let revision_decision_events =
             shared_order_events_by_kind(&fixture.paths, 3425, fixture.buyer_pubkey.as_str());
         assert!(revision_decision_events.is_empty());
@@ -19351,9 +19384,16 @@ mod tests {
     }
 
     fn restore_sdk_runtime(runtime: &DesktopAppRuntime, paths: &AppDesktopRuntimePaths) {
-        let sdk_runtime =
-            super::start_desktop_sdk_runtime(paths, vec!["ws://127.0.0.1:8080".to_owned()])
-                .expect("sdk runtime should restart");
+        restore_sdk_runtime_with_relays(runtime, paths, vec!["ws://127.0.0.1:8080".to_owned()]);
+    }
+
+    fn restore_sdk_runtime_with_relays(
+        runtime: &DesktopAppRuntime,
+        paths: &AppDesktopRuntimePaths,
+        relay_urls: Vec<String>,
+    ) {
+        let sdk_runtime = super::start_desktop_sdk_runtime(paths, relay_urls)
+            .expect("sdk runtime should restart");
         {
             let mut handle = runtime.sdk_runtime.lock().expect("sdk runtime lock");
             *handle = Some(sdk_runtime);
