@@ -1609,6 +1609,133 @@ fn app_sdk_trade_propose_request_stays_product_shaped() {
 }
 
 #[test]
+fn app_sdk_trade_mutation_requests_stay_locator_and_resync_owned() {
+    let source = read_source_path(app_root().join("crates/runtime/src/sdk.rs").as_path());
+
+    for request_struct in [
+        "AppSdkTradeProposeRequest",
+        "AppSdkTradeDecisionRequest",
+        "AppSdkTradeRevisionProposalRequest",
+        "AppSdkTradeRevisionDecisionRequest",
+        "AppSdkTradeCancellationRequest",
+    ] {
+        let request = struct_block(source.as_str(), request_struct);
+        assert!(
+            !request.contains("evidence_events"),
+            "{request_struct} must not expose caller-owned evidence events"
+        );
+    }
+
+    for request_struct in [
+        "AppSdkTradeDecisionRequest",
+        "AppSdkTradeRevisionProposalRequest",
+        "AppSdkTradeRevisionDecisionRequest",
+        "AppSdkTradeCancellationRequest",
+    ] {
+        let request = struct_block(source.as_str(), request_struct);
+        assert!(
+            request.contains("pub locator: RadrootsTradeLocator"),
+            "{request_struct} must require a root-capable SDK trade locator"
+        );
+    }
+
+    assert!(source.contains("sdk.trades().buyer().propose_trade(sdk_request)"));
+    for (label, start, end, required_count) in [
+        (
+            "trade decision",
+            "fn trade_decision_with_sdk(",
+            "fn trade_revision_propose_with_sdk(",
+            2usize,
+        ),
+        (
+            "trade revision proposal",
+            "fn trade_revision_propose_with_sdk(",
+            "fn trade_revision_decide_with_sdk(",
+            1usize,
+        ),
+        (
+            "trade revision decision",
+            "fn trade_revision_decide_with_sdk(",
+            "fn trade_cancel_with_sdk(",
+            1usize,
+        ),
+        (
+            "trade cancellation",
+            "fn trade_cancel_with_sdk(",
+            "fn sdk_actor_context(",
+            1usize,
+        ),
+    ] {
+        let segment = source_segment(source.as_str(), start, end);
+        assert!(
+            segment
+                .matches("TradeEvidenceMode::ResyncBeforeMutation")
+                .count()
+                >= required_count,
+            "{label} must use SDK resync evidence mode before mutation"
+        );
+        assert!(
+            !segment.contains("TradeEvidenceMode::LocalOnly"),
+            "{label} must not use local-only evidence for app mutation authority"
+        );
+    }
+}
+
+#[test]
+fn app_store_active_order_projection_is_root_aware_and_non_authoritative() {
+    let source = read_source_path(app_root().join("crates/store/src/interop.rs").as_path());
+    let project_active_order = source_segment(
+        source.as_str(),
+        "fn project_active_order(",
+        "fn upsert_order_request(",
+    );
+    assert!(project_active_order.contains("current_evidence.root_event_id()"));
+    assert!(project_active_order.contains("root_event_id.as_str()"));
+    assert!(!project_active_order.contains("current_evidence.order_id()"));
+
+    let load_active_order_evidence = source_segment(
+        source.as_str(),
+        "fn load_active_order_evidence(",
+        "fn replace_order_request_lines(",
+    );
+    assert!(load_active_order_evidence.contains("record.root_event_id() == root_event_id"));
+    assert!(!load_active_order_evidence.contains("record.order_id()"));
+
+    let active_evidence_identity = source_segment(
+        source.as_str(),
+        "fn root_event_id(&self)",
+        "struct ActiveOrderEvidenceBuckets",
+    );
+    assert!(active_evidence_identity.contains("Self::Request(record) => record.event_id.as_str()"));
+    assert!(
+        active_evidence_identity
+            .contains("Self::Decision(record) => record.root_event_id.as_str()")
+    );
+
+    let projected_order_id = source_segment(
+        source.as_str(),
+        "pub fn projected_order_id_from_trade_request(",
+        "fn active_order_revision_status(",
+    );
+    assert!(projected_order_id.contains("root_event_id: &str"));
+    assert!(projected_order_id.contains("radroots-cli-order-root"));
+
+    for forbidden in [
+        "TradeAcceptRequest::new",
+        "TradeDeclineRequest::new",
+        "TradeRevisionProposalRequest::new",
+        "TradeRevisionDecisionRequest::new",
+        "TradeCancelRequest::new",
+        "TradeEvidenceMode::",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "store projection must not become SDK mutation authority through `{forbidden}`"
+        );
+    }
+}
+
+#[test]
 fn app_production_sources_do_not_suppress_dead_code() {
     let forbidden = ["#[allow(", "dead_code", ")]"].concat();
 
@@ -2393,6 +2520,17 @@ fn struct_block<'source>(source: &'source str, struct_name: &str) -> &'source st
         }
     }
     panic!("struct `{struct_name}` body is not closed");
+}
+
+fn source_segment<'source>(source: &'source str, start: &str, end: &str) -> &'source str {
+    let start_index = source
+        .find(start)
+        .unwrap_or_else(|| panic!("missing source segment start `{start}`"));
+    let end_index = source[start_index..]
+        .find(end)
+        .map(|index| start_index + index)
+        .unwrap_or_else(|| panic!("missing source segment end `{end}`"));
+    &source[start_index..end_index]
 }
 
 fn app_root() -> PathBuf {

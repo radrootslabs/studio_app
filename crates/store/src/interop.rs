@@ -1151,17 +1151,18 @@ impl<'a> AppLocalInteropRepository<'a> {
         current_evidence: ActiveOrderEvidence,
     ) -> Result<(), AppSqliteError> {
         if let ActiveOrderEvidence::Request(request) = &current_evidence {
-            let order_id = self.upsert_order_request(record, &request.payload)?;
+            let order_id =
+                self.upsert_order_request(record, &request.payload, request.event_id.as_str())?;
             self.attach_validation_receipts_for_request(
                 request.event_id.as_str(),
                 request.payload.order_id.as_str(),
                 order_id,
             )?;
         }
-        let mut evidence = self.load_active_order_evidence(current_evidence.order_id())?;
+        let mut evidence = self.load_active_order_evidence(current_evidence.root_event_id())?;
         evidence.push(current_evidence);
         dedupe_active_order_evidence(&mut evidence);
-        let Some((raw_order_id, buyer_pubkey)) = evidence
+        let Some((raw_order_id, buyer_pubkey, root_event_id)) = evidence
             .first()
             .map(ActiveOrderEvidence::order_projection_identity)
         else {
@@ -1169,7 +1170,12 @@ impl<'a> AppLocalInteropRepository<'a> {
         };
         let raw_order_id = raw_order_id.to_owned();
         let buyer_pubkey = buyer_pubkey.to_owned();
-        let order_id = projected_order_id(raw_order_id.as_str(), buyer_pubkey.as_str());
+        let root_event_id = root_event_id.to_owned();
+        let order_id = projected_order_id(
+            raw_order_id.as_str(),
+            buyer_pubkey.as_str(),
+            root_event_id.as_str(),
+        );
         let buckets = ActiveOrderEvidenceBuckets::from_evidence(evidence);
         let requests = buckets.requests.clone();
         let revision_proposals = buckets.revision_proposals.clone();
@@ -1219,6 +1225,7 @@ impl<'a> AppLocalInteropRepository<'a> {
         &self,
         record: &LocalEventRecord,
         payload: &RadrootsOrderRequest,
+        root_event_id: &str,
     ) -> Result<OrderId, AppSqliteError> {
         let existing_listing =
             self.existing_listing_projection(Some(payload.listing_addr.as_str()))?;
@@ -1231,7 +1238,11 @@ impl<'a> AppLocalInteropRepository<'a> {
             )
         };
         self.ensure_farm_exists(farm_id)?;
-        let order_id = projected_order_id(payload.order_id.as_str(), payload.buyer_pubkey.as_str());
+        let order_id = projected_order_id(
+            payload.order_id.as_str(),
+            payload.buyer_pubkey.as_str(),
+            root_event_id,
+        );
         let order_number = existing_order_number(self.connection, order_id)?
             .unwrap_or_else(|| deterministic_order_number(payload.order_id.as_str()));
         self.connection
@@ -1415,6 +1426,7 @@ impl<'a> AppLocalInteropRepository<'a> {
             projected_order_id(
                 envelope.payload.order_id.as_str(),
                 envelope.payload.buyer_pubkey.as_str(),
+                tags.root_event_id.as_str(),
             ),
         ))
     }
@@ -1546,7 +1558,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn load_active_order_evidence(
         &self,
-        order_id: &str,
+        root_event_id: &str,
     ) -> Result<Vec<ActiveOrderEvidence>, AppSqliteError> {
         let mut evidence = Vec::new();
         for kind in ACTIVE_ORDER_EVENT_KINDS {
@@ -1554,7 +1566,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                 let Some(record) = active_order_evidence_from_event(&event) else {
                     continue;
                 };
-                if record.order_id() == order_id {
+                if record.root_event_id() == root_event_id {
                     evidence.push(record);
                 }
             }
@@ -2802,37 +2814,42 @@ impl ActiveOrderEvidence {
         }
     }
 
-    fn order_id(&self) -> &str {
+    fn root_event_id(&self) -> &str {
         match self {
-            Self::Request(record) => record.payload.order_id.as_str(),
-            Self::Decision(record) => record.payload.order_id.as_str(),
-            Self::RevisionProposal(record) => record.payload.order_id.as_str(),
-            Self::RevisionDecision(record) => record.payload.order_id.as_str(),
-            Self::Cancellation(record) => record.payload.order_id.as_str(),
+            Self::Request(record) => record.event_id.as_str(),
+            Self::Decision(record) => record.root_event_id.as_str(),
+            Self::RevisionProposal(record) => record.root_event_id.as_str(),
+            Self::RevisionDecision(record) => record.root_event_id.as_str(),
+            Self::Cancellation(record) => record.root_event_id.as_str(),
         }
     }
 
-    fn order_projection_identity(&self) -> (&str, &str) {
+    fn order_projection_identity(&self) -> (&str, &str, &str) {
         match self {
             Self::Request(record) => (
                 record.payload.order_id.as_str(),
                 record.payload.buyer_pubkey.as_str(),
+                record.event_id.as_str(),
             ),
             Self::Decision(record) => (
                 record.payload.order_id.as_str(),
                 record.payload.buyer_pubkey.as_str(),
+                record.root_event_id.as_str(),
             ),
             Self::RevisionProposal(record) => (
                 record.payload.order_id.as_str(),
                 record.payload.buyer_pubkey.as_str(),
+                record.root_event_id.as_str(),
             ),
             Self::RevisionDecision(record) => (
                 record.payload.order_id.as_str(),
                 record.payload.buyer_pubkey.as_str(),
+                record.root_event_id.as_str(),
             ),
             Self::Cancellation(record) => (
                 record.payload.order_id.as_str(),
                 record.payload.buyer_pubkey.as_str(),
+                record.root_event_id.as_str(),
             ),
         }
     }
@@ -3271,18 +3288,20 @@ fn tags_from_json(value: &Value) -> Option<Vec<Vec<String>>> {
     })
 }
 
-pub fn projected_order_id_from_trade_request(order_id: &str, buyer_pubkey: &str) -> OrderId {
-    order_id.parse().unwrap_or_else(|_| {
-        OrderId::from(deterministic_uuid(
-            "radroots-cli-order",
-            Some(buyer_pubkey),
-            order_id,
-        ))
-    })
+pub fn projected_order_id_from_trade_request(
+    order_id: &str,
+    buyer_pubkey: &str,
+    root_event_id: &str,
+) -> OrderId {
+    OrderId::from(deterministic_uuid(
+        "radroots-cli-order-root",
+        Some(buyer_pubkey),
+        format!("{}:{}", root_event_id.trim(), order_id.trim()).as_str(),
+    ))
 }
 
-fn projected_order_id(order_id: &str, buyer_pubkey: &str) -> OrderId {
-    projected_order_id_from_trade_request(order_id, buyer_pubkey)
+fn projected_order_id(order_id: &str, buyer_pubkey: &str, root_event_id: &str) -> OrderId {
+    projected_order_id_from_trade_request(order_id, buyer_pubkey, root_event_id)
 }
 
 fn active_order_revision_status(
@@ -4646,7 +4665,11 @@ mod tests {
             events,
             buyer_context: BuyerContext::account("acct_validation"),
             seller_farm_id: deterministic_farm_id(Some(seller_pubkey.as_str()), farm_key),
-            order_id: projected_order_id(order_id_raw.as_str(), buyer_pubkey.as_str()),
+            order_id: projected_order_id(
+                order_id_raw.as_str(),
+                buyer_pubkey.as_str(),
+                request_event_id.as_str(),
+            ),
             order_id_raw,
             listing_addr,
             buyer_pubkey,
@@ -4856,7 +4879,7 @@ mod tests {
             .import_shared_local_events_from_store(&events)
             .expect("import signed order request");
         let farm_id = deterministic_farm_id(Some(seller_pubkey), farm_key);
-        let order_id = projected_order_id(order_id_raw, buyer_pubkey);
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey, event.id.as_str());
         let orders = app_store
             .load_orders_list(
                 farm_id,
@@ -5116,7 +5139,7 @@ mod tests {
             .import_shared_local_events_from_store(&events)
             .expect("import app order request");
         let buyer_context = BuyerContext::account("acct_buyer");
-        let order_id = projected_order_id(order_id_raw, buyer_pubkey);
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
         let farm_id = deterministic_farm_id(Some(seller_pubkey), farm_key);
         let buyer_orders = app_store
             .load_buyer_orders(&buyer_context)
@@ -5208,6 +5231,110 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_app_order_request_roots_project_to_distinct_buyer_orders() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_key = "CCCCCCCCCCCCCCCCCCCCCC";
+        let listing_key = "AAAAAAAAAAAAAAAAAAAAAy";
+        let seller_pubkey = test_pubkey("duplicate-root-seller-pubkey");
+        let seller_pubkey = seller_pubkey.as_str();
+        let buyer_pubkey = test_pubkey("duplicate-root-buyer-pubkey");
+        let buyer_pubkey = buyer_pubkey.as_str();
+        let order_id_raw = "duplicate-root-order";
+        let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
+        events
+            .append_record(&signed_market_listing_record(
+                "duplicate-root-listing",
+                seller_pubkey,
+                farm_key,
+                listing_key,
+                "Duplicate Root Eggs",
+                "9",
+                "active",
+                "pickup",
+                "North barn pickup",
+                4_102_444_800,
+                4_102_531_200,
+                LocalRecordStatus::Published,
+                PublishOutboxStatus::Acknowledged,
+            ))
+            .expect("append duplicate-root listing");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import duplicate-root listing");
+
+        let request_payload = order_request_payload(
+            order_id_raw,
+            listing_addr.as_str(),
+            buyer_pubkey,
+            seller_pubkey,
+        );
+        let first_request_parts = order_request_event_build(
+            &listing_event_ptr("duplicate-root-listing-event"),
+            &request_payload,
+        )
+        .expect("build duplicate-root order request");
+        let first_request_event = event_from_parts(
+            "duplicate-root-request-first",
+            buyer_pubkey,
+            first_request_parts,
+        );
+        let second_request_parts = order_request_event_build(
+            &listing_event_ptr("duplicate-root-listing-event"),
+            &request_payload,
+        )
+        .expect("build second duplicate-root order request");
+        let second_request_event = event_from_parts(
+            "duplicate-root-request-second",
+            buyer_pubkey,
+            second_request_parts,
+        );
+        for (record_id, event) in [
+            (
+                "app:signed_event:duplicate-root:first",
+                &first_request_event,
+            ),
+            (
+                "app:signed_event:duplicate-root:second",
+                &second_request_event,
+            ),
+        ] {
+            events
+                .append_record(&signed_order_event_record(
+                    record_id,
+                    event,
+                    listing_addr.as_str(),
+                    SourceRuntime::App,
+                    Some("acct_duplicate_root"),
+                ))
+                .expect("append duplicate-root request");
+        }
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import duplicate-root requests");
+
+        let first_order_id =
+            projected_order_id(order_id_raw, buyer_pubkey, first_request_event.id.as_str());
+        let second_order_id =
+            projected_order_id(order_id_raw, buyer_pubkey, second_request_event.id.as_str());
+        let buyer_context = BuyerContext::account("acct_duplicate_root");
+        let buyer_orders = app_store
+            .load_buyer_orders(&buyer_context)
+            .expect("load duplicate-root buyer orders");
+        let projected_ids = buyer_orders
+            .rows
+            .iter()
+            .map(|row| row.order_id)
+            .collect::<Vec<_>>();
+
+        assert_ne!(first_order_id, second_order_id);
+        assert_eq!(buyer_orders.rows.len(), 2);
+        assert!(projected_ids.contains(&first_order_id));
+        assert!(projected_ids.contains(&second_order_id));
+    }
+
+    #[test]
     fn app_origin_signed_order_request_and_decline_project_to_buyer_orders() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
@@ -5270,7 +5397,7 @@ mod tests {
             .import_shared_local_events_from_store(&events)
             .expect("import app order request");
         let buyer_context = BuyerContext::account("acct_buyer");
-        let order_id = projected_order_id(order_id_raw, buyer_pubkey);
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
         let buyer_orders = app_store
             .load_buyer_orders(&buyer_context)
             .expect("load buyer orders after request");
@@ -5764,7 +5891,7 @@ mod tests {
             .import_shared_local_events_from_store(&events)
             .expect("import request after receipt");
 
-        let order_id = projected_order_id(order_id_raw, buyer_pubkey);
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
         let buyer_context = BuyerContext::account("acct_validation_out_of_order");
         let buyer_detail = app_store
             .load_buyer_order_detail(&buyer_context, order_id)
@@ -5979,7 +6106,7 @@ mod tests {
             .expect("import revision proposal");
 
         let seller_farm_id = deterministic_farm_id(Some(seller_pubkey), farm_key);
-        let order_id = projected_order_id(order_id_raw, buyer_pubkey);
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
         let buyer_context = BuyerContext::account("acct_revision");
         let seller_orders = app_store
             .load_orders_list(
@@ -6160,7 +6287,7 @@ mod tests {
             .expect("import cancellation");
 
         let seller_farm_id = deterministic_farm_id(Some(seller_pubkey), farm_key);
-        let order_id = projected_order_id(order_id_raw, buyer_pubkey);
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
         let buyer_context = BuyerContext::account("acct_cancel");
         let buyer_detail = app_store
             .load_buyer_order_detail(&buyer_context, order_id)
@@ -6301,7 +6428,8 @@ mod tests {
             app_store
                 .import_shared_local_events_from_store(&events)
                 .expect("import conflicting decisions");
-            let order_id = projected_order_id(order_id_raw, buyer_pubkey);
+            let order_id =
+                projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
             let detail = app_store
                 .load_order_detail(
                     deterministic_farm_id(Some(seller_pubkey), farm_key),

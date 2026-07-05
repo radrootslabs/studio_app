@@ -9534,6 +9534,7 @@ fn insert_seller_order_request_evidence(
     let app_order_id = projected_order_id_from_trade_request(
         payload.order_id.as_str(),
         payload.buyer_pubkey.as_str(),
+        event.id.as_str(),
     );
     if app_order_id != *order_id {
         return;
@@ -19840,8 +19841,6 @@ mod tests {
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
         let listing_event_id = signed_listing_event_id(label);
         let trade_order_id = format!("{label}-trade-order");
-        let order_id =
-            projected_order_id_from_trade_request(trade_order_id.as_str(), buyer_pubkey.as_str());
         append_app_signed_listing_record(
             &paths,
             "linked-seller-account",
@@ -19859,6 +19858,11 @@ mod tests {
             buyer_pubkey.as_str(),
             seller_pubkey,
             2,
+        );
+        let order_id = projected_order_id_from_trade_request(
+            trade_order_id.as_str(),
+            buyer_pubkey.as_str(),
+            request_event_id.as_str(),
         );
         let decision_event_id = if append_decision {
             append_signed_order_decision_record(
@@ -19914,7 +19918,6 @@ mod tests {
         let buyer_pubkey = SDK_TEST_BUYER_PUBLIC_KEY_HEX.to_owned();
         let product_id = ProductId::new();
         let trade_order_id = "seller-order-decision-1";
-        let order_id = projected_order_id_from_trade_request(trade_order_id, buyer_pubkey.as_str());
         let farm_key = super::d_tag_from_uuid(farm_id.as_uuid());
         let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
@@ -19928,7 +19931,7 @@ mod tests {
             listing_event_id.as_str(),
             stock_count,
         );
-        append_signed_order_request_record(
+        let request_event_id = append_signed_order_request_record(
             &paths,
             trade_order_id,
             listing_addr.as_str(),
@@ -19936,6 +19939,11 @@ mod tests {
             buyer_pubkey.as_str(),
             seller_pubkey.as_str(),
             order_quantity,
+        );
+        let order_id = projected_order_id_from_trade_request(
+            trade_order_id,
+            buyer_pubkey.as_str(),
+            request_event_id.as_str(),
         );
 
         (
@@ -19976,7 +19984,6 @@ mod tests {
         let buyer_pubkey = SDK_TEST_BUYER_PUBLIC_KEY_HEX.to_owned();
         let product_id = ProductId::new();
         let trade_order_id = "seller-order-decision-1";
-        let order_id = projected_order_id_from_trade_request(trade_order_id, buyer_pubkey.as_str());
         let farm_key = super::d_tag_from_uuid(farm_id.as_uuid());
         let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
@@ -19990,7 +19997,7 @@ mod tests {
             listing_event_id.as_str(),
             stock_count,
         );
-        append_verified_signed_order_request_record(
+        let request_event_id = append_verified_signed_order_request_record(
             &paths,
             trade_order_id,
             listing_addr.as_str(),
@@ -19998,6 +20005,11 @@ mod tests {
             buyer_pubkey.as_str(),
             seller_pubkey.as_str(),
             order_quantity,
+        );
+        let order_id = projected_order_id_from_trade_request(
+            trade_order_id,
+            buyer_pubkey.as_str(),
+            request_event_id.as_str(),
         );
 
         (
@@ -20294,7 +20306,7 @@ mod tests {
         buyer_pubkey: &str,
         seller_pubkey: &str,
         order_quantity: u32,
-    ) {
+    ) -> String {
         assert_eq!(buyer_pubkey, SDK_TEST_BUYER_PUBLIC_KEY_HEX);
         let database_path = paths
             .shared_local_events_database_path()
@@ -20334,6 +20346,7 @@ mod tests {
             .sign_with_keys(&keys)
             .expect("order request event should sign");
         let event = radroots_event_from_nostr(&signed_event);
+        let stored_event_id = event.id.clone();
         let record_id = format!("app:signed_event:order-request:{trade_order_id}");
         let relay_delivery_json = RelayDeliveryEvidence::acknowledged(
             ["wss://relay.example"],
@@ -20372,6 +20385,7 @@ mod tests {
                 relay_delivery_json: Some(relay_delivery_json),
             })
             .expect("append verified signed order request");
+        stored_event_id
     }
 
     fn signed_order_request_economics(
