@@ -36,8 +36,8 @@ pub use repo::{
     APP_ACTIVITY_CONTEXT_LIMIT, APP_ACTIVITY_RETENTION_LIMIT, AppActivationRepository,
     AppActivityRepository, AppBuyerRepository, AppFarmRulesRepository, AppFarmSetupRepository,
     AppOrdersRepository, AppProductsRepository, AppRemindersRepository, AppTodayAgendaRepository,
-    BuyerOrderCoordinationRecord, BuyerOrderCoordinationState, BuyerOrderLocalEventExport,
-    BuyerOrderLocalEventLine, BuyerRepeatDemandApplyOutcome, SelectedBuyerOrderScope,
+    BuyerOrderCoordinationRecord, BuyerOrderCoordinationState, BuyerOrderRuntimeStoreExport,
+    BuyerOrderRuntimeStoreLine, BuyerRepeatDemandApplyOutcome, SelectedBuyerOrderScope,
     SellerOrderDecisionExport, SellerOrderDecisionLineExport, TODAY_AGENDA_LIST_LIMIT,
     TODAY_AGENDA_LOW_STOCK_THRESHOLD, derive_farm_rules_readiness,
 };
@@ -438,7 +438,7 @@ impl AppSqliteStore {
         &self,
         context: &BuyerContext,
         order_id: OrderId,
-    ) -> Result<Option<BuyerOrderLocalEventExport>, AppSqliteError> {
+    ) -> Result<Option<BuyerOrderRuntimeStoreExport>, AppSqliteError> {
         self.buyer_repository()
             .load_buyer_order_local_event_export(context, order_id)
     }

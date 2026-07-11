@@ -8692,7 +8692,7 @@ fn sdk_recovery_actions_text(actions: &[String]) -> String {
 
 fn sdk_recovery_action_key(action: &str) -> AppTextKey {
     match action {
-        "configure_relay_targets" => AppTextKey::ValueSdkRecoveryConfigureRelayTargets,
+        "configure_transport_targets" => AppTextKey::ValueSdkRecoveryConfigureRelayTargets,
         "retry_startup" => AppTextKey::ValueSdkRecoveryRetryStartup,
         "wait_for_sdk_lifecycle" => AppTextKey::ValueSdkRecoveryWaitForLifecycle,
         "retry_status_refresh" => AppTextKey::ValueSdkRecoveryRetryStatusRefresh,
@@ -11704,7 +11704,7 @@ fn trade_workflow_source_key(source: TradeWorkflowSource) -> AppTextKey {
         TradeWorkflowSource::App => AppTextKey::TradeWorkflowProvenanceApp,
         TradeWorkflowSource::Cli => AppTextKey::TradeWorkflowProvenanceCli,
         TradeWorkflowSource::Relay => AppTextKey::TradeWorkflowProvenanceRelay,
-        TradeWorkflowSource::LocalEvents => AppTextKey::TradeWorkflowProvenanceLocalEvents,
+        TradeWorkflowSource::RuntimeStore => AppTextKey::TradeWorkflowProvenanceRuntimeStore,
         TradeWorkflowSource::Unknown => AppTextKey::TradeWorkflowProvenanceUnknown,
     }
 }
@@ -12597,7 +12597,9 @@ fn startup_home_body(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
     div().w_full().text_center().child(home_body_text(body))
 }
 
-async fn connect_configured_relays(relay_urls: Vec<String>) -> Result<RadrootsNostrClient, String> {
+async fn connect_configured_targets(
+    relay_urls: Vec<String>,
+) -> Result<RadrootsNostrClient, String> {
     let client = RadrootsNostrClient::new_signerless();
     for relay_url in relay_urls {
         client
@@ -12614,7 +12616,7 @@ struct StartupAppInitResult {
 }
 
 async fn run_startup_app_init(relay_urls: Vec<String>) -> Result<StartupAppInitResult, String> {
-    let relay_client = connect_configured_relays(relay_urls).await?;
+    let relay_client = connect_configured_targets(relay_urls).await?;
     Ok(StartupAppInitResult { relay_client })
 }
 
@@ -16146,7 +16148,7 @@ fn home_empty_state_card(title_key: AppTextKey, body_key: AppTextKey) -> impl In
 
 fn buyer_order_place_failure_notice(error: &AppSqliteError) -> BuyerWorkspaceNotice {
     match error {
-        AppSqliteError::LocalEventsSql { .. } | AppSqliteError::LocalEvents { .. } => {
+        AppSqliteError::RuntimeStoreSql { .. } | AppSqliteError::RuntimeStore { .. } => {
             BuyerWorkspaceNotice::OrderCoordinationFailed
         }
         _ => BuyerWorkspaceNotice::OrderPlaceFailed,
@@ -16429,8 +16431,8 @@ mod tests {
         (HomeView::new(runtime), paths, home_dir)
     }
 
-    fn block_shared_local_events_database(paths: &AppDesktopRuntimePaths) {
-        let database_path = paths.shared_local_events_database_path().unwrap();
+    fn block_shared_runtime_store_database(paths: &AppDesktopRuntimePaths) {
+        let database_path = paths.shared_runtime_store_database_path().unwrap();
         if let Some(parent) = database_path.parent() {
             fs::create_dir_all(parent).unwrap();
         }
@@ -16587,7 +16589,7 @@ mod tests {
     #[test]
     fn buyer_browse_refresh_failure_uses_typed_visible_notice() {
         let (mut view, paths, home_dir) = test_home_view("buyer_notice");
-        block_shared_local_events_database(&paths);
+        block_shared_runtime_store_database(&paths);
 
         assert!(view.select_personal_section_update(PersonalSection::Browse));
         assert_eq!(
@@ -16601,7 +16603,7 @@ mod tests {
     #[test]
     fn buyer_search_refresh_failure_uses_typed_visible_notice() {
         let (mut view, paths, home_dir) = test_home_view("buyer_notice");
-        block_shared_local_events_database(&paths);
+        block_shared_runtime_store_database(&paths);
 
         assert!(view.set_personal_search_query_update("eggs"));
         assert_eq!(
@@ -16615,7 +16617,7 @@ mod tests {
     #[test]
     fn buyer_detail_open_failure_uses_typed_visible_notice() {
         let (mut view, paths, home_dir) = test_home_view("buyer_notice");
-        block_shared_local_events_database(&paths);
+        block_shared_runtime_store_database(&paths);
 
         assert!(
             view.open_personal_product_detail_update(PersonalSection::Browse, ProductId::new())
@@ -16870,8 +16872,8 @@ mod tests {
                 AppTextKey::TradeWorkflowProvenanceRelay,
             ),
             (
-                TradeWorkflowSource::LocalEvents,
-                AppTextKey::TradeWorkflowProvenanceLocalEvents,
+                TradeWorkflowSource::RuntimeStore,
+                AppTextKey::TradeWorkflowProvenanceRuntimeStore,
             ),
             (
                 TradeWorkflowSource::Unknown,
@@ -18708,7 +18710,7 @@ mod tests {
             code: "invalid_relay_url".to_owned(),
             class: "configuration".to_owned(),
             retryable: false,
-            recovery_actions: vec!["configure_relay_targets".to_owned()],
+            recovery_actions: vec!["configure_transport_targets".to_owned()],
         };
         let mut sdk_status = fixture_sdk_status(AppSdkLifecycleState::Degraded);
         sdk_status.last_issue = Some(issue.clone());

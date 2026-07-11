@@ -3,7 +3,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use radroots_local_events::normalize_relay_url;
+use radroots_sdk::{NostrRelayUrlPolicy, TargetSet};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -254,10 +254,18 @@ fn normalize_app_relay_url(
     field: &'static str,
     relay: &str,
 ) -> Result<String, AppRuntimeConfigError> {
-    normalize_relay_url(relay).map_err(|_| AppRuntimeConfigError::InvalidRelayUrl {
-        field,
-        value: relay.to_owned(),
-    })
+    TargetSet::nostr_relays([relay], NostrRelayUrlPolicy::Localhost)
+        .map(|targets| {
+            targets
+                .nostr_relay_urls()
+                .into_iter()
+                .next()
+                .expect("single relay target set must contain one relay")
+        })
+        .map_err(|_| AppRuntimeConfigError::InvalidRelayUrl {
+            field,
+            value: relay.to_owned(),
+        })
 }
 
 fn require_path_value(
@@ -553,10 +561,7 @@ mod tests {
         )
         .expect("ipv6 relay url should resolve");
 
-        assert_eq!(
-            config.nostr_relay_urls,
-            vec!["wss://[2001:db8::1]:443/relay"]
-        );
+        assert_eq!(config.nostr_relay_urls, vec!["wss://[2001:db8::1]/relay"]);
     }
 
     #[test]

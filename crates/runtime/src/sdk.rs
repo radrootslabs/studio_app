@@ -11,8 +11,8 @@ use std::{
 };
 
 use radroots_authority::{RadrootsActorContext, RadrootsLocalEventSigner};
-use radroots_events::{
-    RadrootsNostrEventPtr,
+use radroots_event::{
+    RadrootsEventEnvelope, RadrootsEventPtr,
     contract::RadrootsActorRole,
     farm::RadrootsFarm,
     ids::{
@@ -27,24 +27,24 @@ use radroots_events::{
     },
 };
 use radroots_nostr::prelude::RadrootsNostrKeys;
+use radroots_sdk::SdkMutationState;
 use radroots_sdk::{
-    AckPolicy, FARM_PUBLISH_OPERATION_KIND, FarmEnqueuePublishRequest, FarmEnqueueReceipt,
-    IntegrityReceipt, IntegrityRequest, LISTING_PUBLISH_OPERATION_KIND,
-    ListingEnqueuePublishRequest, ListingEnqueueReceipt, PrivacyPreflightConfirmation,
+    FARM_PUBLISH_OPERATION_KIND, FarmEnqueuePublishRequest, FarmEnqueueReceipt, IntegrityReceipt,
+    IntegrityRequest, LISTING_PUBLISH_OPERATION_KIND, ListingEnqueuePublishRequest,
+    ListingEnqueueReceipt, NostrProfile, NostrRelayUrlPolicy, PrivacyPreflightConfirmation,
     ProductSensitivityField, PublishMode, RadrootsClient, RadrootsSdkError,
-    RadrootsSdkLocalKeySigner, RadrootsSdkSignerProvider, RadrootsSdkStoragePaths,
-    RelayResolutionPolicy, RestoreReceipt, RestoreRequest, SdkBackupVerification,
-    SdkPublicLocality, SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy, StorageStatusReceipt,
-    StorageStatusRequest, SyncStatusReceipt, SyncStatusRequest, TRADE_CANCELLATION_OPERATION_KIND,
-    TRADE_DECISION_OPERATION_KIND, TRADE_REVISION_DECISION_OPERATION_KIND,
-    TRADE_REVISION_PROPOSAL_OPERATION_KIND, TRADE_SUBMIT_OPERATION_KIND, TradeAcceptRequest,
-    TradeCancelRequest, TradeCancellationPlan, TradeCancellationReceipt, TradeDecisionPlan,
-    TradeDecisionReceipt, TradeDeclineRequest, TradeEvidenceMode, TradeMutationOutcome,
+    RadrootsSdkLocalKeySigner, RadrootsSdkSignerProvider, RadrootsSdkStoragePaths, RestoreReceipt,
+    RestoreRequest, SatisfactionPolicy, SdkBackupVerification, SdkPublicLocality,
+    StorageStatusReceipt, StorageStatusRequest, SyncStatusReceipt, SyncStatusRequest,
+    TRADE_CANCELLATION_OPERATION_KIND, TRADE_DECISION_OPERATION_KIND,
+    TRADE_REVISION_DECISION_OPERATION_KIND, TRADE_REVISION_PROPOSAL_OPERATION_KIND,
+    TRADE_SUBMIT_OPERATION_KIND, TargetPolicy, TradeAcceptRequest, TradeCancelRequest,
+    TradeCancellationPlan, TradeCancellationReceipt, TradeDecisionPlan, TradeDecisionReceipt,
+    TradeDeclineRequest, TradeEvidenceIngestRequest, TradeEvidenceMode, TradeMutationOutcome,
     TradeProposeRequest, TradeRevisionDecisionPlan, TradeRevisionDecisionReceipt,
     TradeRevisionDecisionRequest, TradeRevisionProposalPlan, TradeRevisionProposalReceipt,
-    TradeRevisionProposalRequest, TradeSubmitPlan, TradeSubmitReceipt,
+    TradeRevisionProposalRequest, TradeSubmitPlan, TradeSubmitReceipt, TransportProfile,
 };
-use radroots_sdk::{SdkMutationState, SdkRelayTargetPolicy};
 use radroots_trade::identity::RadrootsTradeLocator;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -141,7 +141,7 @@ pub struct AppSdkEventStoreDiagnostics {
     pub store: AppSdkSqliteStoreDiagnostics,
     pub total_events: i64,
     pub projection_eligible_events: i64,
-    pub relay_observations: i64,
+    pub transport_observations: i64,
     pub last_event_seq: Option<i64>,
     pub last_event_updated_at_ms: Option<i64>,
 }
@@ -175,14 +175,14 @@ pub struct AppSdkSyncDiagnostics {
     pub observed_at_ms: i64,
     pub event_store: AppSdkSyncEventStoreDiagnostics,
     pub outbox: AppSdkSyncOutboxDiagnostics,
-    pub relay_targets: AppSdkSyncRelayTargetDiagnostics,
+    pub transport_targets: AppSdkSyncTransportTargetDiagnostics,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AppSdkSyncEventStoreDiagnostics {
     pub total_events: i64,
     pub projection_eligible_events: i64,
-    pub relay_observations: i64,
+    pub transport_observations: i64,
     pub last_event_seq: Option<i64>,
     pub last_event_updated_at_ms: Option<i64>,
 }
@@ -201,9 +201,9 @@ pub struct AppSdkSyncOutboxDiagnostics {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppSdkSyncRelayTargetDiagnostics {
+pub struct AppSdkSyncTransportTargetDiagnostics {
     pub configured_count: usize,
-    pub configured_relays: Vec<String>,
+    pub configured_targets: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -251,7 +251,7 @@ pub struct AppSdkTradeProposeRequest {
     pub actor_account_id: String,
     pub actor_pubkey: String,
     pub signer_keys: RadrootsNostrKeys,
-    pub listing_event: RadrootsNostrEventPtr,
+    pub listing_event: RadrootsEventPtr,
     pub order_id: RadrootsOrderId,
     pub listing_addr: RadrootsListingAddress,
     pub seller_pubkey: RadrootsPublicKey,
@@ -301,6 +301,7 @@ pub struct AppSdkTradeRevisionDecisionRequest {
     pub locator: RadrootsTradeLocator,
     pub revision_id: RadrootsOrderRevisionId,
     pub decision: RadrootsOrderRevisionOutcome,
+    pub evidence: Vec<RadrootsEventEnvelope>,
     pub confirm_public_note: bool,
     pub idempotency_key: Option<String>,
 }
@@ -759,7 +760,7 @@ impl Drop for AppSdkRuntime {
     }
 }
 
-impl From<AppSdkRelayUrlPolicy> for SdkRuntimeRelayUrlPolicy {
+impl From<AppSdkRelayUrlPolicy> for NostrRelayUrlPolicy {
     fn from(policy: AppSdkRelayUrlPolicy) -> Self {
         match policy {
             AppSdkRelayUrlPolicy::Public => Self::Public,
@@ -876,7 +877,7 @@ impl From<StorageStatusReceipt> for AppSdkStorageDiagnostics {
                 store: receipt.event_store.store.into(),
                 total_events: receipt.event_store.total_events,
                 projection_eligible_events: receipt.event_store.projection_eligible_events,
-                relay_observations: receipt.event_store.relay_observations,
+                transport_observations: receipt.event_store.transport_observations,
                 last_event_seq: receipt.event_store.last_event_seq,
                 last_event_updated_at_ms: receipt.event_store.last_event_updated_at_ms,
             },
@@ -929,7 +930,7 @@ impl From<SyncStatusReceipt> for AppSdkSyncDiagnostics {
             event_store: AppSdkSyncEventStoreDiagnostics {
                 total_events: receipt.event_store.total_events,
                 projection_eligible_events: receipt.event_store.projection_eligible_events,
-                relay_observations: receipt.event_store.relay_observations,
+                transport_observations: receipt.event_store.transport_observations,
                 last_event_seq: receipt.event_store.last_event_seq,
                 last_event_updated_at_ms: receipt.event_store.last_event_updated_at_ms,
             },
@@ -944,9 +945,14 @@ impl From<SyncStatusReceipt> for AppSdkSyncDiagnostics {
                 last_attempt_at_ms: receipt.outbox.last_attempt_at_ms,
                 last_error: receipt.outbox.last_error,
             },
-            relay_targets: AppSdkSyncRelayTargetDiagnostics {
-                configured_count: receipt.relay_targets.configured_count,
-                configured_relays: receipt.relay_targets.configured_relays,
+            transport_targets: AppSdkSyncTransportTargetDiagnostics {
+                configured_count: receipt.transport_profile.configured_transport_target_count,
+                configured_targets: receipt
+                    .transport_profile
+                    .configured_transport_targets
+                    .into_iter()
+                    .map(|target| target.endpoint_uri)
+                    .collect(),
             },
         }
     }
@@ -1369,13 +1375,11 @@ fn run_degraded_worker(
 }
 
 async fn build_sdk_runtime(config: &AppSdkConfig) -> Result<RadrootsClient, RadrootsSdkError> {
-    let mut builder = RadrootsClient::builder()
+    RadrootsClient::builder()
         .directory_storage(config.storage_root.clone())
-        .relay_url_policy(config.relay_url_policy.into());
-    for relay_url in &config.relay_urls {
-        builder = builder.relay_url(relay_url.clone());
-    }
-    builder.build().await
+        .transport_profile(app_transport_profile(config)?)
+        .build()
+        .await
 }
 
 async fn build_sdk_runtime_with_signer(
@@ -1384,29 +1388,37 @@ async fn build_sdk_runtime_with_signer(
 ) -> Result<RadrootsClient, AppSdkRuntimeIssue> {
     let signer = RadrootsSdkLocalKeySigner::new(keys)
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
-    let mut builder = RadrootsClient::builder()
+    let transport_profile = app_transport_profile(config)
+        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    RadrootsClient::builder()
         .directory_storage(config.storage_root.clone())
-        .relay_url_policy(config.relay_url_policy.into())
-        .signer_provider(RadrootsSdkSignerProvider::LocalKey(signer));
-    for relay_url in &config.relay_urls {
-        builder = builder.relay_url(relay_url.clone());
-    }
-    builder
+        .transport_profile(transport_profile)
+        .signer_provider(RadrootsSdkSignerProvider::LocalKey(signer))
         .build()
         .await
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))
+}
+
+fn app_transport_profile(config: &AppSdkConfig) -> Result<TransportProfile, RadrootsSdkError> {
+    if config.relay_urls.is_empty() {
+        return Ok(TransportProfile::local_only());
+    }
+    Ok(TransportProfile::nostr(NostrProfile::new(
+        config.relay_urls.iter().map(String::as_str),
+        config.relay_url_policy.into(),
+    )?))
 }
 
 fn app_trade_publish_mode() -> PublishMode {
     PublishMode::EnqueueOnly
 }
 
-fn app_trade_ack_policy() -> AckPolicy {
-    AckPolicy::NoWait
+fn app_trade_satisfaction_policy() -> SatisfactionPolicy {
+    SatisfactionPolicy::NoWait
 }
 
-fn app_trade_relay_resolution_policy() -> RelayResolutionPolicy {
-    RelayResolutionPolicy::configured_relays()
+fn app_trade_target_policy() -> TargetPolicy {
+    TargetPolicy::default_profile()
 }
 
 fn app_trade_privacy_confirmation(confirm_public_note: bool) -> PrivacyPreflightConfirmation {
@@ -1502,7 +1514,7 @@ fn enqueue_farm_publish_with_sdk(
         RadrootsActorRole::Farmer,
     )?;
     let signer = sdk_local_signer(request.signer_keys)?;
-    let target_relays = sdk_relay_targets(request.target_relays, request.relay_url_policy)?;
+    let target_relays = sdk_transport_targets(request.target_relays, request.relay_url_policy)?;
     let mut enqueue = FarmEnqueuePublishRequest::new(actor, request.farm, target_relays);
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
         enqueue = enqueue
@@ -1529,7 +1541,7 @@ fn enqueue_listing_publish_with_sdk(
         RadrootsActorRole::Seller,
     )?;
     let signer = sdk_local_signer(request.signer_keys)?;
-    let target_relays = sdk_relay_targets(request.target_relays, request.relay_url_policy)?;
+    let target_relays = sdk_transport_targets(request.target_relays, request.relay_url_policy)?;
     let mut enqueue = ListingEnqueuePublishRequest::new(actor, request.listing, target_relays);
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
         enqueue = enqueue
@@ -1564,9 +1576,9 @@ fn trade_propose_with_sdk(
         request.seller_pubkey,
         request.items,
         request.economics,
-        app_trade_relay_resolution_policy(),
+        app_trade_target_policy(),
         app_trade_publish_mode(),
-        app_trade_ack_policy(),
+        app_trade_satisfaction_policy(),
     )
     .with_optional_public_note(request.public_note)
     .with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note));
@@ -1593,7 +1605,7 @@ fn trade_decision_with_sdk(
     )?;
     let sdk = runtime.block_on(build_sdk_runtime_with_signer(config, request.signer_keys))?;
     let publish_mode = app_trade_publish_mode();
-    let ack_policy = app_trade_ack_policy();
+    let satisfaction_policy = app_trade_satisfaction_policy();
     let outcome = match request.decision {
         AppSdkTradeDecision::Accept {
             inventory_commitments,
@@ -1602,9 +1614,9 @@ fn trade_decision_with_sdk(
                 actor,
                 request.locator,
                 inventory_commitments,
-                app_trade_relay_resolution_policy(),
+                app_trade_target_policy(),
                 publish_mode,
-                ack_policy,
+                satisfaction_policy,
                 TradeEvidenceMode::ResyncBeforeMutation,
             )
             .with_privacy_confirmation(app_trade_privacy_confirmation(false));
@@ -1622,9 +1634,9 @@ fn trade_decision_with_sdk(
                 actor,
                 request.locator,
                 reason,
-                app_trade_relay_resolution_policy(),
+                app_trade_target_policy(),
                 publish_mode,
-                ack_policy,
+                satisfaction_policy,
                 TradeEvidenceMode::ResyncBeforeMutation,
             )
             .with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note));
@@ -1659,9 +1671,9 @@ fn trade_revision_propose_with_sdk(
         request.items,
         request.economics,
         request.reason,
-        app_trade_relay_resolution_policy(),
+        app_trade_target_policy(),
         app_trade_publish_mode(),
-        app_trade_ack_policy(),
+        app_trade_satisfaction_policy(),
         TradeEvidenceMode::ResyncBeforeMutation,
     )
     .with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note));
@@ -1692,10 +1704,15 @@ fn trade_revision_decide_with_sdk(
         request.locator,
         request.revision_id,
         request.decision.clone(),
-        app_trade_relay_resolution_policy(),
+        app_trade_target_policy(),
         app_trade_publish_mode(),
-        app_trade_ack_policy(),
-        TradeEvidenceMode::ResyncBeforeMutation,
+        app_trade_satisfaction_policy(),
+        TradeEvidenceMode::require_explicit_evidence(
+            request
+                .evidence
+                .into_iter()
+                .map(TradeEvidenceIngestRequest::new),
+        ),
     )
     .with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note));
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
@@ -1729,9 +1746,9 @@ fn trade_cancel_with_sdk(
         actor,
         request.locator,
         request.reason,
-        app_trade_relay_resolution_policy(),
+        app_trade_target_policy(),
         app_trade_publish_mode(),
-        app_trade_ack_policy(),
+        app_trade_satisfaction_policy(),
         TradeEvidenceMode::ResyncBeforeMutation,
     )
     .with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note));
@@ -1764,11 +1781,11 @@ fn sdk_local_signer(
     })
 }
 
-fn sdk_relay_targets(
+fn sdk_transport_targets(
     relays: Vec<String>,
     policy: AppSdkRelayUrlPolicy,
-) -> Result<SdkRelayTargetPolicy, AppSdkRuntimeIssue> {
-    SdkRelayTargetPolicy::try_explicit(relays, policy.into())
+) -> Result<TargetPolicy, AppSdkRuntimeIssue> {
+    TargetPolicy::try_nostr_relays(relays, policy.into())
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))
 }
 
@@ -2060,7 +2077,7 @@ mod tests {
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreQuantity,
         RadrootsCoreQuantityPrice, RadrootsCoreUnit,
     };
-    use radroots_events::{
+    use radroots_event::{
         farm::RadrootsFarmRef,
         ids::{RadrootsDTag, RadrootsInventoryBinId},
         listing::{
@@ -2071,8 +2088,8 @@ mod tests {
     };
     use radroots_nostr::prelude::{RadrootsNostrKeys, RadrootsNostrSecretKey};
     use radroots_sdk::{
-        BackupRequest, LISTING_PUBLISH_OPERATION_KIND, RadrootsClient,
-        SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy,
+        BackupRequest, LISTING_PUBLISH_OPERATION_KIND, NostrProfile, NostrRelayUrlPolicy,
+        RadrootsClient, TransportProfile,
     };
 
     use crate::{
@@ -2169,11 +2186,11 @@ mod tests {
         assert!(integrity.outbox_ok);
         let sync = runtime.sync_status().expect("sync diagnostics should load");
         assert_eq!(sync.source, "sdk_canonical_stores");
-        assert_eq!(sync.relay_targets.configured_count, 1);
+        assert_eq!(sync.transport_targets.configured_count, 1);
         let diagnostics = runtime.diagnostics().expect("diagnostics should load");
         assert_eq!(diagnostics.runtime.state, AppSdkLifecycleState::Ready);
         assert_eq!(diagnostics.storage.storage_kind, "directory");
-        assert_eq!(diagnostics.sync.relay_targets.configured_count, 1);
+        assert_eq!(diagnostics.sync.transport_targets.configured_count, 1);
         runtime.shutdown().expect("sdk runtime should shut down");
         assert_eq!(runtime.status().state, AppSdkLifecycleState::Stopped);
         let _ = fs::remove_dir_all(storage_root);
@@ -2247,7 +2264,7 @@ mod tests {
         assert!(
             issue
                 .recovery_actions
-                .contains(&"configure_relay_targets".to_owned())
+                .contains(&"configure_transport_targets".to_owned())
         );
         assert_eq!(issue.detail_json["code"], "invalid_relay_url");
         let error = runtime
@@ -2334,8 +2351,10 @@ mod tests {
             .block_on(
                 RadrootsClient::builder()
                     .directory_storage(backup_source_root.clone())
-                    .relay_url_policy(SdkRuntimeRelayUrlPolicy::Localhost)
-                    .relay_url("ws://127.0.0.1:8080")
+                    .transport_profile(TransportProfile::nostr(
+                        NostrProfile::new(["ws://127.0.0.1:8080"], NostrRelayUrlPolicy::Localhost)
+                            .expect("backup source relay profile"),
+                    ))
                     .build(),
             )
             .expect("source sdk should build");

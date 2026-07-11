@@ -10,8 +10,8 @@ use radroots_core::{
     RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreQuantity,
     RadrootsCoreQuantityPrice, RadrootsCoreUnit,
 };
-use radroots_events::{
-    RadrootsNostrEvent as SdkRadrootsNostrEvent, RadrootsNostrEventPtr,
+use radroots_event::{
+    RadrootsEventEnvelope, RadrootsEventPtr,
     farm::{RadrootsFarm, RadrootsFarmPublicLocation, RadrootsFarmRef},
     ids::{
         RadrootsDTag, RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress,
@@ -33,29 +33,30 @@ use radroots_events::{
         RadrootsOrderRevisionDecision, RadrootsOrderRevisionOutcome, RadrootsOrderRevisionProposal,
     },
 };
-use radroots_events_codec::order::{
+use radroots_event_codec::order::{
     order_cancellation_from_event, order_decision_from_event, order_event_context_from_tags,
     order_request_from_event, order_revision_decision_from_event,
     order_revision_proposal_from_event,
 };
 use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
-use radroots_local_events::{
-    BUYER_ORDER_REQUEST_ACTOR_SOURCE_RESOLVED_ACCOUNT,
-    BUYER_ORDER_REQUEST_ACTOR_SOURCE_UNRESOLVED_APP, BUYER_ORDER_REQUEST_DOCUMENT_KIND,
-    BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, LocalEventRecord, LocalEventRecordInput,
-    LocalEventRecordUpdate, LocalEventsStore, LocalRecordFamily, LocalRecordStatus,
-    PublishOutboxStatus, RelayDeliveryEvidence, RelayDeliveryFailure, SourceRuntime,
-    buyer_order_request_local_work_record_id, validate_buyer_order_request_local_work_payload,
-};
 use radroots_nostr::prelude::{
     RadrootsNostrClient, RadrootsNostrEvent, RadrootsNostrFilter, RadrootsNostrOutput,
     RadrootsNostrTimestamp, radroots_nostr_kind, radroots_nostr_parse_pubkey,
 };
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
+use radroots_runtime_store::{
+    BUYER_ORDER_REQUEST_ACTOR_SOURCE_RESOLVED_ACCOUNT,
+    BUYER_ORDER_REQUEST_ACTOR_SOURCE_UNRESOLVED_APP, BUYER_ORDER_REQUEST_DOCUMENT_KIND,
+    BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, PublishOutboxStatus, RelayDeliveryEvidence,
+    RelayDeliveryFailure, RuntimeStore, RuntimeStoreRecord, RuntimeStoreRecordFamily,
+    RuntimeStoreRecordInput, RuntimeStoreRecordStatus, RuntimeStoreRecordUpdate, SourceRuntime,
+    buyer_order_request_local_work_record_id, validate_buyer_order_request_local_work_payload,
+};
 use radroots_sdk::{
-    FARM_PUBLISH_OPERATION_KIND, LISTING_PUBLISH_OPERATION_KIND, TRADE_CANCELLATION_OPERATION_KIND,
-    TRADE_DECISION_OPERATION_KIND, TRADE_REVISION_DECISION_OPERATION_KIND,
-    TRADE_REVISION_PROPOSAL_OPERATION_KIND, TRADE_SUBMIT_OPERATION_KIND,
+    FARM_PUBLISH_OPERATION_KIND, LISTING_PUBLISH_OPERATION_KIND, NostrRelayUrlPolicy,
+    TRADE_CANCELLATION_OPERATION_KIND, TRADE_DECISION_OPERATION_KIND,
+    TRADE_REVISION_DECISION_OPERATION_KIND, TRADE_REVISION_PROPOSAL_OPERATION_KIND,
+    TRADE_SUBMIT_OPERATION_KIND, TargetSet,
 };
 use radroots_sql_core::SqliteExecutor;
 use radroots_studio_app_core::{
@@ -68,7 +69,7 @@ use radroots_studio_app_core::{
     AppSdkTradeDecisionRequest, AppSdkTradeProposeRequest, AppSdkTradeRevisionDecisionRequest,
     AppSdkTradeRevisionProposalRequest, AppSdkWorkflowReceipt, AppSharedAccountsPaths,
     PackDayExportWriteError, prepare_pack_day_export_bundle_at_data_root,
-    shared_local_events_database_path_from_shared_accounts, write_prepared_pack_day_export_bundle,
+    shared_runtime_store_database_path_from_shared_accounts, write_prepared_pack_day_export_bundle,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -76,7 +77,7 @@ use radroots_studio_app_remote_signer::{
 use radroots_studio_app_sqlite::{
     APP_ACTIVITY_CONTEXT_LIMIT, AppLocalInteropImportReport, AppSdkWorkflowReceiptInput,
     AppSdkWorkflowReceiptSourceKind, AppSdkWorkflowReceiptState, AppSqliteError, AppSqliteStore,
-    BuyerOrderLocalEventExport, BuyerOrderLocalEventLine, BuyerRepeatDemandApplyOutcome,
+    BuyerOrderRuntimeStoreExport, BuyerOrderRuntimeStoreLine, BuyerRepeatDemandApplyOutcome,
     DatabaseTarget, SelectedBuyerOrderScope, SellerOrderDecisionExport, StoredPendingSyncOperation,
     StoredRelayIngestCursor, StoredSyncConflict, derive_farm_rules_readiness,
     projected_order_id_from_trade_request,
@@ -223,7 +224,7 @@ pub enum AppSellerOrderDecisionCommand {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ResolvedAppSellerOrderRequest {
-    request_event: SdkRadrootsNostrEvent,
+    request_event: RadrootsEventEnvelope,
     request_event_id: String,
     request_author_pubkey: String,
     listing_event_id: Option<String>,
@@ -238,6 +239,7 @@ struct ResolvedAppOrderDecisionEvidence {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ResolvedAppOrderRevisionProposalEvidence {
+    event: RadrootsEventEnvelope,
     event_id: String,
     payload: RadrootsOrderRevisionProposal,
 }
@@ -1094,12 +1096,12 @@ impl DesktopAppRuntime {
             .attempt_sync(SyncTrigger::ManualRefresh)
     }
 
-    pub fn refresh_shared_local_events(
+    pub fn refresh_shared_runtime_store(
         &self,
     ) -> Result<AppLocalInteropImportReport, AppSqliteError> {
         let mut state = self.lock_state_mut();
-        let report = state.import_shared_local_events()?;
-        let _ = state.refresh_selected_account_context_after_local_events()?;
+        let report = state.import_shared_runtime_store()?;
+        let _ = state.refresh_selected_account_context_after_runtime_store()?;
         Ok(report)
     }
 
@@ -1347,7 +1349,7 @@ impl DesktopAppSdkReadyDiagnosticsSummary {
             integrity_outbox_ok: diagnostics.integrity.outbox_ok,
             sync_source: diagnostics.sync.source.clone(),
             sync_observed_at_ms: diagnostics.sync.observed_at_ms,
-            sync_relay_target_count: diagnostics.sync.relay_targets.configured_count,
+            sync_relay_target_count: diagnostics.sync.transport_targets.configured_count,
         }
     }
 
@@ -1587,9 +1589,9 @@ impl DesktopAppRuntimeState {
         }
         let database_path = paths.app.data.join(APP_DATABASE_FILE_NAME);
         let sqlite_store = AppSqliteStore::open(DatabaseTarget::Path(database_path.clone()))?;
-        let shared_local_events_database_path = paths.shared_local_events_database_path()?;
+        let shared_runtime_store_database_path = paths.shared_runtime_store_database_path()?;
         let _ = sqlite_store
-            .import_shared_local_events_from_path(shared_local_events_database_path.as_path())?;
+            .import_shared_runtime_store_from_path(shared_runtime_store_database_path.as_path())?;
         let database_schema_version = sqlite_store.schema_version()?;
         let mut state_store = AppStateStore::load(AppStatePersistenceRepository::file_backed(
             paths.app.data.join(APP_STATE_FILE_NAME),
@@ -1854,9 +1856,9 @@ impl DesktopAppRuntimeState {
     }
 
     fn refresh_personal_browse_navigation(&mut self) -> Result<bool, AppSqliteError> {
-        let report = self.import_shared_local_events()?;
+        let report = self.import_shared_runtime_store()?;
         let local_changed = report.imported_records > 0 || report.skipped_records > 0;
-        let context_changed = self.refresh_selected_account_context_after_local_events()?;
+        let context_changed = self.refresh_selected_account_context_after_runtime_store()?;
 
         Ok(local_changed || context_changed)
     }
@@ -2554,7 +2556,7 @@ impl DesktopAppRuntimeState {
         order_id: OrderId,
         command: AppSellerOrderDecisionCommand,
     ) -> Result<AppOrderDecisionPublishPayload, AppSqliteError> {
-        let _ = self.import_shared_local_events()?;
+        let _ = self.import_shared_runtime_store()?;
         let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
             AppSqliteError::InvalidProjection {
                 reason: "seller order decision requires valid configured relays",
@@ -2587,7 +2589,7 @@ impl DesktopAppRuntimeState {
             });
         };
         let account_id = selected_account.account.account_id.clone();
-        let seller_pubkey = self.local_events_owner_pubkey(selected_account).ok_or(
+        let seller_pubkey = self.runtime_store_owner_pubkey(selected_account).ok_or(
             AppSqliteError::InvalidProjection {
                 reason: "seller order decision requires a selected seller public key",
             },
@@ -2684,7 +2686,7 @@ impl DesktopAppRuntimeState {
                     || report.local_import.imported_records > 0
                     || report.local_import.skipped_records > 0
                 {
-                    let _ = self.refresh_selected_account_context_after_local_events()?;
+                    let _ = self.refresh_selected_account_context_after_runtime_store()?;
                 }
                 Ok(())
             }
@@ -2721,7 +2723,7 @@ impl DesktopAppRuntimeState {
         reason: &str,
         confirm_public_note: bool,
     ) -> Result<AppOrderRevisionProposalPublishPayload, AppSqliteError> {
-        let _ = self.import_shared_local_events()?;
+        let _ = self.import_shared_runtime_store()?;
         let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
             AppSqliteError::InvalidProjection {
                 reason: "seller order revision requires valid configured relays",
@@ -2754,7 +2756,7 @@ impl DesktopAppRuntimeState {
             });
         };
         let account_id = selected_account.account.account_id.clone();
-        let seller_pubkey = self.local_events_owner_pubkey(selected_account).ok_or(
+        let seller_pubkey = self.runtime_store_owner_pubkey(selected_account).ok_or(
             AppSqliteError::InvalidProjection {
                 reason: "seller order revision requires a selected seller public key",
             },
@@ -2861,7 +2863,7 @@ impl DesktopAppRuntimeState {
         decision: RadrootsOrderRevisionOutcome,
         confirm_public_note: bool,
     ) -> Result<AppOrderRevisionDecisionPublishPayload, AppSqliteError> {
-        let _ = self.import_shared_local_events()?;
+        let _ = self.import_shared_runtime_store()?;
         let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
             AppSqliteError::InvalidProjection {
                 reason: "buyer order revision requires valid configured relays",
@@ -2884,7 +2886,7 @@ impl DesktopAppRuntimeState {
                 reason: "buyer order revision requires a selected buyer account",
             });
         };
-        let buyer_pubkey = self.local_events_owner_pubkey(selected_account).ok_or(
+        let buyer_pubkey = self.runtime_store_owner_pubkey(selected_account).ok_or(
             AppSqliteError::InvalidProjection {
                 reason: "buyer order revision requires a selected buyer public key",
             },
@@ -3007,7 +3009,7 @@ impl DesktopAppRuntimeState {
         order_id: OrderId,
         confirm_public_note: bool,
     ) -> Result<AppOrderCancellationPublishPayload, AppSqliteError> {
-        let _ = self.import_shared_local_events()?;
+        let _ = self.import_shared_runtime_store()?;
         let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
             AppSqliteError::InvalidProjection {
                 reason: "buyer order cancellation requires valid configured relays",
@@ -3030,7 +3032,7 @@ impl DesktopAppRuntimeState {
                 reason: "buyer order cancellation requires a selected buyer account",
             });
         };
-        let buyer_pubkey = self.local_events_owner_pubkey(selected_account).ok_or(
+        let buyer_pubkey = self.runtime_store_owner_pubkey(selected_account).ok_or(
             AppSqliteError::InvalidProjection {
                 reason: "buyer order cancellation requires a selected buyer public key",
             },
@@ -3734,7 +3736,7 @@ impl DesktopAppRuntimeState {
         projection: AppIdentityProjection,
     ) -> Result<bool, DesktopAppRuntimeCommandError> {
         let projection = self.decorate_identity_projection(projection)?;
-        let _ = self.import_shared_local_events()?;
+        let _ = self.import_shared_runtime_store()?;
         let continuity_state = self.continuity_state();
         let selected_account_context =
             load_selected_account_context(self.sqlite_store()?, &projection, &continuity_state)?;
@@ -3756,7 +3758,7 @@ impl DesktopAppRuntimeState {
     fn refresh_selected_account_context(
         &self,
     ) -> Result<DesktopSelectedAccountContext, DesktopAppRuntimeFarmSetupError> {
-        let _ = self.import_shared_local_events()?;
+        let _ = self.import_shared_runtime_store()?;
         let continuity_state = self.continuity_state();
         Ok(load_selected_account_context(
             self.sqlite_store_for_farm_setup()?,
@@ -4099,7 +4101,7 @@ impl DesktopAppRuntimeState {
                     &result,
                 )?;
                 if relay_context_changed {
-                    changed |= self.refresh_selected_account_context_after_local_events()?;
+                    changed |= self.refresh_selected_account_context_after_runtime_store()?;
                 }
             }
             Err(error) => {
@@ -4114,7 +4116,7 @@ impl DesktopAppRuntimeState {
                     self.ingest_configured_relay_events_for_sync(None, &started_at)?;
                 if relay_context_changed {
                     changed |= self.refresh_selected_account_sync()?;
-                    changed |= self.refresh_selected_account_context_after_local_events()?;
+                    changed |= self.refresh_selected_account_context_after_runtime_store()?;
                 }
             }
         }
@@ -4353,7 +4355,7 @@ impl DesktopAppRuntimeState {
         let receipt_import_changed = if result.published_receipts.is_empty() {
             false
         } else {
-            let report = self.import_shared_local_events()?;
+            let report = self.import_shared_runtime_store()?;
             report.imported_records > 0 || report.skipped_records > 0
         };
         {
@@ -4466,7 +4468,7 @@ impl DesktopAppRuntimeState {
     fn enqueue_selected_account_order_sync_operation(
         &mut self,
         buyer_context: &BuyerContext,
-        order: &BuyerOrderLocalEventExport,
+        order: &BuyerOrderRuntimeStoreExport,
         local_work: Option<&AppOrderLocalWorkPublishSource>,
     ) -> Result<bool, AppSqliteError> {
         let Some(payload) = self.order_request_publish_payload(buyer_context, order, local_work)?
@@ -4481,7 +4483,7 @@ impl DesktopAppRuntimeState {
             .unwrap_or_else(|| format!("app:order_request:{}", payload.order_id));
         self.enqueue_order_request_payload_via_sdk(
             &payload,
-            AppSdkWorkflowReceiptSourceKind::SharedLocalEvent,
+            AppSdkWorkflowReceiptSourceKind::SharedRuntimeStore,
             source_record_id.as_str(),
         )?;
         self.refresh_selected_account_sync()
@@ -4618,7 +4620,7 @@ impl DesktopAppRuntimeState {
         let Some(farm_id) = self.selected_farm_id() else {
             return Ok(None);
         };
-        let Some(farm_pubkey) = self.local_events_owner_pubkey(selected_account) else {
+        let Some(farm_pubkey) = self.runtime_store_owner_pubkey(selected_account) else {
             return Ok(None);
         };
         let farm_setup = self.state_store.farm_setup_projection();
@@ -4666,7 +4668,7 @@ impl DesktopAppRuntimeState {
     fn order_request_publish_payload(
         &self,
         buyer_context: &BuyerContext,
-        order: &BuyerOrderLocalEventExport,
+        order: &BuyerOrderRuntimeStoreExport,
         local_work: Option<&AppOrderLocalWorkPublishSource>,
     ) -> Result<Option<AppOrderRequestPublishPayload>, AppSqliteError> {
         let Some(local_work) = local_work else {
@@ -4675,7 +4677,7 @@ impl DesktopAppRuntimeState {
         let Some(buyer_account) = self.selected_buyer_account(buyer_context) else {
             return Ok(None);
         };
-        let buyer_pubkey = self.local_events_owner_pubkey(buyer_account);
+        let buyer_pubkey = self.runtime_store_owner_pubkey(buyer_account);
         let export = AppBuyerOrderRequestExport::from_order(order, buyer_pubkey.as_deref())?;
         if !export.is_supported() {
             return Ok(None);
@@ -4990,6 +4992,9 @@ impl DesktopAppRuntimeState {
                     locator: trade_locator_from_revision_decision_payload(payload)?,
                     revision_id: publish_revision_id(payload.revision_id.as_str())?,
                     decision: payload.decision.clone(),
+                    evidence: self
+                        .order_revision_decision_sdk_evidence(payload)
+                        .map_err(|error| AppSyncTransportError::failed(error.to_string()))?,
                     confirm_public_note: payload.confirm_public_note,
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
                 };
@@ -5057,6 +5062,25 @@ impl DesktopAppRuntimeState {
                 sync_transport_error_detail_json(&error),
             ),
         }
+    }
+
+    fn order_revision_decision_sdk_evidence(
+        &self,
+        payload: &AppOrderRevisionDecisionPublishPayload,
+    ) -> Result<Vec<RadrootsEventEnvelope>, AppSqliteError> {
+        let request = self.resolve_seller_order_request_evidence(payload.app_order_id)?;
+        let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
+        let Some(proposal) = active_order_pending_revision_proposal(&lifecycle) else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order revision requires a pending seller proposal",
+            });
+        };
+        if proposal.payload.revision_id.to_string() != payload.revision_id {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order revision evidence does not match requested revision",
+            });
+        }
+        Ok(vec![request.request_event, proposal.event.clone()])
     }
 
     fn local_signing_identity_for_publish_payload(
@@ -5345,7 +5369,7 @@ impl DesktopAppRuntimeState {
         &self,
         query: &BuyerSearchScreenQueryState,
     ) -> Result<radroots_studio_app_view::BuyerListingsProjection, AppSqliteError> {
-        let _ = self.import_shared_local_events()?;
+        let _ = self.import_shared_runtime_store()?;
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Ok(Default::default());
         };
@@ -5470,7 +5494,7 @@ impl DesktopAppRuntimeState {
         &self,
         query: &ProductsScreenQueryState,
     ) -> Result<ProductsListProjection, AppSqliteError> {
-        let _ = self.import_shared_local_events()?;
+        let _ = self.import_shared_runtime_store()?;
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Ok(ProductsListProjection::default());
         };
@@ -5481,7 +5505,7 @@ impl DesktopAppRuntimeState {
         sqlite_store.load_products(farm_id, &query.search_query, query.filter, query.sort)
     }
 
-    fn import_shared_local_events(&self) -> Result<AppLocalInteropImportReport, AppSqliteError> {
+    fn import_shared_runtime_store(&self) -> Result<AppLocalInteropImportReport, AppSqliteError> {
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Ok(AppLocalInteropImportReport::default());
         };
@@ -5489,11 +5513,11 @@ impl DesktopAppRuntimeState {
             return Ok(AppLocalInteropImportReport::default());
         };
         let Some(database_path) =
-            shared_local_events_database_path_from_shared_accounts(shared_accounts_paths)
+            shared_runtime_store_database_path_from_shared_accounts(shared_accounts_paths)
         else {
             return Ok(AppLocalInteropImportReport::default());
         };
-        sqlite_store.import_shared_local_events_from_path(database_path.as_path())
+        sqlite_store.import_shared_runtime_store_from_path(database_path.as_path())
     }
 
     fn resolve_seller_order_request_evidence(
@@ -5529,7 +5553,7 @@ impl DesktopAppRuntimeState {
         order_id: &OrderId,
         matched_requests: &mut BTreeMap<String, ResolvedAppSellerOrderRequest>,
     ) -> Result<(), AppSqliteError> {
-        let store = self.open_shared_local_events_store()?;
+        let store = self.open_shared_runtime_store_store()?;
         let Some(store) = store else {
             return Ok(());
         };
@@ -5543,13 +5567,13 @@ impl DesktopAppRuntimeState {
                         before_seq,
                         APP_SELLER_ORDER_DECISION_EVIDENCE_PAGE_SIZE,
                     )
-                    .map_err(|source| AppSqliteError::LocalEvents {
+                    .map_err(|source| AppSqliteError::RuntimeStore {
                         operation: "load shared order request evidence",
                         source,
                     })?,
                 None => store
                     .list_records_changed_latest(APP_SELLER_ORDER_DECISION_EVIDENCE_PAGE_SIZE)
-                    .map_err(|source| AppSqliteError::LocalEvents {
+                    .map_err(|source| AppSqliteError::RuntimeStore {
                         operation: "load shared order request evidence",
                         source,
                     })?,
@@ -5562,7 +5586,7 @@ impl DesktopAppRuntimeState {
             before = records.last().map(|record| (record.change_seq, record.seq));
 
             for record in records {
-                if record.family != LocalRecordFamily::SignedEvent
+                if record.family != RuntimeStoreRecordFamily::SignedEvent
                     || record.event_kind
                         != Some(i64::from(RadrootsOrderEventType::OrderRequested.kind()))
                     || !signed_order_request_evidence_record_is_usable(&record)
@@ -5630,6 +5654,7 @@ impl DesktopAppRuntimeState {
         });
 
         let mut buckets = AppActiveOrderEvidenceBuckets::default();
+        let mut signed_events_by_id = BTreeMap::new();
         let request_event_id =
             active_order_event_id(request.request_event_id.as_str(), "request_event_id")?;
         let request_author_pubkey = active_order_pubkey(
@@ -5649,6 +5674,7 @@ impl DesktopAppRuntimeState {
             }
             let event_id = active_order_event_id(event.id.as_str(), "event_id")?;
             let author_pubkey = active_order_pubkey(event.author.as_str(), "author_pubkey")?;
+            signed_events_by_id.insert(event_id.to_string(), event.clone());
             match event.kind {
                 KIND_ORDER_DECISION => {
                     let envelope = order_decision_from_event(&event).map_err(|_| {
@@ -5774,11 +5800,20 @@ impl DesktopAppRuntimeState {
             revision_proposals: buckets
                 .revision_proposals
                 .into_iter()
-                .map(|proposal| ResolvedAppOrderRevisionProposalEvidence {
-                    event_id: proposal.event_id.to_string(),
-                    payload: proposal.payload,
+                .map(|proposal| {
+                    let event = signed_events_by_id
+                        .get(proposal.event_id.as_str())
+                        .cloned()
+                        .ok_or(AppSqliteError::InvalidProjection {
+                            reason: "order lifecycle evidence is invalid",
+                        })?;
+                    Ok(ResolvedAppOrderRevisionProposalEvidence {
+                        event,
+                        event_id: proposal.event_id.to_string(),
+                        payload: proposal.payload,
+                    })
                 })
-                .collect(),
+                .collect::<Result<Vec<_>, AppSqliteError>>()?,
             revision_decisions: buckets
                 .revision_decisions
                 .into_iter()
@@ -5795,7 +5830,7 @@ impl DesktopAppRuntimeState {
 
     fn collect_order_lifecycle_signed_events(
         &self,
-    ) -> Result<Vec<SdkRadrootsNostrEvent>, AppSqliteError> {
+    ) -> Result<Vec<RadrootsEventEnvelope>, AppSqliteError> {
         let mut events = Vec::new();
         let mut seen_event_ids = BTreeSet::new();
         let kinds = [
@@ -5817,7 +5852,7 @@ impl DesktopAppRuntimeState {
             }
         }
 
-        let Some(store) = self.open_shared_local_events_store()? else {
+        let Some(store) = self.open_shared_runtime_store_store()? else {
             return Ok(events);
         };
         let mut before = None;
@@ -5829,13 +5864,13 @@ impl DesktopAppRuntimeState {
                         before_seq,
                         APP_SELLER_ORDER_DECISION_EVIDENCE_PAGE_SIZE,
                     )
-                    .map_err(|source| AppSqliteError::LocalEvents {
+                    .map_err(|source| AppSqliteError::RuntimeStore {
                         operation: "load shared order lifecycle evidence",
                         source,
                     })?,
                 None => store
                     .list_records_changed_latest(APP_SELLER_ORDER_DECISION_EVIDENCE_PAGE_SIZE)
-                    .map_err(|source| AppSqliteError::LocalEvents {
+                    .map_err(|source| AppSqliteError::RuntimeStore {
                         operation: "load shared order lifecycle evidence",
                         source,
                     })?,
@@ -5851,7 +5886,7 @@ impl DesktopAppRuntimeState {
                 let Some(kind) = record.event_kind else {
                     continue;
                 };
-                if record.family != LocalRecordFamily::SignedEvent
+                if record.family != RuntimeStoreRecordFamily::SignedEvent
                     || !kinds.contains(&u32::try_from(kind).unwrap_or_default())
                     || !signed_order_request_evidence_record_is_usable(&record)
                 {
@@ -5873,14 +5908,14 @@ impl DesktopAppRuntimeState {
         Ok(events)
     }
 
-    fn open_shared_local_events_store(
+    fn open_shared_runtime_store_store(
         &self,
-    ) -> Result<Option<LocalEventsStore<SqliteExecutor>>, AppSqliteError> {
+    ) -> Result<Option<RuntimeStore<SqliteExecutor>>, AppSqliteError> {
         let Some(shared_accounts_paths) = self.shared_accounts_paths.as_ref() else {
             return Ok(None);
         };
         let Some(database_path) =
-            shared_local_events_database_path_from_shared_accounts(shared_accounts_paths)
+            shared_runtime_store_database_path_from_shared_accounts(shared_accounts_paths)
         else {
             return Ok(None);
         };
@@ -5891,16 +5926,16 @@ impl DesktopAppRuntimeState {
             })?;
         }
         let executor = SqliteExecutor::open(database_path.as_path()).map_err(|source| {
-            AppSqliteError::LocalEventsSql {
-                operation: "open shared local events database",
+            AppSqliteError::RuntimeStoreSql {
+                operation: "open shared runtime store database",
                 source,
             }
         })?;
-        let store = LocalEventsStore::new(executor);
+        let store = RuntimeStore::new(executor);
         store
             .migrate_up()
-            .map_err(|source| AppSqliteError::LocalEventsSql {
-                operation: "migrate shared local events database",
+            .map_err(|source| AppSqliteError::RuntimeStoreSql {
+                operation: "migrate shared runtime store database",
                 source,
             })?;
 
@@ -5918,7 +5953,7 @@ impl DesktopAppRuntimeState {
         };
         let timestamp = current_runtime_time_ms()?;
         let farm_d_tag = d_tag_from_uuid(saved_farm.farm_id.as_uuid());
-        let owner_pubkey = self.local_events_owner_pubkey(account);
+        let owner_pubkey = self.runtime_store_owner_pubkey(account);
         let exportability = local_work_exportability(owner_pubkey.as_deref());
         let delivery_method = projection
             .draft
@@ -5957,10 +5992,10 @@ impl DesktopAppRuntimeState {
             },
         });
         let record_id = format!("app:local_work:farm:{farm_d_tag}:{}", Uuid::now_v7());
-        let input = LocalEventRecordInput {
+        let input = RuntimeStoreRecordInput {
             record_id: record_id.clone(),
-            family: LocalRecordFamily::LocalWork,
-            status: LocalRecordStatus::LocalSaved,
+            family: RuntimeStoreRecordFamily::LocalWork,
+            status: RuntimeStoreRecordStatus::LocalSaved,
             source_runtime: SourceRuntime::App,
             created_at_ms: timestamp,
             inserted_at_ms: timestamp,
@@ -6009,7 +6044,7 @@ impl DesktopAppRuntimeState {
         let farm_d_tag = d_tag_from_uuid(farm_id.as_uuid());
         let listing_d_tag = d_tag_from_uuid(product_id.as_uuid());
         let primary_bin_id = listing_primary_bin_id(listing_d_tag.as_str());
-        let owner_pubkey = self.local_events_owner_pubkey(account);
+        let owner_pubkey = self.runtime_store_owner_pubkey(account);
         let listing_addr = owner_pubkey
             .as_ref()
             .map(|pubkey| format!("{KIND_LISTING}:{pubkey}:{listing_d_tag}"));
@@ -6080,10 +6115,10 @@ impl DesktopAppRuntimeState {
             },
         });
         let record_id = format!("app:local_work:listing:{listing_d_tag}:{}", Uuid::now_v7());
-        let input = LocalEventRecordInput {
+        let input = RuntimeStoreRecordInput {
             record_id: record_id.clone(),
-            family: LocalRecordFamily::LocalWork,
-            status: LocalRecordStatus::LocalSaved,
+            family: RuntimeStoreRecordFamily::LocalWork,
+            status: RuntimeStoreRecordStatus::LocalSaved,
             source_runtime: SourceRuntime::App,
             created_at_ms: timestamp,
             inserted_at_ms: timestamp,
@@ -6113,7 +6148,7 @@ impl DesktopAppRuntimeState {
         &self,
         sqlite_store: &AppSqliteStore,
         buyer_context: &BuyerContext,
-        order: &BuyerOrderLocalEventExport,
+        order: &BuyerOrderRuntimeStoreExport,
     ) -> Result<Option<AppOrderLocalWorkPublishSource>, AppSqliteError> {
         let Some(shared_accounts_paths) = self.shared_accounts_paths.as_ref() else {
             return Ok(None);
@@ -6122,14 +6157,14 @@ impl DesktopAppRuntimeState {
         let record_id = buyer_order_request_local_work_record_id(
             order.order_id.to_string().as_str(),
         )
-        .map_err(|source| AppSqliteError::LocalEvents {
+        .map_err(|source| AppSqliteError::RuntimeStore {
             operation: "build app buyer order request record id",
             source,
         })?;
         let buyer_account = self.selected_buyer_account(buyer_context);
         let owner_account_id = buyer_account.map(|account| account.account.account_id.clone());
         let buyer_pubkey =
-            buyer_account.and_then(|account| self.local_events_owner_pubkey(account));
+            buyer_account.and_then(|account| self.runtime_store_owner_pubkey(account));
         let export = AppBuyerOrderRequestExport::from_order(order, buyer_pubkey.as_deref())?;
         let payload = buyer_order_request_local_work_payload(
             order,
@@ -6142,7 +6177,7 @@ impl DesktopAppRuntimeState {
             return Ok(Some(AppOrderLocalWorkPublishSource { record_id, payload }));
         }
         validate_buyer_order_request_local_work_payload(&payload).map_err(|source| {
-            AppSqliteError::LocalEvents {
+            AppSqliteError::RuntimeStore {
                 operation: "validate app buyer order request local work payload",
                 source,
             }
@@ -6157,10 +6192,10 @@ impl DesktopAppRuntimeState {
             record_id.as_str(),
             payload_json.as_str(),
         )?;
-        let input = LocalEventRecordInput {
+        let input = RuntimeStoreRecordInput {
             record_id: record_id.clone(),
-            family: LocalRecordFamily::LocalWork,
-            status: LocalRecordStatus::LocalSaved,
+            family: RuntimeStoreRecordFamily::LocalWork,
+            status: RuntimeStoreRecordStatus::LocalSaved,
             source_runtime: SourceRuntime::App,
             created_at_ms: timestamp,
             inserted_at_ms: timestamp,
@@ -6198,10 +6233,10 @@ impl DesktopAppRuntimeState {
     fn append_app_local_work_record(
         &self,
         shared_accounts_paths: &AppSharedAccountsPaths,
-        input: &LocalEventRecordInput,
+        input: &RuntimeStoreRecordInput,
     ) -> Result<(), AppSqliteError> {
         let Some(database_path) =
-            shared_local_events_database_path_from_shared_accounts(shared_accounts_paths)
+            shared_runtime_store_database_path_from_shared_accounts(shared_accounts_paths)
         else {
             return Ok(());
         };
@@ -6212,21 +6247,21 @@ impl DesktopAppRuntimeState {
             })?;
         }
         let executor = SqliteExecutor::open(database_path.as_path()).map_err(|source| {
-            AppSqliteError::LocalEventsSql {
-                operation: "open shared local events database",
+            AppSqliteError::RuntimeStoreSql {
+                operation: "open shared runtime store database",
                 source,
             }
         })?;
-        let store = LocalEventsStore::new(executor);
+        let store = RuntimeStore::new(executor);
         store
             .migrate_up()
-            .map_err(|source| AppSqliteError::LocalEventsSql {
-                operation: "migrate shared local events database",
+            .map_err(|source| AppSqliteError::RuntimeStoreSql {
+                operation: "migrate shared runtime store database",
                 source,
             })?;
         store
             .append_record(input)
-            .map_err(|source| AppSqliteError::LocalEvents {
+            .map_err(|source| AppSqliteError::RuntimeStore {
                 operation: "append app local work record",
                 source,
             })?;
@@ -6244,7 +6279,7 @@ impl DesktopAppRuntimeState {
             return Ok(());
         };
         let Some(database_path) =
-            shared_local_events_database_path_from_shared_accounts(shared_accounts_paths)
+            shared_runtime_store_database_path_from_shared_accounts(shared_accounts_paths)
         else {
             return Ok(());
         };
@@ -6255,16 +6290,16 @@ impl DesktopAppRuntimeState {
             })?;
         }
         let executor = SqliteExecutor::open(database_path.as_path()).map_err(|source| {
-            AppSqliteError::LocalEventsSql {
-                operation: "open shared local events database",
+            AppSqliteError::RuntimeStoreSql {
+                operation: "open shared runtime store database",
                 source,
             }
         })?;
-        let store = LocalEventsStore::new(executor);
+        let store = RuntimeStore::new(executor);
         store
             .migrate_up()
-            .map_err(|source| AppSqliteError::LocalEventsSql {
-                operation: "migrate shared local events database",
+            .map_err(|source| AppSqliteError::RuntimeStoreSql {
+                operation: "migrate shared runtime store database",
                 source,
             })?;
         let timestamp = current_runtime_time_ms()?;
@@ -6275,7 +6310,7 @@ impl DesktopAppRuntimeState {
                 .as_deref()
                 .map(|source_record_id| {
                     store.get_record(source_record_id).map_err(|source| {
-                        AppSqliteError::LocalEvents {
+                        AppSqliteError::RuntimeStore {
                             operation: "load app publish source record",
                             source,
                         }
@@ -6301,10 +6336,10 @@ impl DesktopAppRuntimeState {
                 .and_then(|record| record.listing_addr.clone())
                 .or_else(|| receipt.listing_addr.clone())
                 .or_else(|| signed_event_listing_addr(receipt));
-            let event_record = LocalEventRecordInput {
+            let event_record = RuntimeStoreRecordInput {
                 record_id: format!("app:signed_event:{}", receipt.event_id),
-                family: LocalRecordFamily::SignedEvent,
-                status: LocalRecordStatus::Published,
+                family: RuntimeStoreRecordFamily::SignedEvent,
+                status: RuntimeStoreRecordStatus::Published,
                 source_runtime: SourceRuntime::App,
                 created_at_ms: i64::from(receipt.event_created_at) * 1_000,
                 inserted_at_ms: timestamp,
@@ -6327,7 +6362,7 @@ impl DesktopAppRuntimeState {
             };
             store
                 .append_record(&event_record)
-                .map_err(|source| AppSqliteError::LocalEvents {
+                .map_err(|source| AppSqliteError::RuntimeStore {
                     operation: "append app published event record",
                     source,
                 })?;
@@ -6336,19 +6371,19 @@ impl DesktopAppRuntimeState {
                 let Some(source_record) = source_record.as_ref() else {
                     continue;
                 };
-                if source_record.family == LocalRecordFamily::LocalWork {
+                if source_record.family == RuntimeStoreRecordFamily::LocalWork {
                     continue;
                 }
                 store
-                    .update_outbox(&LocalEventRecordUpdate {
+                    .update_outbox(&RuntimeStoreRecordUpdate {
                         record_id: source_record_id.to_owned(),
-                        status: LocalRecordStatus::Published,
+                        status: RuntimeStoreRecordStatus::Published,
                         outbox_status: PublishOutboxStatus::Acknowledged,
                         relay_set_fingerprint: Some(receipt.relay_set_fingerprint.clone()),
                         relay_delivery_json: Some(receipt.relay_delivery_json.clone()),
                         updated_at_ms: timestamp,
                     })
-                    .map_err(|source| AppSqliteError::LocalEvents {
+                    .map_err(|source| AppSqliteError::RuntimeStore {
                         operation: "update app publish source evidence",
                         source,
                     })?;
@@ -6358,7 +6393,7 @@ impl DesktopAppRuntimeState {
         Ok(())
     }
 
-    fn local_events_owner_pubkey(
+    fn runtime_store_owner_pubkey(
         &self,
         account: &radroots_studio_app_view::SelectedAccountProjection,
     ) -> Option<String> {
@@ -6390,7 +6425,7 @@ impl DesktopAppRuntimeState {
             .filter(|account| account.account.account_id == *account_id)
     }
 
-    fn refresh_selected_account_context_after_local_events(
+    fn refresh_selected_account_context_after_runtime_store(
         &mut self,
     ) -> Result<bool, AppSqliteError> {
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
@@ -6405,9 +6440,9 @@ impl DesktopAppRuntimeState {
     }
 
     fn sync_on_foreground_resume(&mut self) -> Result<bool, AppSqliteError> {
-        let report = self.import_shared_local_events()?;
+        let report = self.import_shared_runtime_store()?;
         let local_changed = report.imported_records > 0 || report.skipped_records > 0;
-        let context_changed = self.refresh_selected_account_context_after_local_events()?;
+        let context_changed = self.refresh_selected_account_context_after_runtime_store()?;
         let coordination_changed = self.retry_pending_personal_order_coordination()?;
         let sync_changed = self.attempt_sync(SyncTrigger::ForegroundResume)?;
 
@@ -6815,7 +6850,7 @@ fn current_runtime_time_seconds() -> Result<i64, AppSqliteError> {
 fn normalized_app_sync_relay_urls(
     relay_urls: &[String],
 ) -> Result<Vec<String>, AppSyncTransportError> {
-    let normalized = radroots_local_events::normalize_relay_urls(relay_urls).map_err(|error| {
+    let normalized = normalized_app_nostr_relay_urls(relay_urls).map_err(|error| {
         AppSyncTransportError::failed(format!("invalid direct relay app sync relay url: {error}"))
     })?;
     if normalized.is_empty() {
@@ -6827,11 +6862,29 @@ fn normalized_app_sync_relay_urls(
 }
 
 fn normalized_app_relay_ingest_urls(relay_urls: &[String]) -> Result<Vec<String>, AppSqliteError> {
-    let normalized = radroots_local_events::normalize_relay_urls(relay_urls).map_err(|_| {
-        AppSqliteError::InvalidProjection {
-            reason: "app relay ingest requires valid relay urls",
+    normalized_app_nostr_relay_urls(relay_urls).map_err(|_| AppSqliteError::InvalidProjection {
+        reason: "app relay ingest requires valid relay urls",
+    })
+}
+
+fn normalized_app_nostr_relay_urls(
+    relay_urls: &[String],
+) -> Result<Vec<String>, radroots_sdk::RadrootsSdkError> {
+    if relay_urls.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut normalized = Vec::new();
+    for relay_url in relay_urls {
+        let relay_url =
+            TargetSet::nostr_relays([relay_url.as_str()], NostrRelayUrlPolicy::Localhost)?
+                .nostr_relay_urls()
+                .into_iter()
+                .next()
+                .expect("single relay target set must contain one relay");
+        if !normalized.iter().any(|existing| existing == &relay_url) {
+            normalized.push(relay_url);
         }
-    })?;
+    }
     Ok(normalized)
 }
 
@@ -7092,7 +7145,7 @@ fn append_unique_relays(target: &mut Vec<String>, relays: Vec<String>) {
 fn direct_relay_event_records(
     receipt: &AppDirectRelayFetchReceipt,
     inserted_at_ms: i64,
-) -> Result<Vec<LocalEventRecord>, AppDirectRelayIngestError> {
+) -> Result<Vec<RuntimeStoreRecord>, AppDirectRelayIngestError> {
     let mut records = Vec::with_capacity(receipt.events.len());
 
     for (index, event) in receipt.events.iter().enumerate() {
@@ -7128,12 +7181,12 @@ fn direct_relay_event_records(
                 reason: "app relay ingest sequence must fit i64",
             }
         })?);
-        records.push(LocalEventRecord {
+        records.push(RuntimeStoreRecord {
             seq: local_seq,
             change_seq: local_seq,
             record_id: format!("app:relay_event:{event_id}"),
-            family: LocalRecordFamily::SignedEvent,
-            status: LocalRecordStatus::Published,
+            family: RuntimeStoreRecordFamily::SignedEvent,
+            status: RuntimeStoreRecordStatus::Published,
             source_runtime: direct_relay_event_source_runtime(kind, listing_d_tag.as_deref()),
             created_at_ms,
             inserted_at_ms,
@@ -7357,7 +7410,7 @@ fn farm_publish_source_record(
     source_local_event_id
         .map(|record_id| {
             (
-                AppSdkWorkflowReceiptSourceKind::SharedLocalEvent,
+                AppSdkWorkflowReceiptSourceKind::SharedRuntimeStore,
                 record_id.to_owned(),
             )
         })
@@ -7377,7 +7430,7 @@ fn listing_publish_source_record(
     source_local_event_id
         .map(|record_id| {
             (
-                AppSdkWorkflowReceiptSourceKind::SharedLocalEvent,
+                AppSdkWorkflowReceiptSourceKind::SharedRuntimeStore,
                 record_id.to_owned(),
             )
         })
@@ -7729,7 +7782,7 @@ fn parse_app_listing_delivery_method(
 
 fn order_request_sdk_listing_event_ptr(
     payload: &AppOrderRequestPublishPayload,
-) -> Result<RadrootsNostrEventPtr, AppSyncTransportError> {
+) -> Result<RadrootsEventPtr, AppSyncTransportError> {
     let listing_event_id = payload
         .listing_event_id
         .as_deref()
@@ -7742,7 +7795,7 @@ fn order_request_sdk_listing_event_ptr(
         .into_iter()
         .next();
 
-    Ok(RadrootsNostrEventPtr {
+    Ok(RadrootsEventPtr {
         id: listing_event_id,
         relays: listing_relay,
     })
@@ -7965,7 +8018,7 @@ struct AppOrderLocalWorkPublishSource {
 
 impl AppBuyerOrderRequestExport {
     fn from_order(
-        order: &BuyerOrderLocalEventExport,
+        order: &BuyerOrderRuntimeStoreExport,
         buyer_pubkey: Option<&str>,
     ) -> Result<Self, AppSqliteError> {
         let mut support_issues = Vec::new();
@@ -8052,7 +8105,7 @@ impl AppBuyerOrderRequestExport {
 }
 
 fn buyer_order_request_local_work_payload(
-    order: &BuyerOrderLocalEventExport,
+    order: &BuyerOrderRuntimeStoreExport,
     buyer_context: &BuyerContext,
     record_id: &str,
     export: &AppBuyerOrderRequestExport,
@@ -8129,7 +8182,7 @@ fn buyer_order_request_local_work_payload(
 }
 
 fn order_economics_json(
-    order: &BuyerOrderLocalEventExport,
+    order: &BuyerOrderRuntimeStoreExport,
     support_issues: &mut Vec<&'static str>,
 ) -> Result<Option<serde_json::Value>, AppSqliteError> {
     let mut economics_items = Vec::with_capacity(order.lines.len());
@@ -8227,7 +8280,7 @@ fn order_economics_json(
 }
 
 fn order_currency_and_total(
-    order: &BuyerOrderLocalEventExport,
+    order: &BuyerOrderRuntimeStoreExport,
 ) -> Result<Option<(String, u32)>, AppSqliteError> {
     let mut currency = None::<String>;
     let mut total_minor_units = 0_u32;
@@ -8265,8 +8318,8 @@ fn order_currency_and_total(
 }
 
 fn shared_optional_line_value(
-    lines: &[BuyerOrderLocalEventLine],
-    value: impl Fn(&BuyerOrderLocalEventLine) -> Option<&str>,
+    lines: &[BuyerOrderRuntimeStoreLine],
+    value: impl Fn(&BuyerOrderRuntimeStoreLine) -> Option<&str>,
 ) -> Option<String> {
     let mut resolved = None::<String>;
     for line in lines {
@@ -8284,7 +8337,7 @@ fn shared_optional_line_value(
     resolved
 }
 
-fn shared_listing_relays(lines: &[BuyerOrderLocalEventLine]) -> Vec<String> {
+fn shared_listing_relays(lines: &[BuyerOrderRuntimeStoreLine]) -> Vec<String> {
     let mut seen = BTreeSet::new();
     let mut relays = Vec::new();
     for line in lines {
@@ -9367,8 +9420,8 @@ fn current_utc_timestamp() -> String {
 }
 
 fn signed_event_from_local_record(
-    record: &LocalEventRecord,
-) -> Result<Option<SdkRadrootsNostrEvent>, AppSqliteError> {
+    record: &RuntimeStoreRecord,
+) -> Result<Option<RadrootsEventEnvelope>, AppSqliteError> {
     let Some(id) = record.event_id.as_deref().map(str::trim) else {
         return Ok(None);
     };
@@ -9392,7 +9445,7 @@ fn signed_event_from_local_record(
         reason: "signed local event kind must fit u32",
     })?;
 
-    Ok(Some(SdkRadrootsNostrEvent {
+    Ok(Some(RadrootsEventEnvelope {
         id: id.to_owned(),
         author: author.to_owned(),
         created_at,
@@ -9437,7 +9490,7 @@ fn event_tags_from_value(
         .collect()
 }
 
-fn trade_chain_tag_value(event: &SdkRadrootsNostrEvent, key: &str) -> Option<String> {
+fn trade_chain_tag_value(event: &RadrootsEventEnvelope, key: &str) -> Option<String> {
     event.tags.iter().find_map(|tag| {
         if tag.first().map(String::as_str) == Some(key) {
             tag.get(1)
@@ -9472,7 +9525,7 @@ fn active_order_pubkey(
 }
 
 fn active_order_event_record_context(
-    event: &SdkRadrootsNostrEvent,
+    event: &RadrootsEventEnvelope,
     message_type: RadrootsOrderEventType,
 ) -> Result<(RadrootsPublicKey, RadrootsEventId, RadrootsEventId), AppSqliteError> {
     let context = order_event_context_from_tags(message_type, &event.tags).map_err(|_| {
@@ -9527,7 +9580,7 @@ fn active_order_pending_revision_proposal(
 
 fn insert_seller_order_request_evidence(
     order_id: &OrderId,
-    event: &SdkRadrootsNostrEvent,
+    event: &RadrootsEventEnvelope,
     payload: RadrootsOrderRequest,
     matched_requests: &mut BTreeMap<String, ResolvedAppSellerOrderRequest>,
 ) {
@@ -9752,8 +9805,8 @@ fn farm_sync_payload(
     .to_string()
 }
 
-fn signed_order_request_evidence_record_is_usable(record: &LocalEventRecord) -> bool {
-    if record.status != LocalRecordStatus::Published
+fn signed_order_request_evidence_record_is_usable(record: &RuntimeStoreRecord) -> bool {
+    if record.status != RuntimeStoreRecordStatus::Published
         || matches!(
             record.outbox_status,
             PublishOutboxStatus::Pending | PublishOutboxStatus::Failed
@@ -9787,18 +9840,18 @@ mod tests {
     use radroots_core::{
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
     };
-    use radroots_events::ids::{
+    use radroots_event::ids::{
         RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress, RadrootsOrderId,
         RadrootsOrderQuoteId, RadrootsOrderRevisionId, RadrootsPublicKey,
     };
-    use radroots_events::order::{
+    use radroots_event::order::{
         RadrootsOrderCancellation, RadrootsOrderDecision, RadrootsOrderDecisionOutcome,
         RadrootsOrderEconomicItem, RadrootsOrderEconomics, RadrootsOrderInventoryCommitment,
         RadrootsOrderItem, RadrootsOrderPricingBasis, RadrootsOrderRequest,
         RadrootsOrderRevisionOutcome, RadrootsOrderRevisionProposal,
     };
-    use radroots_events::{RadrootsNostrEvent as SdkRadrootsNostrEvent, RadrootsNostrEventPtr};
-    use radroots_events_codec::{
+    use radroots_event::{RadrootsEventEnvelope, RadrootsEventPtr};
+    use radroots_event_codec::{
         order::{
             order_cancellation_event_build, order_decision_event_build, order_request_event_build,
             order_revision_proposal_event_build,
@@ -9806,11 +9859,6 @@ mod tests {
         wire::WireEventParts,
     };
     use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
-    use radroots_local_events::{
-        BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, LocalEventRecord, LocalEventRecordInput,
-        LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus,
-        RelayDeliveryEvidence, SourceRuntime,
-    };
     use radroots_nostr::prelude::{
         RadrootsNostrClient, RadrootsNostrEvent, RadrootsNostrKeys, RadrootsNostrSecretKey,
         RadrootsNostrTimestamp, radroots_event_from_nostr, radroots_nostr_build_event,
@@ -9819,6 +9867,11 @@ mod tests {
         RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
         RadrootsNostrMemoryAccountStore, RadrootsNostrSecretVaultMemory, RadrootsSecretVault,
         account_secret_slot,
+    };
+    use radroots_runtime_store::{
+        BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, PublishOutboxStatus, RelayDeliveryEvidence,
+        RuntimeStore, RuntimeStoreRecord, RuntimeStoreRecordFamily, RuntimeStoreRecordInput,
+        RuntimeStoreRecordStatus, SourceRuntime,
     };
     use radroots_sdk::{
         LISTING_PUBLISH_OPERATION_KIND, TRADE_CANCELLATION_OPERATION_KIND,
@@ -10166,7 +10219,7 @@ mod tests {
         });
     }
 
-    fn seed_relay_with_sdk_event(relay: &ThreadedAckRelay, event: &SdkRadrootsNostrEvent) {
+    fn seed_relay_with_sdk_event(relay: &ThreadedAckRelay, event: &RadrootsEventEnvelope) {
         relay.seed_event(json!({
             "id": event.id,
             "pubkey": event.author,
@@ -10196,7 +10249,7 @@ mod tests {
         paths: &AppDesktopRuntimePaths,
         event_id: &str,
     ) {
-        let event = shared_local_event_records(paths)
+        let event = shared_runtime_store_records(paths)
             .into_iter()
             .find(|record| record.event_id.as_deref() == Some(event_id))
             .and_then(|record| {
@@ -10262,7 +10315,7 @@ mod tests {
         secret_key_hex: &str,
         created_at: u32,
         parts: WireEventParts,
-    ) -> SdkRadrootsNostrEvent {
+    ) -> RadrootsEventEnvelope {
         let secret_key = RadrootsNostrSecretKey::from_hex(secret_key_hex).expect("secret key");
         let keys = RadrootsNostrKeys::new(secret_key);
         let event = radroots_nostr_build_event(parts.kind, parts.content, parts.tags)
@@ -10277,7 +10330,7 @@ mod tests {
         pubkey: &str,
         created_at: u32,
         parts: WireEventParts,
-    ) -> Option<SdkRadrootsNostrEvent> {
+    ) -> Option<RadrootsEventEnvelope> {
         match pubkey {
             SDK_TEST_BUYER_PUBLIC_KEY_HEX => Some(signed_test_event(
                 SDK_TEST_BUYER_SECRET_KEY_HEX,
@@ -10299,9 +10352,9 @@ mod tests {
         event_pubkey: &str,
         created_at: u32,
         parts: WireEventParts,
-    ) -> SdkRadrootsNostrEvent {
+    ) -> RadrootsEventEnvelope {
         signed_test_event_for_pubkey(event_pubkey, created_at, parts.clone()).unwrap_or_else(|| {
-            SdkRadrootsNostrEvent {
+            RadrootsEventEnvelope {
                 id: event_id,
                 author: event_pubkey.to_owned(),
                 created_at,
@@ -10890,7 +10943,7 @@ mod tests {
         let listing =
             super::listing_publish_payload_to_sdk_listing(&listing_payload, Some(&public_location))
                 .expect("listing payload should convert to SDK listing");
-        let parts = radroots_events_codec::listing::encode::to_wire_parts(&listing)
+        let parts = radroots_event_codec::listing::encode::to_wire_parts(&listing)
             .expect("listing draft should build");
         let event = radroots_nostr_build_event(parts.kind, parts.content, parts.tags)
             .expect("listing event builder should build")
@@ -11838,7 +11891,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(product_pending_operations.is_empty());
 
-        let records = shared_local_event_records(&paths);
+        let records = shared_runtime_store_records(&paths);
         let listing_record = records
             .iter()
             .find(|record| {
@@ -11873,7 +11926,7 @@ mod tests {
             .expect("sqlite store")
             .sdk_workflow_receipt_repository()
             .load_receipt(
-                AppSdkWorkflowReceiptSourceKind::SharedLocalEvent,
+                AppSdkWorkflowReceiptSourceKind::SharedRuntimeStore,
                 listing_record.record_id.as_str(),
             )
             .expect("listing SDK workflow receipt should load")
@@ -11990,7 +12043,7 @@ mod tests {
             Some(draft.clone())
         );
 
-        let records = shared_local_event_records(&paths);
+        let records = shared_runtime_store_records(&paths);
         let listing_record = records
             .iter()
             .find(|record| {
@@ -12008,7 +12061,7 @@ mod tests {
             .expect("sqlite store")
             .sdk_workflow_receipt_repository()
             .load_receipt(
-                AppSdkWorkflowReceiptSourceKind::SharedLocalEvent,
+                AppSdkWorkflowReceiptSourceKind::SharedRuntimeStore,
                 listing_record.record_id.as_str(),
             )
             .expect("failed listing SDK workflow receipt should load")
@@ -12030,7 +12083,7 @@ mod tests {
                 .save_product_editor_draft(draft.clone())
                 .expect("retry should enqueue listing publish through SDK runtime")
         );
-        let retry_records = shared_local_event_records(&paths);
+        let retry_records = shared_runtime_store_records(&paths);
         let enqueued_listing_receipts = {
             let state = runtime.lock_state();
             let repository = state
@@ -12050,7 +12103,7 @@ mod tests {
                 .filter_map(|record| {
                     repository
                         .load_receipt(
-                            AppSdkWorkflowReceiptSourceKind::SharedLocalEvent,
+                            AppSdkWorkflowReceiptSourceKind::SharedRuntimeStore,
                             record.record_id.as_str(),
                         )
                         .expect("retry listing SDK workflow receipt should load")
@@ -12327,7 +12380,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(product_pending_operations.is_empty());
 
-        let records = shared_local_event_records(&paths);
+        let records = shared_runtime_store_records(&paths);
         let listing_record = records
             .iter()
             .find(|record| {
@@ -12516,9 +12569,9 @@ mod tests {
             SyncCheckpointState::Current
         );
         assert_eq!(
-            shared_local_event_records(&paths)
+            shared_runtime_store_records(&paths)
                 .into_iter()
-                .filter(|record| record.family == LocalRecordFamily::SignedEvent)
+                .filter(|record| record.family == RuntimeStoreRecordFamily::SignedEvent)
                 .count(),
             1
         );
@@ -12648,8 +12701,8 @@ mod tests {
     }
 
     #[test]
-    fn runtime_shared_local_events_refresh_reports_and_reloads_products() {
-        let (runtime, paths) = bootstrapped_runtime("shared_local_events_refresh");
+    fn runtime_shared_runtime_store_refresh_reports_and_reloads_products() {
+        let (runtime, paths) = bootstrapped_runtime("shared_runtime_store_refresh");
         assert!(
             runtime
                 .generate_local_account(Some("Farmer".to_owned()))
@@ -12667,8 +12720,8 @@ mod tests {
         append_cli_local_listing_records(&paths, account_id.as_str());
 
         let report = runtime
-            .refresh_shared_local_events()
-            .expect("shared local events should refresh");
+            .refresh_shared_runtime_store()
+            .expect("shared runtime store should refresh");
         let summary = runtime.summary();
 
         assert_eq!(report.scanned_records, 2);
@@ -12711,8 +12764,8 @@ mod tests {
     }
 
     #[test]
-    fn runtime_buyer_search_imports_shared_local_events_before_read() {
-        let (runtime, paths) = bootstrapped_runtime("buyer_search_shared_local_events_refresh");
+    fn runtime_buyer_search_imports_shared_runtime_store_before_read() {
+        let (runtime, paths) = bootstrapped_runtime("buyer_search_shared_runtime_store_refresh");
         assert!(
             runtime
                 .generate_local_account(Some("Buyer".to_owned()))
@@ -12751,9 +12804,9 @@ mod tests {
     }
 
     #[test]
-    fn runtime_buyer_search_repeated_query_refreshes_shared_local_events() {
+    fn runtime_buyer_search_repeated_query_refreshes_shared_runtime_store() {
         let (runtime, paths) =
-            bootstrapped_runtime("buyer_search_same_query_shared_local_events_refresh");
+            bootstrapped_runtime("buyer_search_same_query_shared_runtime_store_refresh");
         assert!(
             runtime
                 .generate_local_account(Some("Buyer".to_owned()))
@@ -12816,8 +12869,8 @@ mod tests {
     }
 
     #[test]
-    fn runtime_shared_local_events_refresh_reloads_buyer_browse_idempotently() {
-        let (runtime, paths) = bootstrapped_runtime("buyer_browse_shared_local_events_refresh");
+    fn runtime_shared_runtime_store_refresh_reloads_buyer_browse_idempotently() {
+        let (runtime, paths) = bootstrapped_runtime("buyer_browse_shared_runtime_store_refresh");
         assert!(
             runtime
                 .generate_local_account(Some("Buyer".to_owned()))
@@ -12826,8 +12879,8 @@ mod tests {
         append_cli_signed_buyer_listing_record(&paths);
 
         let report = runtime
-            .refresh_shared_local_events()
-            .expect("shared local events should refresh");
+            .refresh_shared_runtime_store()
+            .expect("shared runtime store should refresh");
         let summary = runtime.summary();
         assert_eq!(report.scanned_records, 1);
         assert_eq!(report.imported_records, 1);
@@ -12839,8 +12892,8 @@ mod tests {
         );
 
         let second_report = runtime
-            .refresh_shared_local_events()
-            .expect("second shared local events refresh should succeed");
+            .refresh_shared_runtime_store()
+            .expect("second shared runtime store refresh should succeed");
         assert_eq!(second_report.scanned_records, 0);
         assert_eq!(second_report.imported_records, 0);
         assert_eq!(second_report.skipped_records, 0);
@@ -12859,7 +12912,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_buyer_browse_selection_refreshes_shared_local_events() {
+    fn runtime_buyer_browse_selection_refreshes_shared_runtime_store() {
         let (runtime, paths) = bootstrapped_runtime("buyer_browse_selection_shared_events_refresh");
         assert!(
             runtime
@@ -12933,7 +12986,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_buyer_browse_selection_surfaces_shared_local_events_import_errors() {
+    fn runtime_buyer_browse_selection_surfaces_shared_runtime_store_import_errors() {
         let (runtime, paths) = bootstrapped_runtime("buyer_browse_selection_import_error");
         assert!(
             runtime
@@ -12941,16 +12994,16 @@ mod tests {
                 .expect("account should generate")
         );
         let database_path = paths
-            .shared_local_events_database_path()
-            .expect("shared local events path");
+            .shared_runtime_store_database_path()
+            .expect("shared runtime store path");
         if let Some(parent) = database_path.parent() {
-            fs::create_dir_all(parent).expect("shared local events parent directory");
+            fs::create_dir_all(parent).expect("shared runtime store parent directory");
         }
         if database_path.is_file() {
-            fs::remove_file(&database_path).expect("shared local events file should be removable");
+            fs::remove_file(&database_path).expect("shared runtime store file should be removable");
         } else if database_path.is_dir() {
             fs::remove_dir_all(&database_path)
-                .expect("shared local events directory should be removable");
+                .expect("shared runtime store directory should be removable");
         }
         fs::create_dir(&database_path).expect("directory should block sqlite open");
 
@@ -12958,8 +13011,8 @@ mod tests {
             .select_personal_section(PersonalSection::Browse)
             .expect_err("buyer Browse selection should surface import errors");
         match error {
-            AppSqliteError::LocalEventsSql { operation, .. } => {
-                assert_eq!(operation, "open shared local events database");
+            AppSqliteError::RuntimeStoreSql { operation, .. } => {
+                assert_eq!(operation, "open shared runtime store database");
             }
             unexpected => panic!("unexpected Browse selection error: {unexpected:?}"),
         }
@@ -12968,13 +13021,13 @@ mod tests {
     }
 
     #[test]
-    fn runtime_buyer_detail_open_imports_shared_local_events_before_lookup() {
-        assert_detail_open_imports_shared_local_events_before_lookup(
-            "buyer_browse_detail_shared_local_events_refresh",
+    fn runtime_buyer_detail_open_imports_shared_runtime_store_before_lookup() {
+        assert_detail_open_imports_shared_runtime_store_before_lookup(
+            "buyer_browse_detail_shared_runtime_store_refresh",
             PersonalSection::Browse,
         );
-        assert_detail_open_imports_shared_local_events_before_lookup(
-            "buyer_search_detail_shared_local_events_refresh",
+        assert_detail_open_imports_shared_runtime_store_before_lookup(
+            "buyer_search_detail_shared_runtime_store_refresh",
             PersonalSection::Search,
         );
     }
@@ -13028,7 +13081,7 @@ mod tests {
                 .expect("product draft should save")
         );
 
-        let records = shared_local_event_records(&paths);
+        let records = shared_runtime_store_records(&paths);
         let app_records = records
             .iter()
             .filter(|record| record.source_runtime == SourceRuntime::App)
@@ -13045,8 +13098,8 @@ mod tests {
                     == Some("farm_config_v1")
             })
             .expect("farm local work record");
-        assert_eq!(farm_record.family, LocalRecordFamily::LocalWork);
-        assert_eq!(farm_record.status, LocalRecordStatus::LocalSaved);
+        assert_eq!(farm_record.family, RuntimeStoreRecordFamily::LocalWork);
+        assert_eq!(farm_record.status, RuntimeStoreRecordStatus::LocalSaved);
         assert_eq!(farm_record.outbox_status, PublishOutboxStatus::None);
         assert_eq!(
             farm_record.owner_account_id.as_deref(),
@@ -13088,8 +13141,8 @@ mod tests {
                     == Some("listing_draft_v1")
             })
             .expect("listing local work record");
-        assert_eq!(listing_record.family, LocalRecordFamily::LocalWork);
-        assert_eq!(listing_record.status, LocalRecordStatus::LocalSaved);
+        assert_eq!(listing_record.family, RuntimeStoreRecordFamily::LocalWork);
+        assert_eq!(listing_record.status, RuntimeStoreRecordStatus::LocalSaved);
         assert_eq!(listing_record.outbox_status, PublishOutboxStatus::None);
         assert_eq!(
             listing_record.owner_account_id.as_deref(),
@@ -13182,7 +13235,7 @@ mod tests {
             .record_published_sync_receipts(&[receipt])
             .expect("published receipt should record");
 
-        let records = shared_local_event_records(&paths);
+        let records = shared_runtime_store_records(&paths);
         let signed_record = records
             .iter()
             .find(|record| record.record_id == "app:signed_event:event-app-owner")
@@ -13199,12 +13252,12 @@ mod tests {
     fn runtime_published_receipts_reject_conflicting_source_owner() {
         let (runtime, paths) = bootstrapped_runtime("published_receipt_owner_conflict");
         let database_path = paths
-            .shared_local_events_database_path()
-            .expect("shared local events path");
+            .shared_runtime_store_database_path()
+            .expect("shared runtime store path");
         let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
-        let store = LocalEventsStore::new(executor);
-        store.migrate_up().expect("migrate shared local events");
+            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let store = RuntimeStore::new(executor);
+        store.migrate_up().expect("migrate shared runtime store");
         store
             .append_record(&local_work_record(
                 "app:local_work:conflict-source",
@@ -13232,7 +13285,7 @@ mod tests {
             }
         ));
         assert!(
-            shared_local_event_records(&paths)
+            shared_runtime_store_records(&paths)
                 .iter()
                 .all(|record| record.record_id != "app:signed_event:event-app-owner-conflict")
         );
@@ -13289,7 +13342,7 @@ mod tests {
                 .expect("unresolved listing local work should append");
         }
 
-        let records = shared_local_event_records(&paths);
+        let records = shared_runtime_store_records(&paths);
         let app_records = records
             .iter()
             .filter(|record| record.source_runtime == SourceRuntime::App)
@@ -13672,7 +13725,7 @@ mod tests {
             .expect("sdk diagnostics should be present");
         assert_eq!(diagnostics.runtime.state, AppSdkLifecycleState::Ready);
         assert_eq!(diagnostics.storage.storage_kind, "directory");
-        assert_eq!(diagnostics.sync.relay_targets.configured_count, 1);
+        assert_eq!(diagnostics.sync.transport_targets.configured_count, 1);
         assert!(
             runtime
                 .shutdown_sdk_runtime()
@@ -13746,7 +13799,7 @@ mod tests {
                 assert!(
                     issue
                         .recovery_actions
-                        .contains(&"configure_relay_targets".to_owned())
+                        .contains(&"configure_transport_targets".to_owned())
                 );
             }
             unexpected => panic!("unexpected diagnostics state: {unexpected:?}"),
@@ -15448,7 +15501,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_finds_seller_order_request_evidence_past_first_local_events_page() {
+    fn runtime_finds_seller_order_request_evidence_past_first_runtime_store_page() {
         let relay = ThreadedAckRelay::spawn();
         let (runtime, paths, order_id, _product_id, _seller_pubkey, _buyer_pubkey) =
             seller_order_decision_runtime("seller_order_old_request_evidence", 6, 2);
@@ -15601,8 +15654,8 @@ mod tests {
 
         assert_eq!(persisted_order_status(&runtime, order_id), "needs_action");
         assert_eq!(relay.event_count(), 1);
-        assert!(!shared_local_event_records(&paths).iter().any(|record| {
-            record.family == LocalRecordFamily::SignedEvent
+        assert!(!shared_runtime_store_records(&paths).iter().any(|record| {
+            record.family == RuntimeStoreRecordFamily::SignedEvent
                 && record.event_kind == Some(3423)
                 && record.event_pubkey.as_deref() == Some(seller_pubkey.as_str())
         }));
@@ -15632,8 +15685,8 @@ mod tests {
 
         assert_eq!(persisted_order_status(&runtime, order_id), "needs_action");
         assert_eq!(relay.event_count(), 1);
-        assert!(!shared_local_event_records(&paths).iter().any(|record| {
-            record.family == LocalRecordFamily::SignedEvent
+        assert!(!shared_runtime_store_records(&paths).iter().any(|record| {
+            record.family == RuntimeStoreRecordFamily::SignedEvent
                 && record.event_kind == Some(3423)
                 && record.event_pubkey.as_deref() == Some(seller_pubkey.as_str())
         }));
@@ -15692,7 +15745,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_places_supported_buyer_order_into_shared_local_events() {
+    fn runtime_places_supported_buyer_order_into_shared_runtime_store() {
         let (runtime, paths) = bootstrapped_runtime("buyer_order_local_event");
         assert!(
             runtime
@@ -15815,7 +15868,7 @@ mod tests {
             assert_eq!(coordination_after.attempt_count, 1);
         }
 
-        let records = shared_local_event_records(&paths);
+        let records = shared_runtime_store_records(&paths);
         let order_records = records
             .iter()
             .filter(|record| {
@@ -15829,8 +15882,8 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(order_records.len(), 1);
         let order_record = order_records[0];
-        assert_eq!(order_record.family, LocalRecordFamily::LocalWork);
-        assert_eq!(order_record.status, LocalRecordStatus::LocalSaved);
+        assert_eq!(order_record.family, RuntimeStoreRecordFamily::LocalWork);
+        assert_eq!(order_record.status, RuntimeStoreRecordStatus::LocalSaved);
         assert_eq!(order_record.outbox_status, PublishOutboxStatus::None);
         assert_eq!(
             order_record.record_id,
@@ -15920,7 +15973,7 @@ mod tests {
                 )
                 .expect("buyer order status should mutate before retry refresh");
         }
-        unblock_shared_local_events_database(&paths);
+        unblock_shared_runtime_store_database(&paths);
         assert!(
             runtime
                 .retry_pending_personal_order_coordination()
@@ -16013,7 +16066,7 @@ mod tests {
     fn runtime_buyer_order_shared_append_failure_is_recoverable_after_restart() {
         let (runtime, paths, buyer_account_id, order_id) =
             blocked_buyer_order_runtime("buyer_order_append_failure_restart");
-        unblock_shared_local_events_database(&paths);
+        unblock_shared_runtime_store_database(&paths);
         drop(runtime);
 
         let restarted_runtime = restart_runtime(paths.clone());
@@ -16083,7 +16136,7 @@ mod tests {
      {
         let (runtime, paths, buyer_account_id, order_id) =
             blocked_buyer_order_runtime("buyer_order_append_failure_foreground_resume");
-        unblock_shared_local_events_database(&paths);
+        unblock_shared_runtime_store_database(&paths);
         assert!(
             runtime
                 .sync_on_foreground_resume()
@@ -16230,8 +16283,8 @@ mod tests {
         let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_open");
         let report = fixture
             .runtime
-            .refresh_shared_local_events()
-            .expect("linked buyer local events should import");
+            .refresh_shared_runtime_store()
+            .expect("linked buyer runtime store should import");
         assert!(report.imported_records > 0);
 
         assert!(
@@ -16283,8 +16336,8 @@ mod tests {
         );
         fixture
             .runtime
-            .refresh_shared_local_events()
-            .expect("linked buyer local events should import");
+            .refresh_shared_runtime_store()
+            .expect("linked buyer runtime store should import");
         assert!(
             fixture
                 .runtime
@@ -16335,7 +16388,7 @@ mod tests {
         install_direct_relay_sync_transport(&fixture.runtime, &relay);
         fixture
             .runtime
-            .refresh_shared_local_events()
+            .refresh_shared_runtime_store()
             .expect("linked buyer revision proposal should import");
         assert!(
             fixture
@@ -16368,8 +16421,8 @@ mod tests {
         install_direct_relay_sync_transport(&fixture.runtime, &relay);
         fixture
             .runtime
-            .refresh_shared_local_events()
-            .expect("linked buyer local events should import");
+            .refresh_shared_runtime_store()
+            .expect("linked buyer runtime store should import");
         assert!(
             fixture
                 .runtime
@@ -16401,8 +16454,8 @@ mod tests {
         install_direct_relay_sync_transport(&fixture.runtime, &relay);
         fixture
             .runtime
-            .refresh_shared_local_events()
-            .expect("linked buyer local events should import");
+            .refresh_shared_runtime_store()
+            .expect("linked buyer runtime store should import");
         assert!(
             fixture
                 .runtime
@@ -16464,8 +16517,8 @@ mod tests {
         );
         fixture
             .runtime
-            .refresh_shared_local_events()
-            .expect("linked buyer local events should import");
+            .refresh_shared_runtime_store()
+            .expect("linked buyer runtime store should import");
         assert!(
             fixture
                 .runtime
@@ -19567,15 +19620,15 @@ mod tests {
 
     fn append_cli_local_listing_records(paths: &AppDesktopRuntimePaths, account_id: &str) {
         let database_path = paths
-            .shared_local_events_database_path()
-            .expect("shared local events path");
+            .shared_runtime_store_database_path()
+            .expect("shared runtime store path");
         if let Some(parent) = database_path.parent() {
-            fs::create_dir_all(parent).expect("shared local events directory should create");
+            fs::create_dir_all(parent).expect("shared runtime store directory should create");
         }
         let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
-        let store = LocalEventsStore::new(executor);
-        store.migrate_up().expect("migrate shared local events");
+            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let store = RuntimeStore::new(executor);
+        store.migrate_up().expect("migrate shared runtime store");
         let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
         let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
         store
@@ -19684,15 +19737,15 @@ mod tests {
         bin_id: &str,
     ) {
         let database_path = paths
-            .shared_local_events_database_path()
-            .expect("shared local events path");
+            .shared_runtime_store_database_path()
+            .expect("shared runtime store path");
         if let Some(parent) = database_path.parent() {
-            fs::create_dir_all(parent).expect("shared local events directory should create");
+            fs::create_dir_all(parent).expect("shared runtime store directory should create");
         }
         let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
-        let store = LocalEventsStore::new(executor);
-        store.migrate_up().expect("migrate shared local events");
+            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let store = RuntimeStore::new(executor);
+        store.migrate_up().expect("migrate shared runtime store");
         let farm_key = "CCCCCCCCCCCCCCCCCCCCCC";
         let owner_pubkey = BUYER_VISIBLE_SELLER_PUBKEY;
         let record_id = format!("cli:signed_event:{record_suffix}");
@@ -19724,10 +19777,10 @@ mod tests {
         });
         let event_id = signed_event_id(record_id.as_str());
         store
-            .append_record(&LocalEventRecordInput {
+            .append_record(&RuntimeStoreRecordInput {
                 record_id: record_id.to_owned(),
-                family: LocalRecordFamily::SignedEvent,
-                status: LocalRecordStatus::Published,
+                family: RuntimeStoreRecordFamily::SignedEvent,
+                status: RuntimeStoreRecordStatus::Published,
                 source_runtime: SourceRuntime::Cli,
                 created_at_ms,
                 inserted_at_ms: created_at_ms + 1,
@@ -20109,15 +20162,15 @@ mod tests {
         stock_count: u32,
     ) {
         let database_path = paths
-            .shared_local_events_database_path()
-            .expect("shared local events path");
+            .shared_runtime_store_database_path()
+            .expect("shared runtime store path");
         if let Some(parent) = database_path.parent() {
-            fs::create_dir_all(parent).expect("shared local events directory should create");
+            fs::create_dir_all(parent).expect("shared runtime store directory should create");
         }
         let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
-        let store = LocalEventsStore::new(executor);
-        store.migrate_up().expect("migrate shared local events");
+            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let store = RuntimeStore::new(executor);
+        store.migrate_up().expect("migrate shared runtime store");
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
         let listing_event_id = test_event_id_seed(listing_event_id);
         let content = json!({
@@ -20147,10 +20200,10 @@ mod tests {
             }
         });
         store
-            .append_record(&LocalEventRecordInput {
+            .append_record(&RuntimeStoreRecordInput {
                 record_id: "app:signed_event:listing:seller-order-decision".to_owned(),
-                family: LocalRecordFamily::SignedEvent,
-                status: LocalRecordStatus::Published,
+                family: RuntimeStoreRecordFamily::SignedEvent,
+                status: RuntimeStoreRecordStatus::Published,
                 source_runtime: SourceRuntime::App,
                 created_at_ms: 1_774_000_000_000,
                 inserted_at_ms: 1_774_000_000_001,
@@ -20215,15 +20268,15 @@ mod tests {
         order_quantity: u32,
     ) -> String {
         let database_path = paths
-            .shared_local_events_database_path()
-            .expect("shared local events path");
+            .shared_runtime_store_database_path()
+            .expect("shared runtime store path");
         if let Some(parent) = database_path.parent() {
-            fs::create_dir_all(parent).expect("shared local events directory should create");
+            fs::create_dir_all(parent).expect("shared runtime store directory should create");
         }
         let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
-        let store = LocalEventsStore::new(executor);
-        store.migrate_up().expect("migrate shared local events");
+            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let store = RuntimeStore::new(executor);
+        store.migrate_up().expect("migrate shared runtime store");
         let order = RadrootsOrderRequest {
             order_id: test_order_id(trade_order_id),
             listing_addr: test_listing_addr(listing_addr),
@@ -20236,7 +20289,7 @@ mod tests {
             economics: signed_order_request_economics(trade_order_id, order_quantity),
         };
         let parts = order_request_event_build(
-            &RadrootsNostrEventPtr {
+            &RadrootsEventPtr {
                 id: test_event_id_seed(listing_event_id),
                 relays: Some("wss://relay.example".to_owned()),
             },
@@ -20263,10 +20316,10 @@ mod tests {
         .to_json_value()
         .expect("acknowledged relay delivery json");
         store
-            .append_record(&LocalEventRecordInput {
+            .append_record(&RuntimeStoreRecordInput {
                 record_id,
-                family: LocalRecordFamily::SignedEvent,
-                status: LocalRecordStatus::Published,
+                family: RuntimeStoreRecordFamily::SignedEvent,
+                status: RuntimeStoreRecordStatus::Published,
                 source_runtime: SourceRuntime::Test,
                 created_at_ms: 1_774_000_010_000,
                 inserted_at_ms: 1_774_000_010_001,
@@ -20309,15 +20362,15 @@ mod tests {
     ) -> String {
         assert_eq!(buyer_pubkey, SDK_TEST_BUYER_PUBLIC_KEY_HEX);
         let database_path = paths
-            .shared_local_events_database_path()
-            .expect("shared local events path");
+            .shared_runtime_store_database_path()
+            .expect("shared runtime store path");
         if let Some(parent) = database_path.parent() {
-            fs::create_dir_all(parent).expect("shared local events directory should create");
+            fs::create_dir_all(parent).expect("shared runtime store directory should create");
         }
         let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
-        let store = LocalEventsStore::new(executor);
-        store.migrate_up().expect("migrate shared local events");
+            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let store = RuntimeStore::new(executor);
+        store.migrate_up().expect("migrate shared runtime store");
         let order = RadrootsOrderRequest {
             order_id: test_order_id(trade_order_id),
             listing_addr: test_listing_addr(listing_addr),
@@ -20330,7 +20383,7 @@ mod tests {
             economics: signed_order_request_economics(trade_order_id, order_quantity),
         };
         let parts = order_request_event_build(
-            &RadrootsNostrEventPtr {
+            &RadrootsEventPtr {
                 id: test_event_id_seed(listing_event_id),
                 relays: Some("wss://relay.example".to_owned()),
             },
@@ -20358,10 +20411,10 @@ mod tests {
         .to_json_value()
         .expect("acknowledged relay delivery json");
         store
-            .append_record(&LocalEventRecordInput {
+            .append_record(&RuntimeStoreRecordInput {
                 record_id,
-                family: LocalRecordFamily::SignedEvent,
-                status: LocalRecordStatus::Published,
+                family: RuntimeStoreRecordFamily::SignedEvent,
+                status: RuntimeStoreRecordStatus::Published,
                 source_runtime: SourceRuntime::Test,
                 created_at_ms: 1_774_000_010_000,
                 inserted_at_ms: 1_774_000_010_001,
@@ -20587,15 +20640,15 @@ mod tests {
         parts: WireEventParts,
     ) -> String {
         let database_path = paths
-            .shared_local_events_database_path()
-            .expect("shared local events path");
+            .shared_runtime_store_database_path()
+            .expect("shared runtime store path");
         if let Some(parent) = database_path.parent() {
-            fs::create_dir_all(parent).expect("shared local events directory should create");
+            fs::create_dir_all(parent).expect("shared runtime store directory should create");
         }
         let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
-        let store = LocalEventsStore::new(executor);
-        store.migrate_up().expect("migrate shared local events");
+            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let store = RuntimeStore::new(executor);
+        store.migrate_up().expect("migrate shared runtime store");
         let created_at = test_event_created_at(record_id, 1_774_000_020);
         let event = test_event_from_parts(
             record_id,
@@ -20615,10 +20668,10 @@ mod tests {
         .to_json_value()
         .expect("acknowledged relay delivery json");
         store
-            .append_record(&LocalEventRecordInput {
+            .append_record(&RuntimeStoreRecordInput {
                 record_id: record_id.to_owned(),
-                family: LocalRecordFamily::SignedEvent,
-                status: LocalRecordStatus::Published,
+                family: RuntimeStoreRecordFamily::SignedEvent,
+                status: RuntimeStoreRecordStatus::Published,
                 source_runtime: SourceRuntime::Test,
                 created_at_ms: i64::from(created_at) * 1000,
                 inserted_at_ms: i64::from(created_at) * 1000 + 1,
@@ -20652,13 +20705,13 @@ mod tests {
 
     fn mark_shared_seller_order_request_evidence_pending(paths: &AppDesktopRuntimePaths) {
         let database_path = paths
-            .shared_local_events_database_path()
-            .expect("shared local events path");
+            .shared_runtime_store_database_path()
+            .expect("shared runtime store path");
         let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
+            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
         executor
             .exec(
-                "UPDATE local_event_record
+                "UPDATE runtime_store_record
                  SET status = 'pending_publish',
                      outbox_status = 'pending',
                      relay_set_fingerprint = NULL,
@@ -20671,22 +20724,22 @@ mod tests {
 
     fn append_unrelated_signed_event_records(paths: &AppDesktopRuntimePaths, count: usize) {
         let database_path = paths
-            .shared_local_events_database_path()
-            .expect("shared local events path");
+            .shared_runtime_store_database_path()
+            .expect("shared runtime store path");
         let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
-        let store = LocalEventsStore::new(executor);
-        store.migrate_up().expect("migrate shared local events");
+            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let store = RuntimeStore::new(executor);
+        store.migrate_up().expect("migrate shared runtime store");
         let pubkey = "2222222222222222222222222222222222222222222222222222222222222222";
 
         for index in 0..count {
             let record_id = format!("app:signed_event:unrelated:{index}");
             let event_id = signed_event_id(record_id.as_str());
             store
-                .append_record(&LocalEventRecordInput {
+                .append_record(&RuntimeStoreRecordInput {
                     record_id,
-                    family: LocalRecordFamily::SignedEvent,
-                    status: LocalRecordStatus::Published,
+                    family: RuntimeStoreRecordFamily::SignedEvent,
+                    status: RuntimeStoreRecordStatus::Published,
                     source_runtime: SourceRuntime::Test,
                     created_at_ms: 1_774_000_100_000 + i64::try_from(index).unwrap_or_default(),
                     inserted_at_ms: 1_774_000_100_001 + i64::try_from(index).unwrap_or_default(),
@@ -20737,7 +20790,7 @@ mod tests {
         ))
     }
 
-    fn assert_detail_open_imports_shared_local_events_before_lookup(
+    fn assert_detail_open_imports_shared_runtime_store_before_lookup(
         label: &str,
         section: PersonalSection,
     ) {
@@ -20780,7 +20833,7 @@ mod tests {
             PersonalSection::Search => summary.personal_projection.search.detail,
             _ => None,
         }
-        .expect("buyer detail should open from imported shared local events");
+        .expect("buyer detail should open from imported shared runtime store");
 
         assert_eq!(detail.listing.product_id, product_id);
         assert_eq!(detail.listing.title, "Buyer Visible Eggs");
@@ -20794,11 +20847,11 @@ mod tests {
         farm_key: &str,
         listing_addr: Option<String>,
         payload: serde_json::Value,
-    ) -> LocalEventRecordInput {
-        LocalEventRecordInput {
+    ) -> RuntimeStoreRecordInput {
+        RuntimeStoreRecordInput {
             record_id: record_id.to_owned(),
-            family: LocalRecordFamily::LocalWork,
-            status: LocalRecordStatus::LocalSaved,
+            family: RuntimeStoreRecordFamily::LocalWork,
+            status: RuntimeStoreRecordStatus::LocalSaved,
             source_runtime: SourceRuntime::Cli,
             created_at_ms: 1000,
             inserted_at_ms: 1001,
@@ -20853,13 +20906,13 @@ mod tests {
         }
     }
 
-    fn shared_local_event_records(paths: &AppDesktopRuntimePaths) -> Vec<LocalEventRecord> {
+    fn shared_runtime_store_records(paths: &AppDesktopRuntimePaths) -> Vec<RuntimeStoreRecord> {
         let database_path = paths
-            .shared_local_events_database_path()
-            .expect("shared local events path");
+            .shared_runtime_store_database_path()
+            .expect("shared runtime store path");
         let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
-        let store = LocalEventsStore::new(executor);
+            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let store = RuntimeStore::new(executor);
         store
             .list_records_after_seq(0, 100)
             .expect("shared local records should list")
@@ -20870,7 +20923,7 @@ mod tests {
         trade_order_id: &str,
     ) -> String {
         let record_id = format!("app:signed_event:order-request:{trade_order_id}");
-        shared_local_event_records(paths)
+        shared_runtime_store_records(paths)
             .into_iter()
             .find(|record| record.record_id == record_id)
             .and_then(|record| record.event_id)
@@ -20881,11 +20934,11 @@ mod tests {
         paths: &AppDesktopRuntimePaths,
         kind: i64,
         pubkey: &str,
-    ) -> Vec<SdkRadrootsNostrEvent> {
-        shared_local_event_records(paths)
+    ) -> Vec<RadrootsEventEnvelope> {
+        shared_runtime_store_records(paths)
             .into_iter()
             .filter(|record| {
-                record.family == LocalRecordFamily::SignedEvent
+                record.family == RuntimeStoreRecordFamily::SignedEvent
                     && record.event_kind == Some(kind)
                     && record.event_pubkey.as_deref() == Some(pubkey)
             })
@@ -20971,7 +21024,7 @@ mod tests {
             .expect("sqlite store")
             .sdk_workflow_receipt_repository()
             .load_receipt(
-                AppSdkWorkflowReceiptSourceKind::SharedLocalEvent,
+                AppSdkWorkflowReceiptSourceKind::SharedRuntimeStore,
                 source_record_id.as_str(),
             )
             .expect("SDK workflow receipt should load")
@@ -21082,7 +21135,7 @@ mod tests {
     }
 
     fn buyer_order_local_work_record_ids(paths: &AppDesktopRuntimePaths) -> Vec<String> {
-        shared_local_event_records(paths)
+        shared_runtime_store_records(paths)
             .into_iter()
             .filter(|record| {
                 record.source_runtime == SourceRuntime::App
@@ -21156,13 +21209,13 @@ mod tests {
                 })
                 .expect("buyer order review draft should save")
         );
-        block_shared_local_events_database(&paths);
+        block_shared_runtime_store_database(&paths);
 
         let error = runtime
             .place_personal_order()
-            .expect_err("blocked local events should fail order completion");
+            .expect_err("blocked runtime store should fail order completion");
 
-        assert!(matches!(error, AppSqliteError::LocalEventsSql { .. }));
+        assert!(matches!(error, AppSqliteError::RuntimeStoreSql { .. }));
         let summary = runtime.summary();
         assert_eq!(
             summary.shell_projection.selected_section,
@@ -21219,26 +21272,26 @@ mod tests {
         (runtime, paths, buyer_account_id, visible_order_id)
     }
 
-    fn block_shared_local_events_database(paths: &AppDesktopRuntimePaths) {
+    fn block_shared_runtime_store_database(paths: &AppDesktopRuntimePaths) {
         let database_path = paths
-            .shared_local_events_database_path()
-            .expect("shared local events path");
+            .shared_runtime_store_database_path()
+            .expect("shared runtime store path");
         if let Some(parent) = database_path.parent() {
-            fs::create_dir_all(parent).expect("shared local events directory should create");
+            fs::create_dir_all(parent).expect("shared runtime store directory should create");
         }
         if database_path.is_file() {
-            fs::remove_file(&database_path).expect("shared local events file should remove");
+            fs::remove_file(&database_path).expect("shared runtime store file should remove");
         } else if database_path.is_dir() {
             fs::remove_dir_all(&database_path)
-                .expect("shared local events directory should remove");
+                .expect("shared runtime store directory should remove");
         }
         fs::create_dir(&database_path).expect("blocking directory should create");
     }
 
-    fn unblock_shared_local_events_database(paths: &AppDesktopRuntimePaths) {
+    fn unblock_shared_runtime_store_database(paths: &AppDesktopRuntimePaths) {
         let database_path = paths
-            .shared_local_events_database_path()
-            .expect("shared local events path");
+            .shared_runtime_store_database_path()
+            .expect("shared runtime store path");
         if database_path.is_dir() {
             fs::remove_dir_all(&database_path).expect("blocking directory should remove");
         }

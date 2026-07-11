@@ -1,4 +1,4 @@
-use radroots_events::order::{
+use radroots_event::order::{
     RadrootsOrderEconomics, RadrootsOrderItem, RadrootsOrderRevisionOutcome,
 };
 use radroots_sdk::{
@@ -673,7 +673,7 @@ mod tests {
     use crate::{
         PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind,
     };
-    use radroots_events::order::{
+    use radroots_event::order::{
         RadrootsOrderEconomics, RadrootsOrderItem, RadrootsOrderRevisionOutcome,
     };
     use radroots_studio_app_view::{FarmId, FarmReadiness, OrderId, ProductId, ProductStatus};

@@ -10,9 +10,9 @@ publish = false
 
 [dependencies]
 radroots_core.workspace = true
-radroots_events.workspace = true
-radroots_events_codec.workspace = true
-radroots_local_events.workspace = true
+radroots_event.workspace = true
+radroots_event_codec.workspace = true
+radroots_runtime_store.workspace = true
 radroots_studio_app_view.workspace = true
 radroots_studio_app_sync.workspace = true
 radroots_sql_core.workspace = true

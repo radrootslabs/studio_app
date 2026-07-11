@@ -1,7 +1,7 @@
 CREATE TABLE app_sdk_workflow_receipts (
     id TEXT PRIMARY KEY NOT NULL,
     source_kind TEXT NOT NULL CHECK (
-        source_kind IN ('local_outbox', 'shared_local_event')
+        source_kind IN ('local_outbox', 'shared_runtime_store')
     ),
     source_record_id TEXT NOT NULL,
     sdk_operation_kind TEXT NOT NULL,

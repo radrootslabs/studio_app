@@ -3,7 +3,7 @@
 pub use radroots_studio_app_types::*;
 
 use radroots_core::RadrootsCoreMoney;
-use radroots_events::order::RadrootsOrderEconomics;
+use radroots_event::order::RadrootsOrderEconomics;
 use radroots_trade::validation_receipt::{
     RadrootsValidationReceiptProofSystem, RadrootsValidationReceiptResult,
     RadrootsValidationReceiptType,
@@ -1241,7 +1241,7 @@ pub enum TradeWorkflowSource {
     App,
     Cli,
     Relay,
-    LocalEvents,
+    RuntimeStore,
     #[default]
     Unknown,
 }
@@ -1252,7 +1252,7 @@ impl TradeWorkflowSource {
             Self::App => "app",
             Self::Cli => "cli",
             Self::Relay => "relay",
-            Self::LocalEvents => "local_events",
+            Self::RuntimeStore => "runtime_store",
             Self::Unknown => "unknown",
         }
     }
@@ -1262,7 +1262,7 @@ impl TradeWorkflowSource {
             Self::App => "messages.trade.workflow.provenance.app",
             Self::Cli => "messages.trade.workflow.provenance.cli",
             Self::Relay => "messages.trade.workflow.provenance.relay",
-            Self::LocalEvents => "messages.trade.workflow.provenance.local_events",
+            Self::RuntimeStore => "messages.trade.workflow.provenance.runtime_store",
             Self::Unknown => "messages.trade.workflow.provenance.unknown",
         }
     }
@@ -2126,11 +2126,11 @@ mod tests {
     use radroots_core::{
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
     };
-    use radroots_events::ids::{
+    use radroots_event::ids::{
         RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress, RadrootsOrderId,
         RadrootsOrderQuoteId, RadrootsPublicKey,
     };
-    use radroots_events::order::{
+    use radroots_event::order::{
         RadrootsOrderEconomicItem, RadrootsOrderEconomics, RadrootsOrderPricingBasis,
     };
     use radroots_trade::validation_receipt::{
@@ -2940,7 +2940,7 @@ mod tests {
             order_id,
             &active_order,
             TradeRevisionStatus::Updated,
-            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::LocalEvents),
+            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::RuntimeStore),
         );
         assert_eq!(projection.order_id, order_id);
         assert_eq!(projection.agreement, TradeAgreementStatus::Committed);
@@ -2950,7 +2950,7 @@ mod tests {
         assert_eq!(projection.economics.currency_code.as_deref(), Some("USD"));
         assert_eq!(
             projection.provenance,
-            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::LocalEvents)
+            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::RuntimeStore)
                 .with_last_event_id(Some(
                     "3333333333333333333333333333333333333333333333333333333333333333".to_owned()
                 ))
@@ -2966,7 +2966,7 @@ mod tests {
             order_id,
             &pending_rhi_order,
             TradeRevisionStatus::None,
-            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::LocalEvents),
+            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::RuntimeStore),
         );
         assert_eq!(
             pending_rhi_projection.agreement,
@@ -2986,7 +2986,7 @@ mod tests {
             order_id,
             &requested_order,
             TradeRevisionStatus::None,
-            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::LocalEvents),
+            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::RuntimeStore),
         );
         assert_eq!(
             requested_projection.agreement,
@@ -3075,8 +3075,8 @@ mod tests {
         );
         assert_eq!(TradeInventoryStatus::Reserved.storage_key(), "reserved");
         assert_eq!(
-            TradeWorkflowSource::LocalEvents.storage_key(),
-            "local_events"
+            TradeWorkflowSource::RuntimeStore.storage_key(),
+            "runtime_store"
         );
 
         assert_eq!(

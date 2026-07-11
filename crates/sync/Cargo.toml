@@ -9,7 +9,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
-radroots_events.workspace = true
+radroots_event.workspace = true
 radroots_studio_app_view.workspace = true
 radroots_sdk.workspace = true
 serde.workspace = true

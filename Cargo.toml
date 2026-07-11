@@ -33,10 +33,10 @@ gpui-component-assets = "0.5.1"
 mf2_i18n = { path = "../../../vendor/triesap/mf2_i18n/crates/mf2_i18n" }
 radroots_core = { path = "../lib/crates/core", default-features = false, features = ["std"] }
 radroots_authority = { path = "../lib/crates/authority" }
-radroots_events = { path = "../lib/crates/events", default-features = false, features = ["serde", "std"] }
-radroots_events_codec = { path = "../lib/crates/events_codec", features = ["serde_json"] }
+radroots_event = { path = "../lib/crates/event", default-features = false, features = ["serde", "std"] }
+radroots_event_codec = { path = "../lib/crates/event_codec", features = ["serde_json"] }
 radroots_identity = { path = "../lib/crates/identity" }
-radroots_local_events = { path = "../lib/crates/local_events", features = ["native"] }
+radroots_runtime_store = { path = "../lib/crates/runtime_store", features = ["native"] }
 radroots_nostr = { path = "../lib/crates/nostr", features = ["client"] }
 radroots_nostr_accounts = { path = "../lib/crates/nostr_accounts" }
 radroots_nostr_connect = { path = "../lib/crates/nostr_connect" }

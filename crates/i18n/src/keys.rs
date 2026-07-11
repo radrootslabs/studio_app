@@ -450,7 +450,7 @@ define_app_text_keys! {
     TradeWorkflowProvenanceApp => "trade.workflow.provenance.app",
     TradeWorkflowProvenanceCli => "trade.workflow.provenance.cli",
     TradeWorkflowProvenanceRelay => "trade.workflow.provenance.relay",
-    TradeWorkflowProvenanceLocalEvents => "trade.workflow.provenance.local_events",
+    TradeWorkflowProvenanceRuntimeStore => "trade.workflow.provenance.runtime_store",
     TradeWorkflowProvenanceUnknown => "trade.workflow.provenance.unknown",
     OrdersRemindersTitle => "orders.reminders.title",
     OrdersReminderLogTitle => "orders.reminder_log.title",

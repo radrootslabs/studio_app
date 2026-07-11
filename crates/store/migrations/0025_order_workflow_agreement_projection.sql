@@ -33,7 +33,7 @@ CREATE TABLE orders (
         workflow_inventory IN ('available', 'reserved', 'sold_out', 'needs_review')
     ),
     workflow_provenance_source TEXT NOT NULL DEFAULT 'unknown' CHECK (
-        workflow_provenance_source IN ('app', 'cli', 'relay', 'local_events', 'unknown')
+        workflow_provenance_source IN ('app', 'cli', 'relay', 'runtime_store', 'unknown')
     ),
     workflow_provenance_last_event_id TEXT
 );

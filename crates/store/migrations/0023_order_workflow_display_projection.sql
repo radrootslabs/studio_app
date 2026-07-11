@@ -10,7 +10,7 @@ ALTER TABLE orders
 
 ALTER TABLE orders
     ADD COLUMN workflow_provenance_source TEXT NOT NULL DEFAULT 'unknown' CHECK (
-        workflow_provenance_source IN ('app', 'cli', 'relay', 'local_events', 'unknown')
+        workflow_provenance_source IN ('app', 'cli', 'relay', 'runtime_store', 'unknown')
     );
 
 ALTER TABLE orders

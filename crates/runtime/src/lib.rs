@@ -24,9 +24,10 @@ pub use paths::{
     AppSharedAccountsPaths, AppSharedIdentityPaths, SHARED_ACCOUNTS_NAMESPACE,
     SHARED_ACCOUNTS_NAMESPACE_KIND, SHARED_ACCOUNTS_NAMESPACE_VALUE,
     SHARED_ACCOUNTS_STORE_FILE_NAME, SHARED_IDENTITIES_NAMESPACE, SHARED_IDENTITIES_NAMESPACE_KIND,
-    SHARED_IDENTITIES_NAMESPACE_VALUE, SHARED_IDENTITY_FILE_NAME, SHARED_LOCAL_EVENTS_DB_FILE_NAME,
-    SHARED_LOCAL_EVENTS_NAMESPACE, SHARED_LOCAL_EVENTS_NAMESPACE_KIND,
-    SHARED_LOCAL_EVENTS_NAMESPACE_VALUE, shared_local_events_database_path_from_shared_accounts,
+    SHARED_IDENTITIES_NAMESPACE_VALUE, SHARED_IDENTITY_FILE_NAME,
+    SHARED_RUNTIME_STORE_DB_FILE_NAME, SHARED_RUNTIME_STORE_NAMESPACE,
+    SHARED_RUNTIME_STORE_NAMESPACE_KIND, SHARED_RUNTIME_STORE_NAMESPACE_VALUE,
+    shared_runtime_store_database_path_from_shared_accounts,
 };
 pub use runtime::{
     APP_HOST_PLATFORM, APP_ID, APP_LOCAL_LOG_ROOT_ENV, APP_NAME, APP_NOSTR_RELAY_URLS_ENV,
@@ -44,9 +45,9 @@ pub use sdk::{
     AppSdkRestorePreflightReceipt, AppSdkRestorePreflightRequest, AppSdkRuntime,
     AppSdkRuntimeError, AppSdkRuntimeIssue, AppSdkRuntimeStatus, AppSdkSqliteStoreDiagnostics,
     AppSdkStorageDiagnostics, AppSdkStoragePaths, AppSdkSyncDiagnostics,
-    AppSdkSyncEventStoreDiagnostics, AppSdkSyncOutboxDiagnostics, AppSdkSyncRelayTargetDiagnostics,
-    AppSdkTradeCancellationRequest, AppSdkTradeDecision, AppSdkTradeDecisionRequest,
-    AppSdkTradeProposeRequest, AppSdkTradeRevisionDecisionRequest,
+    AppSdkSyncEventStoreDiagnostics, AppSdkSyncOutboxDiagnostics,
+    AppSdkSyncTransportTargetDiagnostics, AppSdkTradeCancellationRequest, AppSdkTradeDecision,
+    AppSdkTradeDecisionRequest, AppSdkTradeProposeRequest, AppSdkTradeRevisionDecisionRequest,
     AppSdkTradeRevisionProposalRequest, AppSdkWorkflowReceipt, app_sdk_storage_root_from_data_root,
 };
 pub use startup::{AppStartupEvent, AppStartupEventMetadata, launch_startup_event};

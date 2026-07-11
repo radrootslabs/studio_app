@@ -7,21 +7,21 @@ use crate::AppSqliteError;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AppSdkWorkflowReceiptSourceKind {
     LocalOutbox,
-    SharedLocalEvent,
+    SharedRuntimeStore,
 }
 
 impl AppSdkWorkflowReceiptSourceKind {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::LocalOutbox => "local_outbox",
-            Self::SharedLocalEvent => "shared_local_event",
+            Self::SharedRuntimeStore => "shared_runtime_store",
         }
     }
 
     pub fn parse(value: &str) -> Result<Self, AppSqliteError> {
         match value {
             "local_outbox" => Ok(Self::LocalOutbox),
-            "shared_local_event" => Ok(Self::SharedLocalEvent),
+            "shared_runtime_store" => Ok(Self::SharedRuntimeStore),
             _ => Err(AppSqliteError::DecodeEnum {
                 field: "app_sdk_workflow_receipts.source_kind",
                 value: value.to_owned(),

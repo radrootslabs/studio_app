@@ -80,7 +80,7 @@ fn normalized_nostr_pubkey(pubkey: &str) -> Option<String> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BuyerOrderLocalEventExport {
+pub struct BuyerOrderRuntimeStoreExport {
     pub order_id: OrderId,
     pub farm_id: FarmId,
     pub farm_display_name: String,
@@ -97,11 +97,11 @@ pub struct BuyerOrderLocalEventExport {
     pub fulfillment_window_label: Option<String>,
     pub fulfillment_starts_at: Option<String>,
     pub fulfillment_ends_at: Option<String>,
-    pub lines: Vec<BuyerOrderLocalEventLine>,
+    pub lines: Vec<BuyerOrderRuntimeStoreLine>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BuyerOrderLocalEventLine {
+pub struct BuyerOrderRuntimeStoreLine {
     pub product_id: ProductId,
     pub title: String,
     pub quantity: u32,
@@ -1061,7 +1061,7 @@ impl<'a> AppBuyerRepository<'a> {
         &self,
         context: &BuyerContext,
         order_id: OrderId,
-    ) -> Result<Option<BuyerOrderLocalEventExport>, AppSqliteError> {
+    ) -> Result<Option<BuyerOrderRuntimeStoreExport>, AppSqliteError> {
         let context_key = context.storage_key();
         let Some(record) = self
             .connection
@@ -1140,7 +1140,7 @@ impl<'a> AppBuyerRepository<'a> {
         let farm_id = parse_typed_id("orders.farm_id", farm_id)?;
         let lines = self.load_buyer_order_local_event_lines(order_id)?;
 
-        Ok(Some(BuyerOrderLocalEventExport {
+        Ok(Some(BuyerOrderRuntimeStoreExport {
             order_id,
             farm_id,
             farm_display_name,
@@ -1906,7 +1906,7 @@ impl<'a> AppBuyerRepository<'a> {
     fn load_buyer_order_local_event_lines(
         &self,
         order_id: OrderId,
-    ) -> Result<Vec<BuyerOrderLocalEventLine>, AppSqliteError> {
+    ) -> Result<Vec<BuyerOrderRuntimeStoreLine>, AppSqliteError> {
         let order_id_string = order_id.to_string();
         let mut statement = self
             .connection
@@ -1987,7 +1987,7 @@ impl<'a> AppBuyerRepository<'a> {
                 });
             }
 
-            lines.push(BuyerOrderLocalEventLine {
+            lines.push(BuyerOrderRuntimeStoreLine {
                 product_id,
                 title,
                 quantity,
@@ -3913,7 +3913,7 @@ mod tests {
             order_id,
             "committed",
             "reserved",
-            "local_events",
+            "runtime_store",
             Some("agreement-event-1"),
         );
 
@@ -3931,7 +3931,7 @@ mod tests {
         assert_eq!(row.workflow.inventory, TradeInventoryStatus::Reserved);
         assert_eq!(
             row.workflow.provenance.primary_source,
-            TradeWorkflowSource::LocalEvents
+            TradeWorkflowSource::RuntimeStore
         );
         assert_eq!(
             row.workflow.provenance.last_event_id.as_deref(),
@@ -3967,7 +3967,7 @@ mod tests {
             order_id,
             "committed",
             "reserved",
-            "local_events",
+            "runtime_store",
             Some("buyer-workflow-event"),
         );
 
@@ -3984,7 +3984,7 @@ mod tests {
                 order_id,
                 "committed",
                 "reserved",
-                "local_events",
+                "runtime_store",
                 Some("buyer-workflow-event"),
             );
             corrupt_order_workflow_display_projection(connection, order_id, column, "future_state");

@@ -430,7 +430,7 @@
   "trade.workflow.provenance.app": "App",
   "trade.workflow.provenance.cli": "CLI",
   "trade.workflow.provenance.relay": "Relay",
-  "trade.workflow.provenance.local_events": "Local events",
+  "trade.workflow.provenance.runtime_store": "Runtime store",
   "trade.workflow.provenance.unknown": "Unknown",
   "orders.reminders.title": "Reminders",
   "orders.reminder_log.title": "Reminder activity",

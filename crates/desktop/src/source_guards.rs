@@ -110,7 +110,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "CARGO_PKG_VERSION",
     "clock",
     "configuration",
-    "configure_relay_targets",
+    "configure_transport_targets",
     "customer_labels.txt",
     "desktop runtime paths should resolve",
     "desktop runtime roots require HOME for macos",
@@ -734,7 +734,7 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::TradeWorkflowProvenanceApp",
     "AppTextKey::TradeWorkflowProvenanceCli",
     "AppTextKey::TradeWorkflowProvenanceRelay",
-    "AppTextKey::TradeWorkflowProvenanceLocalEvents",
+    "AppTextKey::TradeWorkflowProvenanceRuntimeStore",
     "AppTextKey::TradeWorkflowProvenanceUnknown",
     "AppTextKey::OrdersRemindersTitle",
     "AppTextKey::OrdersReminderLogTitle",
@@ -1035,7 +1035,7 @@ const FORBIDDEN_HARDCODED_WORKFLOW_UI_LITERALS: &[&str] = &[
     "App",
     "CLI",
     "Relay",
-    "Local events",
+    "Runtime store",
     "Unknown",
 ];
 
@@ -1359,6 +1359,13 @@ const SDK_BOUNDARY_EXCEPTIONS: &[SdkBoundaryExceptionEntry] = &[
         reason: "store facade accepts app local_outbox publish operations for deferred workflows",
         removal_condition: "remove when app local_outbox enqueue is replaced by SDK canonical outbox enqueue APIs",
     },
+    SdkBoundaryExceptionEntry {
+        path: "crates/runtime/src/sdk.rs",
+        pattern: "TradeEvidenceIngestRequest",
+        owner: "rpv1-csv1.03",
+        reason: "revision-decision mutations pass reducer-visible runtime-store signed evidence into the SDK explicit evidence mode",
+        removal_condition: "remove when revision-decision SDK mutations can consume shared runtime-store evidence without app-core evidence bridging",
+    },
 ];
 
 #[test]
@@ -1657,7 +1664,7 @@ fn app_sdk_trade_mutation_requests_stay_locator_and_resync_owned() {
             "trade revision decision",
             "fn trade_revision_decide_with_sdk(",
             "fn trade_cancel_with_sdk(",
-            1usize,
+            0usize,
         ),
         (
             "trade cancellation",
@@ -1679,6 +1686,19 @@ fn app_sdk_trade_mutation_requests_stay_locator_and_resync_owned() {
             "{label} must not use local-only evidence for app mutation authority"
         );
     }
+    let revision_decision = source_segment(
+        source.as_str(),
+        "fn trade_revision_decide_with_sdk(",
+        "fn trade_cancel_with_sdk(",
+    );
+    assert!(
+        revision_decision.contains("TradeEvidenceMode::require_explicit_evidence("),
+        "trade revision decision must pass reducer-visible runtime-store evidence into SDK explicit evidence mode"
+    );
+    assert!(
+        revision_decision.contains("TradeEvidenceIngestRequest::new"),
+        "trade revision decision explicit evidence must be converted through SDK evidence ingest requests"
+    );
 }
 
 #[test]
@@ -1842,16 +1862,21 @@ fn strict_sdk_boundary_scanner_rejects_unexcepted_new_production_paths() {
         "crates/runtime/src/sdk.rs",
         "fn mutate() { sdk.trades().ingest_evidence(TradeEvidenceIngestRequest::new(event)); }",
     );
-    assert_eq!(evidence_findings.len(), 2);
-    assert!(
-        evidence_findings
-            .iter()
-            .any(|finding| finding.pattern == "TradeEvidenceIngestRequest")
-    );
+    assert_eq!(evidence_findings.len(), 1);
     assert!(
         evidence_findings
             .iter()
             .any(|finding| finding.pattern == ".ingest_evidence(")
+    );
+    let unexcepted_evidence_type_findings = unexcepted_sdk_boundary_patterns(
+        "crates/desktop/src/runtime.rs",
+        "fn mutate() { let _ = TradeEvidenceIngestRequest::new(event); }",
+    );
+    assert_eq!(unexcepted_evidence_type_findings.len(), 1);
+    assert!(
+        unexcepted_evidence_type_findings
+            .iter()
+            .any(|finding| finding.pattern == "TradeEvidenceIngestRequest")
     );
     let adapter_hook_findings = unexcepted_sdk_boundary_patterns(
         "crates/runtime/src/sdk.rs",

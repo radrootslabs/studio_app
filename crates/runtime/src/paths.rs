@@ -7,14 +7,14 @@ use std::{
 };
 
 pub use radroots_runtime_paths::{
-    DEFAULT_SHARED_LOCAL_EVENTS_DB_FILE_NAME as SHARED_LOCAL_EVENTS_DB_FILE_NAME,
-    DEFAULT_SHARED_LOCAL_EVENTS_NAMESPACE as SHARED_LOCAL_EVENTS_NAMESPACE,
-    DEFAULT_SHARED_LOCAL_EVENTS_NAMESPACE_KIND as SHARED_LOCAL_EVENTS_NAMESPACE_KIND,
-    DEFAULT_SHARED_LOCAL_EVENTS_NAMESPACE_VALUE as SHARED_LOCAL_EVENTS_NAMESPACE_VALUE,
+    DEFAULT_SHARED_RUNTIME_STORE_DB_FILE_NAME as SHARED_RUNTIME_STORE_DB_FILE_NAME,
+    DEFAULT_SHARED_RUNTIME_STORE_NAMESPACE as SHARED_RUNTIME_STORE_NAMESPACE,
+    DEFAULT_SHARED_RUNTIME_STORE_NAMESPACE_KIND as SHARED_RUNTIME_STORE_NAMESPACE_KIND,
+    DEFAULT_SHARED_RUNTIME_STORE_NAMESPACE_VALUE as SHARED_RUNTIME_STORE_NAMESPACE_VALUE,
 };
 use radroots_runtime_paths::{
-    default_shared_local_events_database_path_from_data_root,
-    default_shared_local_events_database_path_from_shared_accounts_data_root,
+    default_shared_runtime_store_database_path_from_data_root,
+    default_shared_runtime_store_database_path_from_shared_accounts_data_root,
 };
 
 pub const APP_RUNTIME_NAMESPACE_KIND: &str = "apps";
@@ -121,8 +121,8 @@ pub struct AppDesktopRuntimePaths {
 }
 
 impl AppSharedAccountsPaths {
-    pub fn shared_local_events_database_path(&self) -> Option<PathBuf> {
-        shared_local_events_database_path_from_shared_accounts(self)
+    pub fn shared_runtime_store_database_path(&self) -> Option<PathBuf> {
+        shared_runtime_store_database_path_from_shared_accounts(self)
     }
 }
 
@@ -200,26 +200,26 @@ impl AppDesktopRuntimePaths {
         })
     }
 
-    pub fn shared_local_events_database_path(&self) -> Result<PathBuf, AppRuntimePathsError> {
+    pub fn shared_runtime_store_database_path(&self) -> Result<PathBuf, AppRuntimePathsError> {
         let data_root = self
             .app
             .data
             .parent()
             .and_then(|apps_root| apps_root.parent())
-            .ok_or(AppRuntimePathsError::SharedLocalEventsPath)?;
+            .ok_or(AppRuntimePathsError::SharedRuntimeStorePath)?;
 
-        Ok(shared_local_events_database_path_from_data_root(data_root))
+        Ok(shared_runtime_store_database_path_from_data_root(data_root))
     }
 }
 
-pub fn shared_local_events_database_path_from_shared_accounts(
+pub fn shared_runtime_store_database_path_from_shared_accounts(
     paths: &AppSharedAccountsPaths,
 ) -> Option<PathBuf> {
-    default_shared_local_events_database_path_from_shared_accounts_data_root(&paths.data_root).ok()
+    default_shared_runtime_store_database_path_from_shared_accounts_data_root(&paths.data_root).ok()
 }
 
-fn shared_local_events_database_path_from_data_root(data_root: &Path) -> PathBuf {
-    default_shared_local_events_database_path_from_data_root(data_root)
+fn shared_runtime_store_database_path_from_data_root(data_root: &Path) -> PathBuf {
+    default_shared_runtime_store_database_path_from_data_root(data_root)
 }
 
 fn resolve_desktop_base_roots(
@@ -306,7 +306,7 @@ pub enum AppRuntimePathsError {
     EmptyRepoLocalRoot,
     UnsupportedPathProfile { value: String },
     UnsupportedPlatform { platform: AppRuntimePlatform },
-    SharedLocalEventsPath,
+    SharedRuntimeStorePath,
 }
 
 impl fmt::Display for AppRuntimePathsError {
@@ -338,7 +338,7 @@ impl fmt::Display for AppRuntimePathsError {
                 "desktop runtime roots are unsupported on {}",
                 platform.label()
             ),
-            Self::SharedLocalEventsPath => formatter
+            Self::SharedRuntimeStorePath => formatter
                 .write_str("desktop app data root must be nested under the Radroots data root"),
         }
     }
@@ -355,7 +355,7 @@ mod tests {
         AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePathsError,
         AppRuntimePlatform, AppRuntimeRoots, SHARED_ACCOUNTS_NAMESPACE,
         SHARED_ACCOUNTS_STORE_FILE_NAME, SHARED_IDENTITIES_NAMESPACE, SHARED_IDENTITY_FILE_NAME,
-        SHARED_LOCAL_EVENTS_DB_FILE_NAME, SHARED_LOCAL_EVENTS_NAMESPACE,
+        SHARED_RUNTIME_STORE_DB_FILE_NAME, SHARED_RUNTIME_STORE_NAMESPACE,
     };
 
     #[test]
@@ -399,11 +399,11 @@ mod tests {
         );
         assert_eq!(
             paths
-                .shared_local_events_database_path()
-                .expect("shared local events path"),
+                .shared_runtime_store_database_path()
+                .expect("shared runtime store path"),
             PathBuf::from("/Users/treesap/.radroots/data")
-                .join(SHARED_LOCAL_EVENTS_NAMESPACE)
-                .join(SHARED_LOCAL_EVENTS_DB_FILE_NAME)
+                .join(SHARED_RUNTIME_STORE_NAMESPACE)
+                .join(SHARED_RUNTIME_STORE_DB_FILE_NAME)
         );
     }
 
@@ -488,11 +488,11 @@ mod tests {
         assert_eq!(
             paths
                 .shared_accounts
-                .shared_local_events_database_path()
-                .expect("shared local events path"),
+                .shared_runtime_store_database_path()
+                .expect("shared runtime store path"),
             PathBuf::from("/repo/infra/local/runtime/radroots/data")
-                .join(SHARED_LOCAL_EVENTS_NAMESPACE)
-                .join(SHARED_LOCAL_EVENTS_DB_FILE_NAME)
+                .join(SHARED_RUNTIME_STORE_NAMESPACE)
+                .join(SHARED_RUNTIME_STORE_DB_FILE_NAME)
         );
     }
 

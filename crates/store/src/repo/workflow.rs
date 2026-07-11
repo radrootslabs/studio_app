@@ -70,7 +70,7 @@ fn parse_trade_workflow_source(
         "app" => Ok(TradeWorkflowSource::App),
         "cli" => Ok(TradeWorkflowSource::Cli),
         "relay" => Ok(TradeWorkflowSource::Relay),
-        "local_events" => Ok(TradeWorkflowSource::LocalEvents),
+        "runtime_store" => Ok(TradeWorkflowSource::RuntimeStore),
         "unknown" => Ok(TradeWorkflowSource::Unknown),
         _ => Err(AppSqliteError::DecodeEnum { field, value }),
     }

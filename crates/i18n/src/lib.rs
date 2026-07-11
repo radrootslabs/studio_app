@@ -668,8 +668,8 @@ mod tests {
         );
         assert_eq!(app_text(AppTextKey::TradeWorkflowProvenanceCli), "CLI");
         assert_eq!(
-            app_text(AppTextKey::TradeWorkflowProvenanceLocalEvents),
-            "Local events"
+            app_text(AppTextKey::TradeWorkflowProvenanceRuntimeStore),
+            "Runtime store"
         );
     }
 

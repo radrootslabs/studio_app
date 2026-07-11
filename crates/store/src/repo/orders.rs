@@ -1608,7 +1608,7 @@ mod tests {
             order_id,
             "committed",
             "reserved",
-            "local_events",
+            "runtime_store",
             Some("seller-workflow-event"),
         );
 
@@ -1632,7 +1632,7 @@ mod tests {
         assert_eq!(workflow.inventory, TradeInventoryStatus::Reserved);
         assert_eq!(
             workflow.provenance.primary_source,
-            TradeWorkflowSource::LocalEvents
+            TradeWorkflowSource::RuntimeStore
         );
         assert_eq!(
             workflow.provenance.last_event_id.as_deref(),
@@ -1674,7 +1674,7 @@ mod tests {
             order_id,
             "committed",
             "reserved",
-            "local_events",
+            "runtime_store",
             Some("seller-workflow-event"),
         );
 
@@ -1691,7 +1691,7 @@ mod tests {
                 order_id,
                 "committed",
                 "reserved",
-                "local_events",
+                "runtime_store",
                 Some("seller-workflow-event"),
             );
             corrupt_order_workflow_display_projection(connection, order_id, column, "future_state");

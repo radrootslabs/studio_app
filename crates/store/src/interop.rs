@@ -1,7 +1,7 @@
 use std::{fs, path::Path};
 
-use radroots_events::{
-    RadrootsNostrEvent,
+use radroots_event::{
+    RadrootsEventEnvelope,
     ids::{RadrootsEventId, RadrootsOrderId, RadrootsPublicKey},
     kinds::{
         KIND_FARM as RADROOTS_KIND_FARM, KIND_LISTING as RADROOTS_KIND_LISTING,
@@ -18,14 +18,14 @@ use radroots_events::{
         RadrootsOrderRevisionOutcome,
     },
 };
-use radroots_events_codec::order::{
+use radroots_event_codec::order::{
     order_cancellation_from_event, order_decision_from_event, order_event_context_from_tags,
     order_request_from_event, order_revision_decision_from_event,
     order_revision_proposal_from_event,
 };
-use radroots_local_events::{
-    LocalEventRecord, LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus,
-    RelayDeliveryEvidence, RelayDeliveryState, SourceRuntime,
+use radroots_runtime_store::{
+    PublishOutboxStatus, RelayDeliveryEvidence, RelayDeliveryState, RuntimeStore,
+    RuntimeStoreRecord, RuntimeStoreRecordFamily, RuntimeStoreRecordStatus, SourceRuntime,
 };
 use radroots_sql_core::{SqlExecutor, SqliteExecutor};
 use radroots_studio_app_view::{
@@ -50,7 +50,7 @@ use uuid::Uuid;
 use crate::repo::farm_setup::AppFarmSetupRepository;
 use crate::{AppSqliteError, AppSqliteStore};
 
-const LOCAL_EVENTS_BATCH_LIMIT: u32 = 500;
+const RUNTIME_STORE_BATCH_LIMIT: u32 = 500;
 const APP_LOCAL_INTEROP_CURSOR_ID: &str = "radroots_studio_app_sqlite_projection_v1";
 const KIND_FARM: i64 = RADROOTS_KIND_FARM as i64;
 const KIND_LISTING: i64 = RADROOTS_KIND_LISTING as i64;
@@ -117,16 +117,16 @@ impl<'a> AppLocalInteropRepository<'a> {
             })?;
         }
         let executor = SqliteExecutor::open(shared_database_path).map_err(|source| {
-            AppSqliteError::LocalEventsSql {
-                operation: "open shared local events database",
+            AppSqliteError::RuntimeStoreSql {
+                operation: "open shared runtime store database",
                 source,
             }
         })?;
-        let store = LocalEventsStore::new(executor);
+        let store = RuntimeStore::new(executor);
         store
             .migrate_up()
-            .map_err(|source| AppSqliteError::LocalEventsSql {
-                operation: "migrate shared local events database",
+            .map_err(|source| AppSqliteError::RuntimeStoreSql {
+                operation: "migrate shared runtime store database",
                 source,
             })?;
         self.import_from_store(&store)
@@ -134,7 +134,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     pub fn import_from_store<E>(
         &self,
-        store: &LocalEventsStore<E>,
+        store: &RuntimeStore<E>,
     ) -> Result<AppLocalInteropImportReport, AppSqliteError>
     where
         E: SqlExecutor,
@@ -143,8 +143,8 @@ impl<'a> AppLocalInteropRepository<'a> {
         let mut after_change_seq = self.last_imported_change_seq()?;
         loop {
             let records = store
-                .list_records_changed_after(after_change_seq, LOCAL_EVENTS_BATCH_LIMIT)
-                .map_err(|source| AppSqliteError::LocalEvents {
+                .list_records_changed_after(after_change_seq, RUNTIME_STORE_BATCH_LIMIT)
+                .map_err(|source| AppSqliteError::RuntimeStore {
                     operation: "list changed shared local event records",
                     source,
                 })?;
@@ -158,7 +158,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     ImportOutcome::Skipped => report.skipped_records += 1,
                 }
             }
-            if batch_len < LOCAL_EVENTS_BATCH_LIMIT as usize {
+            if batch_len < RUNTIME_STORE_BATCH_LIMIT as usize {
                 break;
             }
         }
@@ -170,7 +170,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     pub fn import_records(
         &self,
-        records: &[LocalEventRecord],
+        records: &[RuntimeStoreRecord],
     ) -> Result<AppLocalInteropImportReport, AppSqliteError> {
         let mut report = AppLocalInteropImportReport::default();
         for record in records {
@@ -247,7 +247,7 @@ impl<'a> AppLocalInteropRepository<'a> {
     pub fn load_signed_events_by_kind(
         &self,
         event_kind: i64,
-    ) -> Result<Vec<RadrootsNostrEvent>, AppSqliteError> {
+    ) -> Result<Vec<RadrootsEventEnvelope>, AppSqliteError> {
         let mut statement = self
             .connection
             .prepare(
@@ -310,7 +310,7 @@ impl<'a> AppLocalInteropRepository<'a> {
     fn load_signed_event_by_event_id(
         &self,
         event_id: &str,
-    ) -> Result<Option<RadrootsNostrEvent>, AppSqliteError> {
+    ) -> Result<Option<RadrootsEventEnvelope>, AppSqliteError> {
         let mut statement = self
             .connection
             .prepare(
@@ -411,7 +411,7 @@ impl<'a> AppLocalInteropRepository<'a> {
         Ok(())
     }
 
-    fn import_record(&self, record: &LocalEventRecord) -> Result<ImportOutcome, AppSqliteError> {
+    fn import_record(&self, record: &RuntimeStoreRecord) -> Result<ImportOutcome, AppSqliteError> {
         self.begin_import_record_savepoint()?;
         match self.import_record_inner(record) {
             Ok(outcome) => {
@@ -428,7 +428,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn import_record_inner(
         &self,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
     ) -> Result<ImportOutcome, AppSqliteError> {
         let superseded_listing_ids = match self.duplicate_signed_event_action(record)? {
             DuplicateSignedEventAction::Import => Vec::new(),
@@ -440,8 +440,8 @@ impl<'a> AppLocalInteropRepository<'a> {
             DuplicateSignedEventAction::Skip => return Ok(ImportOutcome::Skipped),
         };
         let projection = match record.family {
-            LocalRecordFamily::LocalWork => self.import_local_work(record)?,
-            LocalRecordFamily::SignedEvent => self.import_signed_event(record)?,
+            RuntimeStoreRecordFamily::LocalWork => self.import_local_work(record)?,
+            RuntimeStoreRecordFamily::SignedEvent => self.import_signed_event(record)?,
         };
         match projection {
             Some(projection) => {
@@ -494,9 +494,9 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn duplicate_signed_event_action(
         &self,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
     ) -> Result<DuplicateSignedEventAction, AppSqliteError> {
-        if record.family != LocalRecordFamily::SignedEvent {
+        if record.family != RuntimeStoreRecordFamily::SignedEvent {
             return Ok(DuplicateSignedEventAction::Import);
         }
         let Some(event_id) = record
@@ -737,7 +737,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn import_local_work(
         &self,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
     ) -> Result<Option<ProjectionRecord>, AppSqliteError> {
         let Some(payload) = record.local_work_json.as_ref() else {
             return Ok(None);
@@ -751,7 +751,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn import_signed_event(
         &self,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
     ) -> Result<Option<ProjectionRecord>, AppSqliteError> {
         match record.event_kind {
             Some(KIND_FARM) => self.import_signed_farm(record),
@@ -767,7 +767,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn import_farm_config(
         &self,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
         payload: &Value,
     ) -> Result<Option<ProjectionRecord>, AppSqliteError> {
         let Some(document) = payload.get("document") else {
@@ -826,7 +826,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn import_listing_draft(
         &self,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
         payload: &Value,
     ) -> Result<Option<ProjectionRecord>, AppSqliteError> {
         let Some(document) = payload.get("document") else {
@@ -898,7 +898,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn import_signed_farm(
         &self,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
     ) -> Result<Option<ProjectionRecord>, AppSqliteError> {
         let Some(content) = record.event_content.as_deref() else {
             return Ok(None);
@@ -941,7 +941,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn import_signed_listing(
         &self,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
     ) -> Result<Option<ProjectionRecord>, AppSqliteError> {
         let content = record
             .event_content
@@ -1110,7 +1110,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn import_signed_active_order(
         &self,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
     ) -> Result<Option<ProjectionRecord>, AppSqliteError> {
         if !signed_event_record_is_usable(record) {
             return Ok(Some(signed_event_projection(record)));
@@ -1127,7 +1127,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn import_signed_validation_receipt(
         &self,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
     ) -> Result<Option<ProjectionRecord>, AppSqliteError> {
         if !signed_event_record_is_usable(record) {
             return Ok(Some(signed_event_projection(record)));
@@ -1147,7 +1147,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn project_active_order(
         &self,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
         current_evidence: ActiveOrderEvidence,
     ) -> Result<(), AppSqliteError> {
         if let ActiveOrderEvidence::Request(request) = &current_evidence {
@@ -1223,7 +1223,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn upsert_order_request(
         &self,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
         payload: &RadrootsOrderRequest,
         root_event_id: &str,
     ) -> Result<OrderId, AppSqliteError> {
@@ -1294,7 +1294,7 @@ impl<'a> AppLocalInteropRepository<'a> {
             order_id,
             projection,
             revision,
-            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::LocalEvents),
+            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::RuntimeStore),
         );
         let Some(status) = order_status_from_active_order_projection(projection) else {
             return Ok(());
@@ -1335,7 +1335,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn upsert_validation_receipt_projection(
         &self,
-        event: &RadrootsNostrEvent,
+        event: &RadrootsEventEnvelope,
         receipt: &RadrootsTradeValidationReceipt,
         tags: &RadrootsValidationReceiptTags,
     ) -> Result<(), AppSqliteError> {
@@ -1545,7 +1545,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     status,
                     agreement,
                     inventory,
-                    TradeWorkflowSource::LocalEvents.storage_key(),
+                    TradeWorkflowSource::RuntimeStore.storage_key(),
                     target_event_id,
                 ],
             )
@@ -1579,7 +1579,7 @@ impl<'a> AppLocalInteropRepository<'a> {
         order_id: OrderId,
         payload: &RadrootsOrderRequest,
         existing_listing: Option<&ExistingListingProjection>,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
     ) -> Result<(), AppSqliteError> {
         self.connection
             .execute(
@@ -1841,7 +1841,7 @@ impl<'a> AppLocalInteropRepository<'a> {
     fn mark_farm_buyer_visible(
         &self,
         farm_id: FarmId,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
         method: FarmOrderMethod,
     ) -> Result<(), AppSqliteError> {
         self.connection
@@ -2221,7 +2221,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn existing_app_origin_listing_projection(
         &self,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
         farm_key: &str,
         listing_key: &str,
         listing_pubkey: Option<&str>,
@@ -2330,7 +2330,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn signed_listing_is_current(
         &self,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
         listing_key: &str,
     ) -> Result<bool, AppSqliteError> {
         if !signed_listing_has_public_evidence(record) {
@@ -2456,7 +2456,7 @@ impl<'a> AppLocalInteropRepository<'a> {
 
     fn record_import(
         &self,
-        record: &LocalEventRecord,
+        record: &RuntimeStoreRecord,
         projected_kind: &str,
         projected_id: Option<String>,
     ) -> Result<(), AppSqliteError> {
@@ -2569,7 +2569,7 @@ impl AppSqliteStore {
         AppLocalInteropRepository::new(&self.connection)
     }
 
-    pub fn import_shared_local_events_from_path(
+    pub fn import_shared_runtime_store_from_path(
         &self,
         shared_database_path: &Path,
     ) -> Result<AppLocalInteropImportReport, AppSqliteError> {
@@ -2577,9 +2577,9 @@ impl AppSqliteStore {
             .import_from_path(shared_database_path)
     }
 
-    pub fn import_shared_local_events_from_store<E>(
+    pub fn import_shared_runtime_store_from_store<E>(
         &self,
-        store: &LocalEventsStore<E>,
+        store: &RuntimeStore<E>,
     ) -> Result<AppLocalInteropImportReport, AppSqliteError>
     where
         E: SqlExecutor,
@@ -2589,7 +2589,7 @@ impl AppSqliteStore {
 
     pub fn import_local_event_records(
         &self,
-        records: &[LocalEventRecord],
+        records: &[RuntimeStoreRecord],
     ) -> Result<AppLocalInteropImportReport, AppSqliteError> {
         self.local_interop_repository().import_records(records)
     }
@@ -2603,7 +2603,7 @@ impl AppSqliteStore {
     pub fn load_local_interop_signed_events_by_kind(
         &self,
         event_kind: i64,
-    ) -> Result<Vec<RadrootsNostrEvent>, AppSqliteError> {
+    ) -> Result<Vec<RadrootsEventEnvelope>, AppSqliteError> {
         self.local_interop_repository()
             .load_signed_events_by_kind(event_kind)
     }
@@ -2725,7 +2725,7 @@ enum ListingCurrentnessIdentity {
 }
 
 impl ListingCurrentnessIdentity {
-    fn from_record(record: &LocalEventRecord, listing_key: &str) -> Option<Self> {
+    fn from_record(record: &RuntimeStoreRecord, listing_key: &str) -> Option<Self> {
         if let Some(listing_addr) = record
             .listing_addr
             .as_deref()
@@ -2939,7 +2939,7 @@ fn signed_event_evidence_precedence(
     outbox_status: &str,
 ) -> u8 {
     let mut precedence = 0;
-    if local_status == LocalRecordStatus::Published.as_str() {
+    if local_status == RuntimeStoreRecordStatus::Published.as_str() {
         precedence += 1;
     }
     if outbox_status == PublishOutboxStatus::Acknowledged.as_str() {
@@ -3032,15 +3032,15 @@ fn active_order_event_kind(kind: i64) -> bool {
     ACTIVE_ORDER_EVENT_KINDS.contains(&kind)
 }
 
-fn active_event_id(event: &RadrootsNostrEvent) -> Option<RadrootsEventId> {
+fn active_event_id(event: &RadrootsEventEnvelope) -> Option<RadrootsEventId> {
     event.id.parse().ok()
 }
 
-fn active_author_pubkey(event: &RadrootsNostrEvent) -> Option<RadrootsPublicKey> {
+fn active_author_pubkey(event: &RadrootsEventEnvelope) -> Option<RadrootsPublicKey> {
     event.author.parse().ok()
 }
 
-fn active_order_evidence_from_event(event: &RadrootsNostrEvent) -> Option<ActiveOrderEvidence> {
+fn active_order_evidence_from_event(event: &RadrootsEventEnvelope) -> Option<ActiveOrderEvidence> {
     match i64::from(event.kind) {
         KIND_ORDER_REQUEST => {
             let envelope = order_request_from_event(event).ok()?;
@@ -3113,7 +3113,7 @@ fn dedupe_active_order_evidence(evidence: &mut Vec<ActiveOrderEvidence>) {
     evidence.dedup_by(|left, right| left.event_id() == right.event_id());
 }
 
-fn signed_event_projection(record: &LocalEventRecord) -> ProjectionRecord {
+fn signed_event_projection(record: &RuntimeStoreRecord) -> ProjectionRecord {
     ProjectionRecord {
         kind: "signed_event",
         projected_id: record.event_id.clone(),
@@ -3121,8 +3121,8 @@ fn signed_event_projection(record: &LocalEventRecord) -> ProjectionRecord {
 }
 
 fn signed_event_from_record(
-    record: &LocalEventRecord,
-) -> Result<Option<RadrootsNostrEvent>, AppSqliteError> {
+    record: &RuntimeStoreRecord,
+) -> Result<Option<RadrootsEventEnvelope>, AppSqliteError> {
     let Some(id) = record
         .event_id
         .as_deref()
@@ -3159,7 +3159,7 @@ fn signed_event_from_record(
     let Some(tags) = record.event_tags_json.as_ref().and_then(tags_from_json) else {
         return Ok(None);
     };
-    Ok(Some(RadrootsNostrEvent {
+    Ok(Some(RadrootsEventEnvelope {
         id: id.to_owned(),
         author: author.to_owned(),
         created_at,
@@ -3170,8 +3170,8 @@ fn signed_event_from_record(
     }))
 }
 
-fn signed_event_record_is_usable(record: &LocalEventRecord) -> bool {
-    if record.status != LocalRecordStatus::Published
+fn signed_event_record_is_usable(record: &RuntimeStoreRecord) -> bool {
+    if record.status != RuntimeStoreRecordStatus::Published
         || matches!(
             record.outbox_status,
             PublishOutboxStatus::Pending | PublishOutboxStatus::Failed
@@ -3194,7 +3194,7 @@ fn signed_event_record_is_usable(record: &LocalEventRecord) -> bool {
 fn signed_event_local_interop_evidence_is_usable(
     evidence: &StoredLocalInteropSignedEventEvidence,
 ) -> bool {
-    if evidence.local_status != LocalRecordStatus::Published.as_str()
+    if evidence.local_status != RuntimeStoreRecordStatus::Published.as_str()
         || matches!(evidence.outbox_status.as_str(), "pending" | "failed")
     {
         return false;
@@ -3216,7 +3216,7 @@ fn signed_event_local_interop_evidence_is_usable(
 
 fn signed_event_from_local_interop_evidence(
     evidence: &StoredLocalInteropSignedEventEvidence,
-) -> Result<Option<RadrootsNostrEvent>, AppSqliteError> {
+) -> Result<Option<RadrootsEventEnvelope>, AppSqliteError> {
     let Some(id) = evidence
         .event_id
         .as_deref()
@@ -3262,7 +3262,7 @@ fn signed_event_from_local_interop_evidence(
     let Some(tags) = tags_from_json(&tags_value) else {
         return Ok(None);
     };
-    Ok(Some(RadrootsNostrEvent {
+    Ok(Some(RadrootsEventEnvelope {
         id: id.to_owned(),
         author: author.to_owned(),
         created_at,
@@ -3385,7 +3385,7 @@ fn active_order_agreement_source(
 fn order_line_product_id(
     payload: &RadrootsOrderRequest,
     existing_listing: Option<&ExistingListingProjection>,
-    item: &radroots_events::order::RadrootsOrderItem,
+    item: &radroots_event::order::RadrootsOrderItem,
 ) -> ProductId {
     order_agreement_line_product_id(
         payload.listing_addr.as_str(),
@@ -3453,7 +3453,7 @@ fn order_customer_display_name(buyer_pubkey: &str) -> String {
     }
 }
 
-fn order_buyer_context_key(record: &LocalEventRecord, buyer_pubkey: &str) -> String {
+fn order_buyer_context_key(record: &RuntimeStoreRecord, buyer_pubkey: &str) -> String {
     if record.source_runtime == SourceRuntime::App
         && record
             .event_pubkey
@@ -3480,7 +3480,7 @@ fn format_quantity_display(quantity: u32, unit_label: &str) -> String {
     }
 }
 
-fn listing_event_id_from_order_record(record: &LocalEventRecord) -> Option<String> {
+fn listing_event_id_from_order_record(record: &RuntimeStoreRecord) -> Option<String> {
     record
         .event_tags_json
         .as_ref()
@@ -3513,7 +3513,7 @@ fn string_at(value: &Value, path: &[&str]) -> Option<String> {
     }
 }
 
-fn listing_id(record: &LocalEventRecord) -> Option<String> {
+fn listing_id(record: &RuntimeStoreRecord) -> Option<String> {
     record
         .listing_addr
         .as_deref()
@@ -3566,7 +3566,7 @@ fn parse_u64_quantity(value: &str) -> Option<u64> {
 }
 
 fn signed_listing_product_status(
-    record: &LocalEventRecord,
+    record: &RuntimeStoreRecord,
     content: Option<&Value>,
     tags: Option<&Value>,
 ) -> Option<ProductStatus> {
@@ -3582,8 +3582,8 @@ fn signed_listing_product_status(
     }
 }
 
-fn signed_listing_has_public_evidence(record: &LocalEventRecord) -> bool {
-    if record.status != LocalRecordStatus::Published {
+fn signed_listing_has_public_evidence(record: &RuntimeStoreRecord) -> bool {
+    if record.status != RuntimeStoreRecordStatus::Published {
         return false;
     }
     if record.outbox_status == PublishOutboxStatus::Acknowledged {
@@ -3601,7 +3601,7 @@ fn signed_event_import_has_public_evidence(
     outbox_status: &str,
     relay_delivery_json: Option<&str>,
 ) -> bool {
-    if local_status != LocalRecordStatus::Published.as_str() {
+    if local_status != RuntimeStoreRecordStatus::Published.as_str() {
         return false;
     }
     if outbox_status == PublishOutboxStatus::Acknowledged.as_str() {
@@ -3859,8 +3859,8 @@ mod tests {
     use radroots_core::{
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
     };
-    use radroots_events::{
-        RadrootsNostrEvent, RadrootsNostrEventPtr,
+    use radroots_event::{
+        RadrootsEventEnvelope, RadrootsEventPtr,
         ids::{
             RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress, RadrootsOrderId,
             RadrootsOrderQuoteId, RadrootsOrderRevisionId, RadrootsPublicKey,
@@ -3873,16 +3873,16 @@ mod tests {
             RadrootsOrderRevisionProposal,
         },
     };
-    use radroots_events_codec::{
+    use radroots_event_codec::{
         order::{
             order_cancellation_event_build, order_decision_event_build, order_request_event_build,
             order_revision_decision_event_build, order_revision_proposal_event_build,
         },
         wire::WireEventParts,
     };
-    use radroots_local_events::{
-        LocalEventRecordInput, LocalEventRecordUpdate, LocalEventsStore, LocalRecordFamily,
-        LocalRecordStatus, PublishOutboxStatus, RelayDeliveryEvidence, SourceRuntime,
+    use radroots_runtime_store::{
+        PublishOutboxStatus, RelayDeliveryEvidence, RuntimeStore, RuntimeStoreRecordFamily,
+        RuntimeStoreRecordInput, RuntimeStoreRecordStatus, RuntimeStoreRecordUpdate, SourceRuntime,
     };
     use radroots_sql_core::SqliteExecutor;
     use radroots_studio_app_view::{
@@ -3909,10 +3909,10 @@ mod tests {
     };
     use crate::{AppSqliteStore, BuyerRepeatDemandApplyOutcome, DatabaseTarget};
 
-    fn local_events_store() -> LocalEventsStore<SqliteExecutor> {
-        let executor = SqliteExecutor::open_memory().expect("open local events memory db");
-        let store = LocalEventsStore::new(executor);
-        store.migrate_up().expect("migrate local events store");
+    fn runtime_store_store() -> RuntimeStore<SqliteExecutor> {
+        let executor = SqliteExecutor::open_memory().expect("open runtime store memory db");
+        let store = RuntimeStore::new(executor);
+        store.migrate_up().expect("migrate runtime store store");
         store
     }
 
@@ -3920,11 +3920,11 @@ mod tests {
         record_id: &str,
         farm_key: &str,
         payload: serde_json::Value,
-    ) -> LocalEventRecordInput {
-        LocalEventRecordInput {
+    ) -> RuntimeStoreRecordInput {
+        RuntimeStoreRecordInput {
             record_id: record_id.to_owned(),
-            family: LocalRecordFamily::LocalWork,
-            status: LocalRecordStatus::LocalSaved,
+            family: RuntimeStoreRecordFamily::LocalWork,
+            status: RuntimeStoreRecordStatus::LocalSaved,
             source_runtime: SourceRuntime::Cli,
             created_at_ms: 1000,
             inserted_at_ms: 1001,
@@ -3955,11 +3955,11 @@ mod tests {
         farm_key: &str,
         readiness: &str,
         display_name: &str,
-    ) -> LocalEventRecordInput {
-        LocalEventRecordInput {
+    ) -> RuntimeStoreRecordInput {
+        RuntimeStoreRecordInput {
             record_id: record_id.to_owned(),
-            family: LocalRecordFamily::SignedEvent,
-            status: LocalRecordStatus::Published,
+            family: RuntimeStoreRecordFamily::SignedEvent,
+            status: RuntimeStoreRecordStatus::Published,
             source_runtime,
             created_at_ms: 1100,
             inserted_at_ms: 1101,
@@ -4006,13 +4006,13 @@ mod tests {
         farm_key: &str,
         listing_key: &str,
         status_tag: &str,
-    ) -> LocalEventRecordInput {
+    ) -> RuntimeStoreRecordInput {
         signed_listing_record_with_publish_state(
             record_id,
             farm_key,
             listing_key,
             status_tag,
-            LocalRecordStatus::Published,
+            RuntimeStoreRecordStatus::Published,
             PublishOutboxStatus::Acknowledged,
         )
     }
@@ -4022,9 +4022,9 @@ mod tests {
         farm_key: &str,
         listing_key: &str,
         status_tag: &str,
-        record_status: LocalRecordStatus,
+        record_status: RuntimeStoreRecordStatus,
         outbox_status: PublishOutboxStatus,
-    ) -> LocalEventRecordInput {
+    ) -> RuntimeStoreRecordInput {
         let relay_delivery_json = match outbox_status {
             PublishOutboxStatus::Acknowledged => Some(json!({
                 "state": "acknowledged",
@@ -4032,13 +4032,16 @@ mod tests {
             })),
             PublishOutboxStatus::Failed => Some(json!({
                 "state": "failed",
-                "failed_relays": ["ws://127.0.0.1:1234/"]
+                "failed_relays": [{
+                    "relay_url": "ws://127.0.0.1:1234/",
+                    "error": "relay rejected event"
+                }]
             })),
             PublishOutboxStatus::Pending | PublishOutboxStatus::None => None,
         };
-        LocalEventRecordInput {
+        RuntimeStoreRecordInput {
             record_id: record_id.to_owned(),
-            family: LocalRecordFamily::SignedEvent,
+            family: RuntimeStoreRecordFamily::SignedEvent,
             status: record_status,
             source_runtime: SourceRuntime::Cli,
             created_at_ms: 1100,
@@ -4089,9 +4092,9 @@ mod tests {
         location_primary: &str,
         availability_start: u64,
         availability_end: u64,
-        record_status: LocalRecordStatus,
+        record_status: RuntimeStoreRecordStatus,
         outbox_status: PublishOutboxStatus,
-    ) -> LocalEventRecordInput {
+    ) -> RuntimeStoreRecordInput {
         let relay_delivery_json = match outbox_status {
             PublishOutboxStatus::Acknowledged => Some(json!({
                 "state": "acknowledged",
@@ -4099,7 +4102,10 @@ mod tests {
             })),
             PublishOutboxStatus::Failed => Some(json!({
                 "state": "failed",
-                "failed_relays": ["ws://127.0.0.1:1234/"]
+                "failed_relays": [{
+                    "relay_url": "ws://127.0.0.1:1234/",
+                    "error": "relay rejected event"
+                }]
             })),
             PublishOutboxStatus::Pending | PublishOutboxStatus::None => None,
         };
@@ -4130,9 +4136,9 @@ mod tests {
             },
         });
 
-        LocalEventRecordInput {
+        RuntimeStoreRecordInput {
             record_id: record_id.to_owned(),
-            family: LocalRecordFamily::SignedEvent,
+            family: RuntimeStoreRecordFamily::SignedEvent,
             status: record_status,
             source_runtime: SourceRuntime::Cli,
             created_at_ms: 1100,
@@ -4179,7 +4185,7 @@ mod tests {
     }
 
     fn set_listing_event_version(
-        record: &mut LocalEventRecordInput,
+        record: &mut RuntimeStoreRecordInput,
         event_id: &str,
         created_at: i64,
         title: &str,
@@ -4303,7 +4309,7 @@ mod tests {
         record_id: &str,
         farm_key: &str,
         payload: serde_json::Value,
-    ) -> LocalEventRecordInput {
+    ) -> RuntimeStoreRecordInput {
         let mut record = local_work_record(record_id, farm_key, payload);
         record.source_runtime = SourceRuntime::App;
         record.owner_pubkey = Some("app-seller-pubkey".to_owned());
@@ -4399,8 +4405,8 @@ mod tests {
         raw.parse().expect("valid listing address")
     }
 
-    fn listing_event_ptr(event_id: &str) -> RadrootsNostrEventPtr {
-        RadrootsNostrEventPtr {
+    fn listing_event_ptr(event_id: &str) -> RadrootsEventPtr {
+        RadrootsEventPtr {
             id: test_event_id_seed(event_id),
             relays: Some("ws://127.0.0.1:1234/".to_owned()),
         }
@@ -4554,7 +4560,7 @@ mod tests {
 
     struct ValidationReceiptOrderFixture {
         app_store: AppSqliteStore,
-        events: LocalEventsStore<SqliteExecutor>,
+        events: RuntimeStore<SqliteExecutor>,
         buyer_context: BuyerContext,
         seller_farm_id: FarmId,
         order_id: OrderId,
@@ -4570,7 +4576,7 @@ mod tests {
     fn validation_receipt_order_fixture(label: &str) -> ValidationReceiptOrderFixture {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "DDDDDDDDDDDDDDDDDDDDDD";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAw";
         let seller_pubkey = test_pubkey(format!("{label}-seller").as_str());
@@ -4593,12 +4599,12 @@ mod tests {
                 "North barn pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ))
             .expect("append signed listing");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import signed listing");
 
         let request_payload = order_request_payload(
@@ -4626,7 +4632,7 @@ mod tests {
             ))
             .expect("append validation order request");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import validation order request");
 
         let decision_payload = accepted_order_decision_payload(
@@ -4657,7 +4663,7 @@ mod tests {
             ))
             .expect("append validation order decision");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import validation order decision");
 
         ValidationReceiptOrderFixture {
@@ -4680,12 +4686,16 @@ mod tests {
         }
     }
 
-    fn event_from_parts(event_id: &str, author: &str, parts: WireEventParts) -> RadrootsNostrEvent {
+    fn event_from_parts(
+        event_id: &str,
+        author: &str,
+        parts: WireEventParts,
+    ) -> RadrootsEventEnvelope {
         let event_id = event_id
             .parse::<RadrootsEventId>()
             .map(|event_id| event_id.to_string())
             .unwrap_or_else(|_| test_event_id_seed(event_id));
-        RadrootsNostrEvent {
+        RadrootsEventEnvelope {
             sig: format!("sig-{event_id}"),
             id: event_id,
             author: author.to_owned(),
@@ -4701,7 +4711,7 @@ mod tests {
         author: &str,
         parts: WireEventParts,
         created_at: u32,
-    ) -> RadrootsNostrEvent {
+    ) -> RadrootsEventEnvelope {
         let mut event = event_from_parts(event_id, author, parts);
         event.created_at = created_at;
         event
@@ -4765,7 +4775,7 @@ mod tests {
         target_event_id: &str,
         result: RadrootsValidationReceiptResult,
         created_at: u32,
-    ) -> RadrootsNostrEvent {
+    ) -> RadrootsEventEnvelope {
         let receipt =
             validation_receipt_payload(listing_event_id, root_event_id, target_event_id, result);
         let parts =
@@ -4775,11 +4785,11 @@ mod tests {
 
     fn signed_order_event_record(
         record_id: &str,
-        event: &RadrootsNostrEvent,
+        event: &RadrootsEventEnvelope,
         listing_addr: &str,
         source_runtime: SourceRuntime,
         owner_account_id: Option<&str>,
-    ) -> LocalEventRecordInput {
+    ) -> RuntimeStoreRecordInput {
         let relay_delivery_json = RelayDeliveryEvidence::acknowledged(
             ["ws://127.0.0.1:1234"],
             ["ws://127.0.0.1:1234"],
@@ -4789,10 +4799,10 @@ mod tests {
         .expect("acknowledged relay evidence")
         .to_json_value()
         .expect("acknowledged relay evidence json");
-        LocalEventRecordInput {
+        RuntimeStoreRecordInput {
             record_id: record_id.to_owned(),
-            family: LocalRecordFamily::SignedEvent,
-            status: LocalRecordStatus::Published,
+            family: RuntimeStoreRecordFamily::SignedEvent,
+            status: RuntimeStoreRecordStatus::Published,
             source_runtime,
             created_at_ms: i64::from(event.created_at) * 1_000,
             inserted_at_ms: i64::from(event.created_at) * 1_000 + 1,
@@ -4827,7 +4837,7 @@ mod tests {
     fn imports_signed_order_request_into_seller_order_projection() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAg";
         let seller_pubkey = test_pubkey("seller-pubkey");
@@ -4849,12 +4859,12 @@ mod tests {
                 "North barn pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ))
             .expect("append signed listing");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import signed listing");
         let payload = order_request_payload(
             order_id_raw,
@@ -4876,7 +4886,7 @@ mod tests {
             .expect("append order request");
 
         let report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import signed order request");
         let farm_id = deterministic_farm_id(Some(seller_pubkey), farm_key);
         let order_id = projected_order_id(order_id_raw, buyer_pubkey, event.id.as_str());
@@ -4934,7 +4944,7 @@ mod tests {
     fn local_interop_order_request_evidence_requires_usable_delivery_state() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let buyer_pubkey = test_pubkey("buyer-pubkey");
         let buyer_pubkey = buyer_pubkey.as_str();
         let seller_pubkey = test_pubkey("seller-pubkey");
@@ -4990,7 +5000,7 @@ mod tests {
             SourceRuntime::Cli,
             None,
         );
-        pending_record.status = LocalRecordStatus::PendingPublish;
+        pending_record.status = RuntimeStoreRecordStatus::PendingPublish;
         pending_record.outbox_status = PublishOutboxStatus::Pending;
         pending_record.relay_delivery_json = Some(
             RelayDeliveryEvidence::pending([relay_url])
@@ -5037,23 +5047,28 @@ mod tests {
             .append_record(&local_only_record)
             .expect("append local-only order request evidence");
 
-        let malformed_delivery_event = build_event(
-            "order-request-evidence-malformed-delivery",
-            "malformed-delivery",
+        let invalid_delivery_event = build_event(
+            "order-request-evidence-invalid-delivery",
+            "invalid-delivery",
         );
-        let mut malformed_delivery_record = signed_order_event_record(
+        let mut invalid_delivery_record = signed_order_event_record(
             "cli:signed_event:order-request:evidence-malformed-delivery",
-            &malformed_delivery_event,
+            &invalid_delivery_event,
             listing_addr.as_str(),
             SourceRuntime::Cli,
             None,
         );
-        malformed_delivery_record.relay_delivery_json = Some(json!({
+        invalid_delivery_record.relay_delivery_json = Some(json!({
             "state": "acknowledged"
         }));
-        events
-            .append_record(&malformed_delivery_record)
-            .expect("append malformed delivery order request evidence");
+        let invalid_delivery_error = events
+            .append_record(&invalid_delivery_record)
+            .expect_err("reject invalid delivery order request evidence");
+        assert!(
+            invalid_delivery_error
+                .to_string()
+                .contains("acknowledged relay delivery evidence requires acknowledged_relays")
+        );
 
         let malformed_event =
             build_event("order-request-evidence-malformed-event", "malformed-event");
@@ -5070,7 +5085,7 @@ mod tests {
             .expect("append malformed order request evidence");
 
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import signed evidence records");
         let signed_evidence = app_store
             .load_local_interop_signed_events_by_kind(KIND_ORDER_REQUEST)
@@ -5083,7 +5098,7 @@ mod tests {
     fn app_origin_signed_order_request_and_decision_project_to_buyer_orders() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "CCCCCCCCCCCCCCCCCCCCCC";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAg";
         let seller_pubkey = test_pubkey("seller-pubkey");
@@ -5105,12 +5120,12 @@ mod tests {
                 "North barn pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ))
             .expect("append signed listing");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import signed listing");
         let request_payload = order_request_payload(
             order_id_raw,
@@ -5136,7 +5151,7 @@ mod tests {
             .expect("append app order request");
 
         let request_report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import app order request");
         let buyer_context = BuyerContext::account("acct_buyer");
         let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
@@ -5175,7 +5190,7 @@ mod tests {
             .expect("append order decision");
 
         let decision_report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import order decision");
         let buyer_orders = app_store
             .load_buyer_orders(&buyer_context)
@@ -5214,7 +5229,7 @@ mod tests {
         );
         assert_eq!(
             buyer_orders.rows[0].workflow.provenance.primary_source,
-            TradeWorkflowSource::LocalEvents
+            TradeWorkflowSource::RuntimeStore
         );
         assert_eq!(
             buyer_orders.rows[0]
@@ -5234,7 +5249,7 @@ mod tests {
     fn duplicate_app_order_request_roots_project_to_distinct_buyer_orders() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "CCCCCCCCCCCCCCCCCCCCCC";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAy";
         let seller_pubkey = test_pubkey("duplicate-root-seller-pubkey");
@@ -5256,12 +5271,12 @@ mod tests {
                 "North barn pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ))
             .expect("append duplicate-root listing");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import duplicate-root listing");
 
         let request_payload = order_request_payload(
@@ -5311,7 +5326,7 @@ mod tests {
                 .expect("append duplicate-root request");
         }
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import duplicate-root requests");
 
         let first_order_id =
@@ -5338,7 +5353,7 @@ mod tests {
     fn app_origin_signed_order_request_and_decline_project_to_buyer_orders() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "CCCCCCCCCCCCCCCCCCCCCC";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAg";
         let seller_pubkey = test_pubkey("seller-pubkey");
@@ -5360,12 +5375,12 @@ mod tests {
                 "North barn pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ))
             .expect("append signed listing");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import signed listing");
         let request_payload = order_request_payload(
             order_id_raw,
@@ -5394,7 +5409,7 @@ mod tests {
             .expect("append app order request");
 
         let request_report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import app order request");
         let buyer_context = BuyerContext::account("acct_buyer");
         let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
@@ -5435,7 +5450,7 @@ mod tests {
             .expect("append declined order decision");
 
         let decision_report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import declined order decision");
         let buyer_orders = app_store
             .load_buyer_orders(&buyer_context)
@@ -5469,7 +5484,7 @@ mod tests {
     fn active_order_decision_projects_agreement_state_through_cli_reducer() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "DDDDDDDDDDDDDDDDDDDDDD";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAw";
         let seller_pubkey = test_pubkey("seller-pubkey");
@@ -5491,12 +5506,12 @@ mod tests {
                 "North barn pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ))
             .expect("append signed listing");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import signed listing");
 
         let request_payload = order_request_payload(
@@ -5525,7 +5540,7 @@ mod tests {
             ))
             .expect("append lifecycle order request");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import lifecycle order request");
 
         let seller_farm_id = deterministic_farm_id(Some(seller_pubkey), farm_key);
@@ -5556,7 +5571,7 @@ mod tests {
             ))
             .expect("append lifecycle order decision");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import lifecycle order decision");
         let seller_orders = app_store
             .load_orders_list(
@@ -5604,7 +5619,7 @@ mod tests {
             .expect("append valid validation receipt");
         fixture
             .app_store
-            .import_shared_local_events_from_store(&fixture.events)
+            .import_shared_runtime_store_from_store(&fixture.events)
             .expect("import valid validation receipt");
 
         let buyer_detail = fixture
@@ -5699,7 +5714,7 @@ mod tests {
             .expect("append duplicate validation receipt");
         fixture
             .app_store
-            .import_shared_local_events_from_store(&fixture.events)
+            .import_shared_runtime_store_from_store(&fixture.events)
             .expect("import validation receipts");
 
         let buyer_detail = fixture
@@ -5795,7 +5810,7 @@ mod tests {
     fn validation_receipt_import_before_order_request_attaches_when_request_arrives() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "DDDDDDDDDDDDDDDDDDDDDD";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAw";
         let seller_pubkey = test_pubkey("validation-out-of-order-seller");
@@ -5820,12 +5835,12 @@ mod tests {
                 "North barn pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ))
             .expect("append out-of-order listing");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import out-of-order listing");
 
         let receipt_event = validation_receipt_event(
@@ -5848,7 +5863,7 @@ mod tests {
             ))
             .expect("append receipt before request");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import receipt before request");
 
         let pending_count: i64 = app_store
@@ -5888,7 +5903,7 @@ mod tests {
             ))
             .expect("append request after receipt");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import request after receipt");
 
         let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
@@ -5987,7 +6002,7 @@ mod tests {
         }
         fixture
             .app_store
-            .import_shared_local_events_from_store(&fixture.events)
+            .import_shared_runtime_store_from_store(&fixture.events)
             .expect("import invalid validation receipt candidates");
 
         let buyer_detail = fixture
@@ -6016,7 +6031,7 @@ mod tests {
     fn active_order_revision_projects_through_cli_reducer_state() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "EEEEEEEEEEEEEEEEEEEEEE";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAw";
         let seller_pubkey = test_pubkey("seller-pubkey");
@@ -6038,12 +6053,12 @@ mod tests {
                 "North barn pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ))
             .expect("append revision listing");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import revision listing");
 
         let request_payload = order_request_payload(
@@ -6069,7 +6084,7 @@ mod tests {
             ))
             .expect("append revision order request");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import revision order request");
 
         let proposal_payload = revision_proposal_payload(
@@ -6102,7 +6117,7 @@ mod tests {
             ))
             .expect("append revision proposal");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import revision proposal");
 
         let seller_farm_id = deterministic_farm_id(Some(seller_pubkey), farm_key);
@@ -6163,7 +6178,7 @@ mod tests {
             ))
             .expect("append revision decision");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import revision decision");
         let seller_orders = app_store
             .load_orders_list(
@@ -6204,7 +6219,7 @@ mod tests {
     fn active_order_pre_agreement_cancellation_projects_through_cli_reducer_state() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "EEEEEEEEEEEEEEEEEEEEEE";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAx";
         let seller_pubkey = test_pubkey("seller-pubkey");
@@ -6226,12 +6241,12 @@ mod tests {
                 "North barn pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ))
             .expect("append cancellation listing");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import cancellation listing");
 
         let request_payload = order_request_payload(
@@ -6257,7 +6272,7 @@ mod tests {
             ))
             .expect("append cancellation order request");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import cancellation order request");
 
         let cancel_payload = order_cancel_payload(
@@ -6283,7 +6298,7 @@ mod tests {
             ))
             .expect("append cancellation");
         let cancel_report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import cancellation");
 
         let seller_farm_id = deterministic_farm_id(Some(seller_pubkey), farm_key);
@@ -6322,7 +6337,7 @@ mod tests {
         let run_case = |accepted_first: bool| {
             let app_store =
                 AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-            let events = local_events_store();
+            let events = runtime_store_store();
             let farm_key = "FFFFFFFFFFFFFFFFFFFFFF";
             let listing_key = "AAAAAAAAAAAAAAAAAAAAAw";
             let seller_pubkey = test_pubkey("seller-pubkey");
@@ -6348,7 +6363,7 @@ mod tests {
                     "North barn pickup",
                     4_102_444_800,
                     4_102_531_200,
-                    LocalRecordStatus::Published,
+                    RuntimeStoreRecordStatus::Published,
                     PublishOutboxStatus::Acknowledged,
                 ))
                 .expect("append conflict listing");
@@ -6426,7 +6441,7 @@ mod tests {
             }
 
             app_store
-                .import_shared_local_events_from_store(&events)
+                .import_shared_runtime_store_from_store(&events)
                 .expect("import conflicting decisions");
             let order_id =
                 projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
@@ -6448,12 +6463,12 @@ mod tests {
     fn malformed_order_event_remains_signed_event_evidence_without_projection() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         events
-            .append_record(&LocalEventRecordInput {
+            .append_record(&RuntimeStoreRecordInput {
                 record_id: "cli:signed_event:order-request:malformed".to_owned(),
-                family: LocalRecordFamily::SignedEvent,
-                status: LocalRecordStatus::Published,
+                family: RuntimeStoreRecordFamily::SignedEvent,
+                status: RuntimeStoreRecordStatus::Published,
                 source_runtime: SourceRuntime::Cli,
                 created_at_ms: 1100,
                 inserted_at_ms: 1101,
@@ -6485,7 +6500,7 @@ mod tests {
             .expect("append malformed order event");
 
         let report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import malformed order event");
         let imported = app_store
             .load_local_interop_records()
@@ -6510,7 +6525,7 @@ mod tests {
     fn imports_cli_local_work_into_app_farm_and_product_projection() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
         let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
         events
@@ -6581,11 +6596,11 @@ mod tests {
             .expect("append listing local work");
 
         let report = app_store
-            .import_shared_local_events_from_store(&events)
-            .expect("import shared local events");
+            .import_shared_runtime_store_from_store(&events)
+            .expect("import shared runtime store");
         let second_report = app_store
-            .import_shared_local_events_from_store(&events)
-            .expect("import shared local events again");
+            .import_shared_runtime_store_from_store(&events)
+            .expect("import shared runtime store again");
 
         assert_eq!(report.scanned_records, 2);
         assert_eq!(report.imported_records, 2);
@@ -6643,7 +6658,7 @@ mod tests {
 
     #[test]
     fn fresh_app_store_replays_existing_shared_records_after_another_app_imported_them() {
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
         events
             .append_record(&local_work_record(
@@ -6674,16 +6689,16 @@ mod tests {
         let first_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open first app sqlite store");
         let first_report = first_store
-            .import_shared_local_events_from_store(&events)
-            .expect("first app imports shared local events");
+            .import_shared_runtime_store_from_store(&events)
+            .expect("first app imports shared runtime store");
         let second_same_store_report = first_store
-            .import_shared_local_events_from_store(&events)
-            .expect("first app imports unchanged shared local events");
+            .import_shared_runtime_store_from_store(&events)
+            .expect("first app imports unchanged shared runtime store");
         let second_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open second app sqlite store");
         let fresh_store_report = second_store
-            .import_shared_local_events_from_store(&events)
-            .expect("fresh app imports shared local events");
+            .import_shared_runtime_store_from_store(&events)
+            .expect("fresh app imports shared runtime store");
 
         assert_eq!(first_report.scanned_records, 1);
         assert_eq!(first_report.imported_records, 1);
@@ -6703,7 +6718,7 @@ mod tests {
     fn imports_signed_listing_tags_into_existing_local_product_projection() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
         let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
         events
@@ -6766,13 +6781,13 @@ mod tests {
             .append_record(&listing)
             .expect("append listing local work");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import local work records");
         events
-            .append_record(&LocalEventRecordInput {
+            .append_record(&RuntimeStoreRecordInput {
                 record_id: "cli:signed_event:listing:event-1".to_owned(),
-                family: LocalRecordFamily::SignedEvent,
-                status: LocalRecordStatus::Published,
+                family: RuntimeStoreRecordFamily::SignedEvent,
+                status: RuntimeStoreRecordStatus::Published,
                 source_runtime: SourceRuntime::Cli,
                 created_at_ms: 1100,
                 inserted_at_ms: 1101,
@@ -6814,7 +6829,7 @@ mod tests {
             .expect("append signed listing");
 
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import signed listing");
         let imported = app_store
             .load_local_interop_records()
@@ -6851,7 +6866,7 @@ mod tests {
     fn cli_origin_signed_window_listing_projects_into_buyer_browse_and_search() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
         let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
         events
@@ -6867,13 +6882,13 @@ mod tests {
                 "North barn pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ))
             .expect("append signed listing");
 
         let report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import signed listing");
         let browse = app_store
             .load_buyer_listings("", &BTreeSet::new())
@@ -6906,7 +6921,7 @@ mod tests {
     fn app_origin_signed_window_listing_converges_into_buyer_visibility() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_uuid = Uuid::from_u128(0x55555555555545558555555555555555);
         let product_uuid = Uuid::from_u128(0x66666666666646668666666666666666);
         let farm_key = app_d_tag_from_uuid(farm_uuid);
@@ -6973,7 +6988,7 @@ mod tests {
             .append_record(&app_listing_record)
             .expect("append app listing local work");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import app local records");
         events
             .append_record(&signed_market_listing_record(
@@ -6988,13 +7003,13 @@ mod tests {
                 "App farmstand pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ))
             .expect("append signed app-origin listing");
 
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import signed app-origin listing");
         let buyer_listings = app_store
             .load_buyer_listings("app eggs", &BTreeSet::new())
@@ -7010,7 +7025,7 @@ mod tests {
     fn network_app_origin_listing_cannot_claim_app_product_without_app_owned_evidence() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_uuid = Uuid::from_u128(0x77777777777747778777777777777777);
         let product_uuid = Uuid::from_u128(0x88888888888848888888888888888888);
         let farm_key = app_d_tag_from_uuid(farm_uuid);
@@ -7029,7 +7044,7 @@ mod tests {
             "App farmstand pickup",
             4_102_444_800,
             4_102_531_200,
-            LocalRecordStatus::Published,
+            RuntimeStoreRecordStatus::Published,
             PublishOutboxStatus::Acknowledged,
         );
         network_listing.source_runtime = SourceRuntime::Network;
@@ -7039,7 +7054,7 @@ mod tests {
             .expect("append network app-origin listing");
 
         let report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import network app-origin listing");
         let imported = app_store
             .load_local_interop_records()
@@ -7105,7 +7120,7 @@ mod tests {
     fn network_app_origin_listing_reuses_app_product_with_matching_app_owned_evidence() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_uuid = Uuid::from_u128(0x79797979797949799797979797979797);
         let product_uuid = Uuid::from_u128(0x89898989898949898989898989898989);
         let farm_key = app_d_tag_from_uuid(farm_uuid);
@@ -7169,7 +7184,7 @@ mod tests {
             .append_record(&app_listing_record)
             .expect("append app listing local work");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import app local work");
         let mut network_listing = signed_market_listing_record(
             "network-app-origin-matching-evidence",
@@ -7183,7 +7198,7 @@ mod tests {
             "App farmstand pickup",
             4_102_444_800,
             4_102_531_200,
-            LocalRecordStatus::Published,
+            RuntimeStoreRecordStatus::Published,
             PublishOutboxStatus::Acknowledged,
         );
         network_listing.source_runtime = SourceRuntime::Network;
@@ -7193,7 +7208,7 @@ mod tests {
             .expect("append network app-origin listing");
 
         let report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import network app-origin listing");
         let product_count: i64 = app_store
             .connection()
@@ -7235,7 +7250,7 @@ mod tests {
     fn network_app_origin_listing_requires_matching_event_pubkey_for_app_product_reuse() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_uuid = Uuid::from_u128(0x7a7a7a7a7a7a4a7a9a7a7a7a7a7a7a7a);
         let product_uuid = Uuid::from_u128(0x8a8a8a8a8a8a4a8aaa8a8a8a8a8a8a8a);
         let farm_key = app_d_tag_from_uuid(farm_uuid);
@@ -7299,7 +7314,7 @@ mod tests {
             .append_record(&app_listing_record)
             .expect("append app listing local work");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import app local work");
         let mut network_listing = signed_market_listing_record(
             "network-app-origin-foreign-event-pubkey",
@@ -7313,7 +7328,7 @@ mod tests {
             "App farmstand pickup",
             4_102_444_800,
             4_102_531_200,
-            LocalRecordStatus::Published,
+            RuntimeStoreRecordStatus::Published,
             PublishOutboxStatus::Acknowledged,
         );
         network_listing.source_runtime = SourceRuntime::Network;
@@ -7324,7 +7339,7 @@ mod tests {
             .expect("append foreign network app-origin listing");
 
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import network app-origin listing");
         let product_count: i64 = app_store
             .connection()
@@ -7359,7 +7374,7 @@ mod tests {
     fn app_signed_duplicate_replaces_network_listing_product_projection() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_uuid = Uuid::from_u128(0x99999999999949999999999999999999);
         let product_uuid = Uuid::from_u128(0xaaaaaaaaaaaa4aaaaaaaaaaaaaaaaaaa);
         let farm_key = app_d_tag_from_uuid(farm_uuid);
@@ -7378,7 +7393,7 @@ mod tests {
             "App farmstand pickup",
             4_102_444_800,
             4_102_531_200,
-            LocalRecordStatus::Published,
+            RuntimeStoreRecordStatus::Published,
             PublishOutboxStatus::Acknowledged,
         );
         network_listing.source_runtime = SourceRuntime::Network;
@@ -7390,7 +7405,7 @@ mod tests {
             .expect("append network app-origin listing");
 
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import network app-origin listing");
         let network_product_id =
             deterministic_product_id(Some(seller_pubkey), listing_key.as_str());
@@ -7484,7 +7499,7 @@ mod tests {
             "App farmstand pickup",
             4_102_444_800,
             4_102_531_200,
-            LocalRecordStatus::Published,
+            RuntimeStoreRecordStatus::Published,
             PublishOutboxStatus::Acknowledged,
         );
         app_listing.source_runtime = SourceRuntime::App;
@@ -7495,7 +7510,7 @@ mod tests {
             .expect("append app signed duplicate listing");
 
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import app signed duplicate listing");
         let imported = app_store
             .load_local_interop_records()
@@ -7565,7 +7580,7 @@ mod tests {
     fn failed_duplicate_listing_replacement_rolls_back_prior_visible_state() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_uuid = Uuid::from_u128(0x9b9b9b9b9b9b4b9bbb9b9b9b9b9b9b9b);
         let product_uuid = Uuid::from_u128(0xabababababab4abababababababababa);
         let farm_key = app_d_tag_from_uuid(farm_uuid);
@@ -7584,7 +7599,7 @@ mod tests {
             "App farmstand pickup",
             4_102_444_800,
             4_102_531_200,
-            LocalRecordStatus::Published,
+            RuntimeStoreRecordStatus::Published,
             PublishOutboxStatus::Acknowledged,
         );
         network_listing.source_runtime = SourceRuntime::Network;
@@ -7595,7 +7610,7 @@ mod tests {
             .append_record(&network_listing)
             .expect("append network app-origin listing");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import network app-origin listing");
 
         let network_product_id =
@@ -7653,7 +7668,7 @@ mod tests {
             "App farmstand pickup",
             4_102_444_800,
             4_102_531_200,
-            LocalRecordStatus::Published,
+            RuntimeStoreRecordStatus::Published,
             PublishOutboxStatus::Acknowledged,
         );
         app_listing.source_runtime = SourceRuntime::App;
@@ -7664,7 +7679,7 @@ mod tests {
             .expect("append app signed duplicate listing");
 
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect_err("duplicate replacement should roll back on cart migration failure");
         let imported = app_store
             .load_local_interop_records()
@@ -7729,7 +7744,7 @@ mod tests {
                 "Pending barn pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::PendingPublish,
+                RuntimeStoreRecordStatus::PendingPublish,
                 PublishOutboxStatus::Pending,
             ),
             signed_market_listing_record(
@@ -7744,7 +7759,7 @@ mod tests {
                 "South barn pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ),
             signed_market_listing_record(
@@ -7759,7 +7774,7 @@ mod tests {
                 "East barn pickup",
                 946_684_800,
                 946_771_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ),
             signed_market_listing_record(
@@ -7774,7 +7789,7 @@ mod tests {
                 "Unknown exchange point",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ),
             signed_listing_record(
@@ -7786,11 +7801,11 @@ mod tests {
         ] {
             let app_store =
                 AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-            let events = local_events_store();
+            let events = runtime_store_store();
             events.append_record(&record).expect("append record");
 
             app_store
-                .import_shared_local_events_from_store(&events)
+                .import_shared_runtime_store_from_store(&events)
                 .expect("import hidden listing record");
 
             assert!(buyer_listing_titles(&app_store).is_empty());
@@ -7798,7 +7813,7 @@ mod tests {
 
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "KKKKKKKKKKKKKKKKKKKKKK";
         let listing_key = "LLLLLLLLLLLLLLLLLLLLLL";
         events
@@ -7828,13 +7843,13 @@ mod tests {
             ))
             .expect("append local-only listing");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import local-only listing");
         assert!(buyer_listing_titles(&app_store).is_empty());
 
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         events
             .append_record(&signed_market_listing_record(
                 "current-active-window",
@@ -7848,12 +7863,12 @@ mod tests {
                 "West barn pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ))
             .expect("append active listing");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import active listing");
         assert_eq!(buyer_listing_titles(&app_store), vec!["Current Eggs"]);
         events
@@ -7869,12 +7884,12 @@ mod tests {
                 "West barn pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ))
             .expect("append archived listing");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import archived listing");
         assert!(buyer_listing_titles(&app_store).is_empty());
     }
@@ -7883,7 +7898,7 @@ mod tests {
     fn older_signed_listing_import_does_not_roll_back_current_product_state() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "CURRENTFARMAAAAAAAAAA";
         let listing_key = "CURRENTLISTINGBBBBBB";
         let mut newer = signed_market_listing_record(
@@ -7898,7 +7913,7 @@ mod tests {
             "North barn pickup",
             4_102_444_800,
             4_102_531_200,
-            LocalRecordStatus::Published,
+            RuntimeStoreRecordStatus::Published,
             PublishOutboxStatus::Acknowledged,
         );
         set_listing_event_version(
@@ -7910,7 +7925,7 @@ mod tests {
         );
         events.append_record(&newer).expect("append newer listing");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import newer listing");
 
         let mut older = signed_market_listing_record(
@@ -7925,7 +7940,7 @@ mod tests {
             "North barn pickup",
             4_102_444_800,
             4_102_531_200,
-            LocalRecordStatus::Published,
+            RuntimeStoreRecordStatus::Published,
             PublishOutboxStatus::Acknowledged,
         );
         set_listing_event_version(
@@ -7938,7 +7953,7 @@ mod tests {
         events.append_record(&older).expect("append older listing");
 
         let report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import older listing");
         let product: (String, Option<i64>) = app_store
             .connection()
@@ -7966,7 +7981,7 @@ mod tests {
     fn equal_timestamp_signed_listing_currentness_uses_event_id_tie_breaker() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "TIEFARMAAAAAAAAAAAAAA";
         let listing_key = "TIELISTINGBBBBBBBBBB";
         let mut winning = signed_market_listing_record(
@@ -7981,7 +7996,7 @@ mod tests {
             "North barn pickup",
             4_102_444_800,
             4_102_531_200,
-            LocalRecordStatus::Published,
+            RuntimeStoreRecordStatus::Published,
             PublishOutboxStatus::Acknowledged,
         );
         set_listing_event_version(
@@ -7995,7 +8010,7 @@ mod tests {
             .append_record(&winning)
             .expect("append winning listing");
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import winning listing");
 
         let mut losing = signed_market_listing_record(
@@ -8010,7 +8025,7 @@ mod tests {
             "North barn pickup",
             4_102_444_800,
             4_102_531_200,
-            LocalRecordStatus::Published,
+            RuntimeStoreRecordStatus::Published,
             PublishOutboxStatus::Acknowledged,
         );
         set_listing_event_version(&mut losing, "event-a-losing", 3_000, "Tie Loser Eggs", "1");
@@ -8019,7 +8034,7 @@ mod tests {
             .expect("append losing listing");
 
         app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import losing listing");
         let product: (String, Option<i64>) = app_store
             .connection()
@@ -8036,14 +8051,14 @@ mod tests {
     fn signed_farm_import_prefers_event_identity_over_local_owner_metadata() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let signed_farm_key = "SIGNEDFARMAAAAAAAAAAAA";
         let expected_farm_id = deterministic_farm_id(Some("event-pubkey"), signed_farm_key);
         events
-            .append_record(&LocalEventRecordInput {
+            .append_record(&RuntimeStoreRecordInput {
                 record_id: "cli:signed_event:farm:event-identity".to_owned(),
-                family: LocalRecordFamily::SignedEvent,
-                status: LocalRecordStatus::Published,
+                family: RuntimeStoreRecordFamily::SignedEvent,
+                status: RuntimeStoreRecordStatus::Published,
                 source_runtime: SourceRuntime::Cli,
                 created_at_ms: 1100,
                 inserted_at_ms: 1101,
@@ -8080,7 +8095,7 @@ mod tests {
             .expect("append signed farm");
 
         let report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import signed farm");
         let imported = app_store
             .load_local_interop_records()
@@ -8106,7 +8121,7 @@ mod tests {
     fn cli_signed_listing_import_uses_cli_identity_for_app_shaped_keys() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let signed_farm_key =
             app_d_tag_from_uuid(Uuid::from_u128(0x77777777777747778777777777777777));
         let signed_listing_key =
@@ -8116,10 +8131,10 @@ mod tests {
         let expected_product_id =
             deterministic_product_id(Some("listing-event-pubkey"), signed_listing_key.as_str());
         events
-            .append_record(&LocalEventRecordInput {
+            .append_record(&RuntimeStoreRecordInput {
                 record_id: "cli:signed_event:listing:event-identity".to_owned(),
-                family: LocalRecordFamily::SignedEvent,
-                status: LocalRecordStatus::Published,
+                family: RuntimeStoreRecordFamily::SignedEvent,
+                status: RuntimeStoreRecordStatus::Published,
                 source_runtime: SourceRuntime::Cli,
                 created_at_ms: 1100,
                 inserted_at_ms: 1101,
@@ -8167,7 +8182,7 @@ mod tests {
             .expect("append signed listing");
 
         let report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import signed listing");
         let imported = app_store
             .load_local_interop_records()
@@ -8193,7 +8208,7 @@ mod tests {
     fn direct_record_import_dedupes_signed_events_by_event_id() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "SIGNEDFARMAAAAAAAAAAAA";
         let listing_key = "SIGNEDLISTINGBBBBBBBB";
         let first = events
@@ -8233,7 +8248,7 @@ mod tests {
     fn app_order_request_receipt_replaces_prior_relay_duplicate() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let seller_pubkey = test_pubkey("seller-pubkey");
         let seller_pubkey = seller_pubkey.as_str();
         let buyer_pubkey = test_pubkey("buyer-pubkey");
@@ -8307,7 +8322,7 @@ mod tests {
     fn relay_order_decision_duplicate_does_not_downgrade_app_receipt() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let seller_pubkey = test_pubkey("seller-pubkey");
         let seller_pubkey = seller_pubkey.as_str();
         let buyer_pubkey = test_pubkey("buyer-pubkey");
@@ -8400,8 +8415,8 @@ mod tests {
     fn local_work_farm_import_preserves_duplicate_relay_signed_ready_farm() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let relay_events = local_events_store();
-        let shared_events = local_events_store();
+        let relay_events = runtime_store_store();
+        let shared_events = runtime_store_store();
         let farm_uuid = Uuid::from_u128(0x55555555555545558555555555555555);
         let farm_key = app_d_tag_from_uuid(farm_uuid);
         let signed_event_id = "event-app-relay-ready-farm";
@@ -8455,7 +8470,7 @@ mod tests {
             .expect("append duplicate signed farm");
 
         let shared_report = app_store
-            .import_shared_local_events_from_store(&shared_events)
+            .import_shared_runtime_store_from_store(&shared_events)
             .expect("import shared local work after relay");
         let stored_farm: (String, String, String) = app_store
             .connection()
@@ -8476,7 +8491,7 @@ mod tests {
     fn signed_farm_without_readiness_preserves_listing_visible_farm() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "SIGNEDFARMAAAAAAAAAAAA";
         let listing_key = "SIGNEDLISTINGBBBBBBBB";
         let expected_farm_id = deterministic_farm_id(Some("seller-pubkey"), farm_key);
@@ -8493,15 +8508,15 @@ mod tests {
                 "West barn pickup",
                 4_102_444_800,
                 4_102_531_200,
-                LocalRecordStatus::Published,
+                RuntimeStoreRecordStatus::Published,
                 PublishOutboxStatus::Acknowledged,
             ))
             .expect("append visible listing");
         events
-            .append_record(&LocalEventRecordInput {
+            .append_record(&RuntimeStoreRecordInput {
                 record_id: "cli:signed_event:farm:no-readiness".to_owned(),
-                family: LocalRecordFamily::SignedEvent,
-                status: LocalRecordStatus::Published,
+                family: RuntimeStoreRecordFamily::SignedEvent,
+                status: RuntimeStoreRecordStatus::Published,
                 source_runtime: SourceRuntime::Cli,
                 created_at_ms: 1200,
                 inserted_at_ms: 1201,
@@ -8538,7 +8553,7 @@ mod tests {
             .expect("append farm without readiness");
 
         let report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import listing and farm");
         let stored_farm: (String, String, String) = app_store
             .connection()
@@ -8564,7 +8579,7 @@ mod tests {
         ] {
             let app_store =
                 AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-            let events = local_events_store();
+            let events = runtime_store_store();
             let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
             let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
             events
@@ -8577,7 +8592,7 @@ mod tests {
                 .expect("append signed listing");
 
             let report = app_store
-                .import_shared_local_events_from_store(&events)
+                .import_shared_runtime_store_from_store(&events)
                 .expect("import signed listing");
             let product_status: String = app_store
                 .connection()
@@ -8594,7 +8609,7 @@ mod tests {
     fn maps_observed_signed_listing_as_published_without_outbox_acknowledgement() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
         let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
         let mut record = signed_listing_record_with_publish_state(
@@ -8602,7 +8617,7 @@ mod tests {
             farm_key,
             listing_key,
             "active",
-            LocalRecordStatus::Published,
+            RuntimeStoreRecordStatus::Published,
             PublishOutboxStatus::None,
         );
         record.relay_delivery_json = Some(json!({
@@ -8618,7 +8633,7 @@ mod tests {
             .expect("append observed signed listing");
 
         let report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import observed signed listing");
         let product_status: String = app_store
             .connection()
@@ -8634,7 +8649,7 @@ mod tests {
     fn unknown_acknowledged_signed_listing_status_is_not_published() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
         let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
         events
@@ -8647,7 +8662,7 @@ mod tests {
             .expect("append signed listing");
 
         let report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import signed listing");
         let imported = app_store
             .load_local_interop_records()
@@ -8667,14 +8682,17 @@ mod tests {
     fn pending_or_failed_signed_listing_records_do_not_downgrade_published_product() {
         for (record_status, outbox_status) in [
             (
-                LocalRecordStatus::PendingPublish,
+                RuntimeStoreRecordStatus::PendingPublish,
                 PublishOutboxStatus::Pending,
             ),
-            (LocalRecordStatus::Failed, PublishOutboxStatus::Failed),
+            (
+                RuntimeStoreRecordStatus::Failed,
+                PublishOutboxStatus::Failed,
+            ),
         ] {
             let app_store =
                 AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-            let events = local_events_store();
+            let events = runtime_store_store();
             let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
             let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
             events
@@ -8686,7 +8704,7 @@ mod tests {
                 ))
                 .expect("append confirmed signed listing");
             app_store
-                .import_shared_local_events_from_store(&events)
+                .import_shared_runtime_store_from_store(&events)
                 .expect("import confirmed signed listing");
             events
                 .append_record(&signed_listing_record_with_publish_state(
@@ -8700,7 +8718,7 @@ mod tests {
                 .expect("append unconfirmed signed listing");
 
             app_store
-                .import_shared_local_events_from_store(&events)
+                .import_shared_runtime_store_from_store(&events)
                 .expect("import unconfirmed signed listing");
             let product_status: String = app_store
                 .connection()
@@ -8722,7 +8740,7 @@ mod tests {
     fn observes_outbox_updates_after_first_import_without_replaying_unchanged_rows() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
         let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
         events
@@ -8731,15 +8749,15 @@ mod tests {
                 farm_key,
                 listing_key,
                 "active",
-                LocalRecordStatus::PendingPublish,
+                RuntimeStoreRecordStatus::PendingPublish,
                 PublishOutboxStatus::Pending,
             ))
             .expect("append pending signed listing");
         let first_report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import pending listing");
         let unchanged_report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import unchanged listing");
 
         assert_eq!(first_report.scanned_records, 1);
@@ -8747,9 +8765,9 @@ mod tests {
         assert_eq!(unchanged_report.scanned_records, 0);
 
         events
-            .update_outbox(&LocalEventRecordUpdate {
+            .update_outbox(&RuntimeStoreRecordUpdate {
                 record_id: "pending-listing".to_owned(),
-                status: LocalRecordStatus::Published,
+                status: RuntimeStoreRecordStatus::Published,
                 outbox_status: PublishOutboxStatus::Acknowledged,
                 relay_set_fingerprint: Some("relay-set".to_owned()),
                 relay_delivery_json: Some(json!({
@@ -8760,7 +8778,7 @@ mod tests {
             })
             .expect("update listing outbox");
         let changed_report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import updated listing");
         let product_status: String = app_store
             .connection()
@@ -8780,7 +8798,7 @@ mod tests {
 
     #[test]
     fn app_authored_shared_records_replay_into_fresh_store_without_origin_duplicates() {
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_uuid = Uuid::from_u128(0x11111111111111111111111111111111);
         let product_uuid = Uuid::from_u128(0x22222222222222222222222222222222);
         let farm_key = app_d_tag_from_uuid(farm_uuid);
@@ -8856,11 +8874,11 @@ mod tests {
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open origin app sqlite store");
         seed_app_projection(&origin_store, farm_uuid, product_uuid);
         let origin_report = origin_store
-            .import_shared_local_events_from_store(&events)
-            .expect("import shared local events into origin store");
+            .import_shared_runtime_store_from_store(&events)
+            .expect("import shared runtime store into origin store");
         let origin_second_report = origin_store
-            .import_shared_local_events_from_store(&events)
-            .expect("import unchanged shared local events into origin store");
+            .import_shared_runtime_store_from_store(&events)
+            .expect("import unchanged shared runtime store into origin store");
         let origin_product_count: i64 = origin_store
             .connection()
             .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
@@ -8901,8 +8919,8 @@ mod tests {
         let fresh_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open fresh app sqlite store");
         let fresh_report = fresh_store
-            .import_shared_local_events_from_store(&events)
-            .expect("import shared local events into fresh store");
+            .import_shared_runtime_store_from_store(&events)
+            .expect("import shared runtime store into fresh store");
         let fresh_product_count: i64 = fresh_store
             .connection()
             .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
@@ -8932,7 +8950,7 @@ mod tests {
     fn app_authored_records_with_non_uuid_tags_do_not_rebind_to_cli_identity() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let app_record = app_local_work_record(
             "app:local_work:farm:invalid-tag",
             "not-a-uuid-d-tag",
@@ -8958,8 +8976,8 @@ mod tests {
             .expect("append app local work");
 
         let report = app_store
-            .import_shared_local_events_from_store(&events)
-            .expect("import shared local events");
+            .import_shared_runtime_store_from_store(&events)
+            .expect("import shared runtime store");
         let imported = app_store
             .load_local_interop_records()
             .expect("load imported records");
@@ -8981,7 +8999,7 @@ mod tests {
     fn signed_app_origin_listing_updates_existing_app_projection() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
-        let events = local_events_store();
+        let events = runtime_store_store();
         let farm_uuid = Uuid::from_u128(0x33333333333343338333333333333333);
         let product_uuid = Uuid::from_u128(0x44444444444444448444444444444444);
         let farm_key = app_d_tag_from_uuid(farm_uuid);
@@ -9046,13 +9064,13 @@ mod tests {
             .expect("append app listing local work");
 
         let local_report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import app local work");
         events
-            .append_record(&LocalEventRecordInput {
+            .append_record(&RuntimeStoreRecordInput {
                 record_id: "cli:signed_event:listing:app-origin".to_owned(),
-                family: LocalRecordFamily::SignedEvent,
-                status: LocalRecordStatus::Published,
+                family: RuntimeStoreRecordFamily::SignedEvent,
+                status: RuntimeStoreRecordStatus::Published,
                 source_runtime: SourceRuntime::Cli,
                 created_at_ms: 1100,
                 inserted_at_ms: 1101,
@@ -9092,7 +9110,7 @@ mod tests {
             })
             .expect("append signed app-origin listing");
         let signed_report = app_store
-            .import_shared_local_events_from_store(&events)
+            .import_shared_runtime_store_from_store(&events)
             .expect("import signed app-origin listing");
         let imported = app_store
             .load_local_interop_records()
