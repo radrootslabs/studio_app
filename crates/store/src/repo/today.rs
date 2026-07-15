@@ -3,7 +3,9 @@ use radroots_studio_app_view::{
     ProductListRow, ProductStatus, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
     TodaySummary,
 };
-use rusqlite::{Connection, OptionalExtension, Params, params};
+use sqlx::Row;
+
+use crate::{AppSqliteDatabase, IntoAppSqliteParams, OptionalSqliteResult};
 
 use crate::AppSqliteError;
 
@@ -11,11 +13,11 @@ pub const TODAY_AGENDA_LIST_LIMIT: i64 = 4;
 pub const TODAY_AGENDA_LOW_STOCK_THRESHOLD: u32 = 3;
 
 pub struct AppTodayAgendaRepository<'a> {
-    connection: &'a Connection,
+    connection: &'a AppSqliteDatabase,
 }
 
 impl<'a> AppTodayAgendaRepository<'a> {
-    pub const fn new(connection: &'a Connection) -> Self {
+    pub(crate) const fn new(connection: &'a AppSqliteDatabase) -> Self {
         Self { connection }
     }
 
@@ -51,7 +53,7 @@ impl<'a> AppTodayAgendaRepository<'a> {
                     display_name = excluded.display_name,
                     readiness = excluded.readiness,
                     updated_at = excluded.updated_at",
-                params![
+                crate::app_sqlite_params![
                     farm.farm_id.to_string(),
                     farm.display_name,
                     farm_readiness_storage_key(farm.readiness),
@@ -73,12 +75,12 @@ impl<'a> AppTodayAgendaRepository<'a> {
             self.connection
                 .query_row(
                     "select id, display_name, readiness from farms where id = ?1 limit 1",
-                    params![farm_id.to_string()],
+                    crate::app_sqlite_params![farm_id.to_string()],
                     |row| {
                         Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
+                            row.try_get::<String, _>(0)?,
+                            row.try_get::<String, _>(1)?,
+                            row.try_get::<String, _>(2)?,
                         ))
                     },
                 )
@@ -91,12 +93,12 @@ impl<'a> AppTodayAgendaRepository<'a> {
             self.connection
                 .query_row(
                     "select id, display_name, readiness from farms order by created_at asc, id asc limit 1",
-                    [],
+                    crate::empty_params(),
                     |row| {
                         Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
+                            row.try_get::<String, _>(0)?,
+                            row.try_get::<String, _>(1)?,
+                            row.try_get::<String, _>(2)?,
                         ))
                     },
                 )
@@ -124,17 +126,17 @@ impl<'a> AppTodayAgendaRepository<'a> {
             orders_needing_action: self.count_u32(
                 "count today orders needing action",
                 "select count(*) from orders where farm_id = ?1 and status = 'needs_action'",
-                params![farm_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string()],
             )?,
             low_stock_products: self.count_u32(
                 "count today low-stock products",
                 "select count(*) from products where farm_id = ?1 and status = 'published' and stock_count <= ?2",
-                params![farm_id.to_string(), TODAY_AGENDA_LOW_STOCK_THRESHOLD],
+                crate::app_sqlite_params![farm_id.to_string(), TODAY_AGENDA_LOW_STOCK_THRESHOLD],
             )?,
             draft_products: self.count_u32(
                 "count today draft products",
                 "select count(*) from products where farm_id = ?1 and status = 'draft'",
-                params![farm_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string()],
             )?,
             reminders_due_soon: 0,
         })
@@ -159,13 +161,13 @@ impl<'a> AppTodayAgendaRepository<'a> {
             })?;
         let rows = statement
             .query_map(
-                params![farm_id.to_string(), TODAY_AGENDA_LIST_LIMIT],
+                crate::app_sqlite_params![farm_id.to_string(), TODAY_AGENDA_LIST_LIMIT],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<Option<String>, _>(1)?,
+                        row.try_get::<String, _>(2)?,
+                        row.try_get::<String, _>(3)?,
                     ))
                 },
             )
@@ -217,16 +219,16 @@ impl<'a> AppTodayAgendaRepository<'a> {
             })?;
         let rows = statement
             .query_map(
-                params![
+                crate::app_sqlite_params![
                     farm_id.to_string(),
                     TODAY_AGENDA_LOW_STOCK_THRESHOLD,
                     TODAY_AGENDA_LIST_LIMIT
                 ],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, u32>(2)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<u32, _>(2)?,
                     ))
                 },
             )
@@ -270,12 +272,12 @@ impl<'a> AppTodayAgendaRepository<'a> {
             })?;
         let rows = statement
             .query_map(
-                params![farm_id.to_string(), TODAY_AGENDA_LIST_LIMIT],
+                crate::app_sqlite_params![farm_id.to_string(), TODAY_AGENDA_LIST_LIMIT],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, u32>(2)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<u32, _>(2)?,
                     ))
                 },
             )
@@ -314,12 +316,12 @@ impl<'a> AppTodayAgendaRepository<'a> {
                  where farm_id = ?1 and starts_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now') \
                  order by starts_at asc, id asc \
                  limit 1",
-                params![farm_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
                     ))
                 },
             )
@@ -356,7 +358,7 @@ impl<'a> AppTodayAgendaRepository<'a> {
                 is_complete: self.exists(
                     "check today fulfillment window setup",
                     "select exists(select 1 from fulfillment_windows where farm_id = ?1)",
-                    params![farm.farm_id.to_string()],
+                    crate::app_sqlite_params![farm.farm_id.to_string()],
                 )?,
             },
             TodaySetupTask {
@@ -364,31 +366,31 @@ impl<'a> AppTodayAgendaRepository<'a> {
                 is_complete: self.exists(
                     "check today published product setup",
                     "select exists(select 1 from products where farm_id = ?1 and status = 'published')",
-                    params![farm.farm_id.to_string()],
+                    crate::app_sqlite_params![farm.farm_id.to_string()],
                 )?,
             },
         ])
     }
 
-    fn count_u32<P: Params>(
+    fn count_u32<P: IntoAppSqliteParams>(
         &self,
         operation: &'static str,
         sql: &'static str,
         params: P,
     ) -> Result<u32, AppSqliteError> {
         self.connection
-            .query_row(sql, params, |row| row.get::<_, u32>(0))
+            .query_row(sql, params, |row| row.try_get::<u32, _>(0))
             .map_err(|source| AppSqliteError::Query { operation, source })
     }
 
-    fn exists<P: Params>(
+    fn exists<P: IntoAppSqliteParams>(
         &self,
         operation: &'static str,
         sql: &'static str,
         params: P,
     ) -> Result<bool, AppSqliteError> {
         self.connection
-            .query_row(sql, params, |row| row.get::<_, i64>(0))
+            .query_row(sql, params, |row| row.try_get::<i64, _>(0))
             .map(|value| value == 1)
             .map_err(|source| AppSqliteError::Query { operation, source })
     }
@@ -433,10 +435,8 @@ fn farm_readiness_storage_key(readiness: FarmReadiness) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use crate::{AppSqliteDatabase, AppSqliteStore, DatabaseTarget};
     use radroots_studio_app_view::{FarmId, FulfillmentWindowId, ProductId, TodaySetupTaskKind};
-    use rusqlite::{Connection, params};
-
-    use crate::{AppSqliteStore, DatabaseTarget};
 
     use super::{TODAY_AGENDA_LIST_LIMIT, TODAY_AGENDA_LOW_STOCK_THRESHOLD};
 
@@ -458,10 +458,10 @@ mod tests {
     fn today_agenda_loads_truthful_projection_for_selected_farm() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
-        let farm_id = FarmId::new();
-        let other_farm_id = FarmId::new();
-        let earliest_window_id = FulfillmentWindowId::new();
-        let later_window_id = FulfillmentWindowId::new();
+        let farm_id = FarmId::generate();
+        let other_farm_id = FarmId::generate();
+        let earliest_window_id = FulfillmentWindowId::generate();
+        let later_window_id = FulfillmentWindowId::generate();
 
         insert_farm(
             connection,
@@ -493,7 +493,7 @@ mod tests {
         );
         insert_window(
             connection,
-            FulfillmentWindowId::new(),
+            FulfillmentWindowId::generate(),
             other_farm_id,
             "2099-04-17T10:00:00Z",
             "2099-04-17T12:00:00Z",
@@ -608,8 +608,8 @@ mod tests {
     fn today_agenda_uses_primary_farm_and_builds_setup_checklist_for_incomplete_farm() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
-        let primary_farm_id = FarmId::new();
-        let secondary_farm_id = FarmId::new();
+        let primary_farm_id = FarmId::generate();
+        let secondary_farm_id = FarmId::generate();
 
         insert_farm(
             connection,
@@ -643,7 +643,7 @@ mod tests {
         );
         insert_window(
             connection,
-            FulfillmentWindowId::new(),
+            FulfillmentWindowId::generate(),
             secondary_farm_id,
             "2099-04-20T16:00:00Z",
             "2099-04-20T18:00:00Z",
@@ -674,7 +674,7 @@ mod tests {
     fn saved_farm_summary_round_trips_into_today_projection() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let farm = radroots_studio_app_view::FarmSummary {
-            farm_id: FarmId::new(),
+            farm_id: FarmId::generate(),
             display_name: "North field farm".to_owned(),
             readiness: radroots_studio_app_view::FarmReadiness::Incomplete,
         };
@@ -696,7 +696,7 @@ mod tests {
     }
 
     fn insert_farm(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         farm_id: FarmId,
         display_name: &str,
         readiness: &str,
@@ -706,13 +706,13 @@ mod tests {
             .execute(
                 "insert into farms (id, display_name, readiness, created_at, updated_at) \
                  values (?1, ?2, ?3, ?4, ?4)",
-                params![farm_id.to_string(), display_name, readiness, created_at],
+                crate::app_sqlite_params![farm_id.to_string(), display_name, readiness, created_at],
             )
             .expect("farm insert should succeed");
     }
 
     fn insert_window(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         fulfillment_window_id: FulfillmentWindowId,
         farm_id: FarmId,
         starts_at: &str,
@@ -722,7 +722,7 @@ mod tests {
             .execute(
                 "insert into fulfillment_windows (id, farm_id, starts_at, ends_at, capacity_limit, created_at, updated_at) \
                  values (?1, ?2, ?3, ?4, null, ?3, ?3)",
-                params![
+                crate::app_sqlite_params![
                     fulfillment_window_id.to_string(),
                     farm_id.to_string(),
                     starts_at,
@@ -733,20 +733,20 @@ mod tests {
     }
 
     fn insert_product(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         farm_id: FarmId,
         title: &str,
         status: &str,
         stock_count: u32,
         updated_at: &str,
     ) -> ProductId {
-        let product_id = ProductId::new();
+        let product_id = ProductId::generate();
 
         connection
             .execute(
                 "insert into products (id, farm_id, title, status, stock_count, updated_at) \
                  values (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
+                crate::app_sqlite_params![
                     product_id.to_string(),
                     farm_id.to_string(),
                     title,
@@ -761,7 +761,7 @@ mod tests {
     }
 
     fn insert_order(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         farm_id: FarmId,
         fulfillment_window_id: Option<FulfillmentWindowId>,
         order_number: &str,
@@ -773,8 +773,8 @@ mod tests {
             .execute(
                 "insert into orders (id, farm_id, fulfillment_window_id, order_number, customer_display_name, status, updated_at) \
                  values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    radroots_studio_app_view::OrderId::new().to_string(),
+                crate::app_sqlite_params![
+                    radroots_studio_app_view::OrderId::generate().to_string(),
                     farm_id.to_string(),
                     fulfillment_window_id.map(|id| id.to_string()),
                     order_number,

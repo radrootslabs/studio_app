@@ -3,7 +3,9 @@ use radroots_studio_app_view::{
     TradeValidationReceiptProjection, TradeValidationReceiptProofSystem,
     TradeValidationReceiptResult, TradeValidationReceiptType,
 };
-use rusqlite::{Connection, params};
+use sqlx::Row;
+
+use crate::AppSqliteDatabase;
 
 use crate::AppSqliteError;
 
@@ -86,7 +88,7 @@ pub(super) fn order_detail_economics(
 }
 
 pub(super) fn order_validation_receipts(
-    connection: &Connection,
+    connection: &AppSqliteDatabase,
     order_id: OrderId,
 ) -> Result<Vec<TradeValidationReceiptProjection>, AppSqliteError> {
     let mut statement = connection
@@ -110,17 +112,17 @@ pub(super) fn order_validation_receipts(
             source,
         })?;
     let rows = statement
-        .query_map(params![order_id.to_string()], |row| {
+        .query_map(crate::app_sqlite_params![order_id.to_string()], |row| {
             Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, String>(7)?,
-                row.get::<_, i64>(8)?,
+                row.try_get::<String, _>(0)?,
+                row.try_get::<String, _>(1)?,
+                row.try_get::<String, _>(2)?,
+                row.try_get::<String, _>(3)?,
+                row.try_get::<String, _>(4)?,
+                row.try_get::<String, _>(5)?,
+                row.try_get::<String, _>(6)?,
+                row.try_get::<String, _>(7)?,
+                row.try_get::<i64, _>(8)?,
             ))
         })
         .map_err(|source| AppSqliteError::Query {

@@ -5,16 +5,18 @@ use radroots_studio_app_view::{
     FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness, FarmTimingConflict,
     FarmTimingConflictKind, FulfillmentWindowRecord, PickupLocationRecord,
 };
-use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
+use sqlx::Row;
+
+use crate::{AppSqliteDatabase, OptionalSqliteResult};
 
 use crate::AppSqliteError;
 
 pub struct AppFarmRulesRepository<'a> {
-    connection: &'a Connection,
+    connection: &'a AppSqliteDatabase,
 }
 
 impl<'a> AppFarmRulesRepository<'a> {
-    pub const fn new(connection: &'a Connection) -> Self {
+    pub(crate) const fn new(connection: &'a AppSqliteDatabase) -> Self {
         Self { connection }
     }
 
@@ -123,10 +125,10 @@ impl<'a> AppFarmRulesRepository<'a> {
                 [farm_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
+                        row.try_get::<String, _>(3)?,
                     ))
                 },
             )
@@ -166,12 +168,12 @@ impl<'a> AppFarmRulesRepository<'a> {
         let rows = statement
             .query_map([farm_id.to_string()], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, i64>(5)?,
+                    row.try_get::<String, _>(0)?,
+                    row.try_get::<String, _>(1)?,
+                    row.try_get::<String, _>(2)?,
+                    row.try_get::<String, _>(3)?,
+                    row.try_get::<Option<String>, _>(4)?,
+                    row.try_get::<i64, _>(5)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -209,9 +211,9 @@ impl<'a> AppFarmRulesRepository<'a> {
                 [farm_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<i64, _>(1)?,
+                        row.try_get::<String, _>(2)?,
                     ))
                 },
             )
@@ -265,13 +267,13 @@ impl<'a> AppFarmRulesRepository<'a> {
         let rows = statement
             .query_map([farm_id.to_string()], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
+                    row.try_get::<String, _>(0)?,
+                    row.try_get::<String, _>(1)?,
+                    row.try_get::<String, _>(2)?,
+                    row.try_get::<String, _>(3)?,
+                    row.try_get::<String, _>(4)?,
+                    row.try_get::<String, _>(5)?,
+                    row.try_get::<String, _>(6)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -330,11 +332,11 @@ impl<'a> AppFarmRulesRepository<'a> {
         let rows = statement
             .query_map([farm_id.to_string()], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
+                    row.try_get::<String, _>(0)?,
+                    row.try_get::<String, _>(1)?,
+                    row.try_get::<String, _>(2)?,
+                    row.try_get::<String, _>(3)?,
+                    row.try_get::<String, _>(4)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -387,7 +389,7 @@ impl<'a> AppFarmRulesRepository<'a> {
                     timezone = excluded.timezone,
                     currency_code = excluded.currency_code,
                     updated_at = excluded.updated_at",
-                params![
+                crate::app_sqlite_params![
                     farm_profile.farm_id.to_string(),
                     farm_profile.display_name,
                     farm_readiness_storage_key(ready),
@@ -426,7 +428,7 @@ impl<'a> AppFarmRulesRepository<'a> {
                     promise_lead_hours = excluded.promise_lead_hours,
                     substitution_policy = excluded.substitution_policy,
                     updated_at = excluded.updated_at",
-                params![
+                crate::app_sqlite_params![
                     operating_rules.farm_id.to_string(),
                     i64::from(operating_rules.promise_lead_hours),
                     operating_rules.substitution_policy,
@@ -486,7 +488,7 @@ impl<'a> AppFarmRulesRepository<'a> {
                     directions = excluded.directions,
                     is_default = excluded.is_default,
                     updated_at = excluded.updated_at",
-                params![
+                crate::app_sqlite_params![
                     pickup_location.pickup_location_id.to_string(),
                     pickup_location.farm_id.to_string(),
                     pickup_location.label,
@@ -540,7 +542,7 @@ impl<'a> AppFarmRulesRepository<'a> {
                     label = excluded.label,
                     order_cutoff_at = excluded.order_cutoff_at,
                     updated_at = excluded.updated_at",
-                params![
+                crate::app_sqlite_params![
                     fulfillment_window.fulfillment_window_id.to_string(),
                     fulfillment_window.farm_id.to_string(),
                     fulfillment_window.starts_at,
@@ -587,7 +589,7 @@ impl<'a> AppFarmRulesRepository<'a> {
                     starts_at = excluded.starts_at,
                     ends_at = excluded.ends_at,
                     updated_at = excluded.updated_at",
-                params![
+                crate::app_sqlite_params![
                     blackout_period.blackout_period_id.to_string(),
                     blackout_period.farm_id.to_string(),
                     blackout_period.label,
@@ -760,10 +762,7 @@ fn derive_farm_rules_readiness_parts(
         blockers.push(FarmReadinessBlocker::MissingProfileBasics);
     }
 
-    if !pickup_locations
-        .iter()
-        .any(|pickup_location| pickup_location_is_present(pickup_location))
-    {
+    if !pickup_locations.iter().any(pickup_location_is_present) {
         blockers.push(FarmReadinessBlocker::MissingPickupLocation);
     }
 
@@ -837,7 +836,7 @@ fn pickup_location_is_present(pickup_location: &PickupLocationRecord) -> bool {
 }
 
 fn delete_missing_rows<T>(
-    connection: &Connection,
+    connection: &AppSqliteDatabase,
     table_name: &str,
     id_column: &str,
     farm_id: FarmId,
@@ -866,19 +865,16 @@ where
     values.extend(keep_ids.iter().map(ToString::to_string));
 
     connection
-        .execute(&sql, params_from_iter(values.iter()))
+        .execute(&sql, values)
         .map_err(|source| AppSqliteError::Query { operation, source })?;
 
     Ok(())
 }
 
-fn collect_rows<T, F>(
+fn collect_rows<T>(
     operation: &'static str,
-    rows: rusqlite::MappedRows<'_, F>,
-) -> Result<Vec<T>, AppSqliteError>
-where
-    F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
-{
+    rows: std::vec::IntoIter<Result<T, sqlx::Error>>,
+) -> Result<Vec<T>, AppSqliteError> {
     let mut values = Vec::new();
 
     for row in rows {
@@ -947,7 +943,7 @@ mod tests {
         let repository = AppFarmRulesRepository::new(store.connection());
 
         let projection = repository
-            .load_farm_rules(FarmId::new())
+            .load_farm_rules(FarmId::generate())
             .expect("missing farm rules should load");
 
         assert_eq!(projection, FarmRulesProjection::default());
@@ -956,10 +952,10 @@ mod tests {
     #[test]
     fn save_farm_rules_round_trips_across_restart() {
         let path = temp_database_path("farm-rules-roundtrip");
-        let farm_id = FarmId::new();
-        let pickup_location_id = PickupLocationId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let blackout_period_id = BlackoutPeriodId::new();
+        let farm_id = FarmId::generate();
+        let pickup_location_id = PickupLocationId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
+        let blackout_period_id = BlackoutPeriodId::generate();
         let projection = FarmRulesProjection {
             farm_profile: Some(FarmProfileRecord {
                 farm_id,
@@ -1024,10 +1020,10 @@ mod tests {
     fn load_farm_rules_derives_missing_and_conflict_readiness() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let repository = AppFarmRulesRepository::new(store.connection());
-        let farm_id = FarmId::new();
-        let pickup_location_id = PickupLocationId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let blackout_period_id = BlackoutPeriodId::new();
+        let farm_id = FarmId::generate();
+        let pickup_location_id = PickupLocationId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
+        let blackout_period_id = BlackoutPeriodId::generate();
 
         repository
             .save_farm_rules(&FarmRulesProjection {
@@ -1091,7 +1087,7 @@ mod tests {
 
     #[test]
     fn blank_pickup_location_rows_do_not_count_as_present_for_readiness() {
-        let farm_id = FarmId::new();
+        let farm_id = FarmId::generate();
         let readiness = derive_farm_rules_readiness(&FarmRulesProjection {
             farm_profile: Some(FarmProfileRecord {
                 farm_id,
@@ -1100,7 +1096,7 @@ mod tests {
                 currency_code: "USD".to_owned(),
             }),
             pickup_locations: vec![PickupLocationRecord {
-                pickup_location_id: PickupLocationId::new(),
+                pickup_location_id: PickupLocationId::generate(),
                 farm_id,
                 label: "   ".to_owned(),
                 address_line: String::new(),
@@ -1131,8 +1127,8 @@ mod tests {
 
     #[test]
     fn zero_promise_lead_hours_keep_operating_rules_incomplete() {
-        let farm_id = FarmId::new();
-        let pickup_location_id = PickupLocationId::new();
+        let farm_id = FarmId::generate();
+        let pickup_location_id = PickupLocationId::generate();
         let readiness = derive_farm_rules_readiness(&FarmRulesProjection {
             farm_profile: Some(FarmProfileRecord {
                 farm_id,
@@ -1154,7 +1150,7 @@ mod tests {
                 substitution_policy: "ask_customer".to_owned(),
             }),
             fulfillment_windows: vec![FulfillmentWindowRecord {
-                fulfillment_window_id: FulfillmentWindowId::new(),
+                fulfillment_window_id: FulfillmentWindowId::generate(),
                 farm_id,
                 pickup_location_id,
                 label: "Friday pickup".to_owned(),
@@ -1175,8 +1171,8 @@ mod tests {
 
     #[test]
     fn complete_pickup_location_row_counts_as_present_for_readiness() {
-        let farm_id = FarmId::new();
-        let pickup_location_id = PickupLocationId::new();
+        let farm_id = FarmId::generate();
+        let pickup_location_id = PickupLocationId::generate();
         let readiness = derive_farm_rules_readiness(&FarmRulesProjection {
             farm_profile: Some(FarmProfileRecord {
                 farm_id,
@@ -1198,7 +1194,7 @@ mod tests {
                 substitution_policy: "ask_customer".to_owned(),
             }),
             fulfillment_windows: vec![FulfillmentWindowRecord {
-                fulfillment_window_id: FulfillmentWindowId::new(),
+                fulfillment_window_id: FulfillmentWindowId::generate(),
                 farm_id,
                 pickup_location_id,
                 label: "Friday pickup".to_owned(),

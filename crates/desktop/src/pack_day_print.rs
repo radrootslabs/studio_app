@@ -936,8 +936,8 @@ mod tests {
 
     fn sample_bundle(bundle_directory: &PathBuf) -> PackDayExportBundle {
         PackDayExportBundle {
-            fulfillment_window_id: radroots_studio_app_view::FulfillmentWindowId::new(),
-            export_instance_id: PackDayExportInstanceId::new(),
+            fulfillment_window_id: radroots_studio_app_view::FulfillmentWindowId::generate(),
+            export_instance_id: PackDayExportInstanceId::generate(),
             generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
             bundle_directory: bundle_directory.to_string_lossy().into_owned(),
             artifacts: vec![
@@ -1285,7 +1285,7 @@ mod tests {
         write_all_artifacts(temp_dir.path());
         let bundle = sample_bundle(temp_dir.path());
         let mut request = sample_batch_request(&bundle);
-        request.export_instance_id = PackDayExportInstanceId::new();
+        request.export_instance_id = PackDayExportInstanceId::generate();
         let artifacts = request.artifacts.clone();
 
         let error = plan_pack_day_batch_print(&bundle, &request)
@@ -1434,7 +1434,7 @@ mod tests {
     #[test]
     fn batch_execution_rejects_empty_command_plan_without_submitting_artifacts() {
         let plan = PackDayBatchPrintCommandPlan {
-            export_instance_id: PackDayExportInstanceId::new(),
+            export_instance_id: PackDayExportInstanceId::generate(),
             plans: Vec::new(),
         };
         let mut submitted = false;
@@ -1576,7 +1576,7 @@ mod tests {
     #[test]
     fn cleanup_prepared_customer_label_asset_root_removes_existing_directories() {
         let root = prepared_customer_label_asset_root();
-        let stale_directory = root.join(PackDayExportInstanceId::new().to_string());
+        let stale_directory = root.join(PackDayExportInstanceId::generate().to_string());
         fs::create_dir_all(&stale_directory).expect("stale prepared directory should create");
         fs::write(stale_directory.join("stale.ps"), "stale").expect("stale asset should write");
 

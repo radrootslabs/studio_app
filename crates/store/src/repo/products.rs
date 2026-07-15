@@ -6,18 +6,20 @@ use radroots_studio_app_view::{
     ProductPublishBlocker, ProductStatus, ProductStockState, ProductStockSummary, ProductsFilter,
     ProductsListProjection, ProductsListRow, ProductsListSummary, ProductsSort,
 };
-use rusqlite::{Connection, OptionalExtension, params};
+use sqlx::Row;
+
+use crate::{AppSqliteDatabase, OptionalSqliteResult};
 
 use crate::AppSqliteError;
 
 const PRODUCTS_LOW_STOCK_THRESHOLD: u32 = 3;
 
 pub struct AppProductsRepository<'a> {
-    connection: &'a Connection,
+    connection: &'a AppSqliteDatabase,
 }
 
 impl<'a> AppProductsRepository<'a> {
-    pub const fn new(connection: &'a Connection) -> Self {
+    pub(crate) const fn new(connection: &'a AppSqliteDatabase) -> Self {
         Self { connection }
     }
 
@@ -58,7 +60,7 @@ impl<'a> AppProductsRepository<'a> {
     }
 
     pub fn create_product_draft(&self, farm_id: FarmId) -> Result<ProductId, AppSqliteError> {
-        let product_id = ProductId::new();
+        let product_id = ProductId::generate();
 
         self.connection
             .execute(
@@ -89,7 +91,7 @@ impl<'a> AppProductsRepository<'a> {
                     null,
                     strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  )",
-                params![product_id.to_string(), farm_id.to_string()],
+                crate::app_sqlite_params![product_id.to_string(), farm_id.to_string()],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "create product draft",
@@ -120,7 +122,7 @@ impl<'a> AppProductsRepository<'a> {
                     availability_window_id = ?10,
                     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  where id = ?1",
-                params![
+                crate::app_sqlite_params![
                     product_id.to_string(),
                     draft.title.as_str(),
                     draft.subtitle.as_str(),
@@ -154,7 +156,7 @@ impl<'a> AppProductsRepository<'a> {
                     stock_count = ?2,
                     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  where id = ?1",
-                params![product_id.to_string(), stock_quantity],
+                crate::app_sqlite_params![product_id.to_string(), stock_quantity],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "update product stock",
@@ -175,9 +177,11 @@ impl<'a> AppProductsRepository<'a> {
 
     fn current_utc_timestamp(&self) -> Result<String, AppSqliteError> {
         self.connection
-            .query_row("select strftime('%Y-%m-%dT%H:%M:%SZ', 'now')", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "select strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .map_err(|source| AppSqliteError::Query {
                 operation: "load current utc timestamp",
                 source,
@@ -212,22 +216,22 @@ impl<'a> AppProductsRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map(params![farm_id.to_string()], |row| {
+            .query_map(crate::app_sqlite_params![farm_id.to_string()], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, Option<u32>>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, Option<u32>>(9)?,
-                    row.get::<_, Option<String>>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, Option<String>>(12)?,
-                    row.get::<_, String>(13)?,
+                    row.try_get::<String, _>(0)?,
+                    row.try_get::<String, _>(1)?,
+                    row.try_get::<String, _>(2)?,
+                    row.try_get::<String, _>(3)?,
+                    row.try_get::<String, _>(4)?,
+                    row.try_get::<String, _>(5)?,
+                    row.try_get::<String, _>(6)?,
+                    row.try_get::<Option<u32>, _>(7)?,
+                    row.try_get::<String, _>(8)?,
+                    row.try_get::<Option<u32>, _>(9)?,
+                    row.try_get::<Option<String>, _>(10)?,
+                    row.try_get::<Option<String>, _>(11)?,
+                    row.try_get::<Option<String>, _>(12)?,
+                    row.try_get::<String, _>(13)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -307,23 +311,23 @@ impl<'a> AppProductsRepository<'a> {
                  left join fulfillment_windows fw on fw.id = p.availability_window_id
                  where p.id = ?1
                  limit 1",
-                params![product_id.to_string()],
+                crate::app_sqlite_params![product_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, String>(6)?,
-                        row.get::<_, Option<u32>>(7)?,
-                        row.get::<_, String>(8)?,
-                        row.get::<_, Option<u32>>(9)?,
-                        row.get::<_, Option<String>>(10)?,
-                        row.get::<_, Option<String>>(11)?,
-                        row.get::<_, Option<String>>(12)?,
-                        row.get::<_, String>(13)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
+                        row.try_get::<String, _>(3)?,
+                        row.try_get::<String, _>(4)?,
+                        row.try_get::<String, _>(5)?,
+                        row.try_get::<String, _>(6)?,
+                        row.try_get::<Option<u32>, _>(7)?,
+                        row.try_get::<String, _>(8)?,
+                        row.try_get::<Option<u32>, _>(9)?,
+                        row.try_get::<Option<String>, _>(10)?,
+                        row.try_get::<Option<String>, _>(11)?,
+                        row.try_get::<Option<String>, _>(12)?,
+                        row.try_get::<String, _>(13)?,
                     ))
                 },
             )
@@ -728,14 +732,12 @@ fn parse_product_status(
 
 #[cfg(test)]
 mod tests {
+    use crate::{AppSqliteDatabase, AppSqliteStore, DatabaseTarget};
     use radroots_studio_app_view::{
         FarmId, FulfillmentWindowId, ProductAttentionState, ProductAvailabilityState,
         ProductEditorDraft, ProductId, ProductPublishBlocker, ProductStatus, ProductStockState,
         ProductsFilter, ProductsSort,
     };
-    use rusqlite::{Connection, params};
-
-    use crate::{AppSqliteStore, DatabaseTarget};
 
     use super::AppProductsRepository;
 
@@ -984,14 +986,14 @@ mod tests {
                 .expect("ready blockers should load"),
             Some(Vec::new())
         );
-        let stale_window_id = FulfillmentWindowId::new();
+        let stale_window_id = FulfillmentWindowId::generate();
         connection
             .execute_batch("PRAGMA foreign_keys = OFF;")
             .expect("foreign keys should disable for stale fixture");
         connection
             .execute(
                 "update products set availability_window_id = ?2 where id = ?1",
-                params![product_id.to_string(), stale_window_id.to_string()],
+                crate::app_sqlite_params![product_id.to_string(), stale_window_id.to_string()],
             )
             .expect("stale availability id should write");
         connection
@@ -1009,7 +1011,7 @@ mod tests {
         connection
             .execute(
                 "update products set availability_window_id = ?2 where id = ?1",
-                params![product_id.to_string(), window_id.to_string()],
+                crate::app_sqlite_params![product_id.to_string(), window_id.to_string()],
             )
             .expect("ready availability id should restore");
         connection
@@ -1054,14 +1056,14 @@ mod tests {
         );
     }
 
-    fn insert_farm(connection: &Connection, display_name: &str) -> FarmId {
-        let farm_id = FarmId::new();
+    fn insert_farm(connection: &AppSqliteDatabase, display_name: &str) -> FarmId {
+        let farm_id = FarmId::generate();
 
         connection
             .execute(
                 "insert into farms (id, display_name, readiness, created_at, updated_at)
                  values (?1, ?2, 'ready', '2026-04-18T08:00:00Z', '2026-04-18T08:00:00Z')",
-                params![farm_id.to_string(), display_name],
+                crate::app_sqlite_params![farm_id.to_string(), display_name],
             )
             .expect("farm insert should succeed");
 
@@ -1069,18 +1071,18 @@ mod tests {
     }
 
     fn insert_window(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         farm_id: FarmId,
         starts_at: &str,
         ends_at: &str,
     ) -> FulfillmentWindowId {
-        let window_id = FulfillmentWindowId::new();
+        let window_id = FulfillmentWindowId::generate();
 
         connection
             .execute(
                 "insert into fulfillment_windows (id, farm_id, starts_at, ends_at, capacity_limit, created_at, updated_at)
                  values (?1, ?2, ?3, ?4, null, ?3, ?3)",
-                params![window_id.to_string(), farm_id.to_string(), starts_at, ends_at],
+                crate::app_sqlite_params![window_id.to_string(), farm_id.to_string(), starts_at, ends_at],
             )
             .expect("fulfillment window insert should succeed");
 
@@ -1088,11 +1090,11 @@ mod tests {
     }
 
     fn insert_product(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         farm_id: FarmId,
         seed: SeedProduct<'_>,
     ) -> ProductId {
-        let product_id = ProductId::new();
+        let product_id = ProductId::generate();
 
         connection
             .execute(
@@ -1110,7 +1112,7 @@ mod tests {
                     availability_window_id,
                     updated_at
                  ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'USD', ?9, ?10, ?11)",
-                params![
+                crate::app_sqlite_params![
                     product_id.to_string(),
                     farm_id.to_string(),
                     seed.title,

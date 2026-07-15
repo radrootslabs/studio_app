@@ -3,23 +3,23 @@ use std::collections::BTreeSet;
 use radroots_studio_app_view::{
     FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
 };
-use rusqlite::{Connection, OptionalExtension, params};
+use sqlx::Row;
 
-use crate::AppSqliteError;
+use crate::{AppSqliteDatabase, AppSqliteError};
 
 pub struct AppFarmSetupRepository<'a> {
-    connection: &'a Connection,
+    connection: &'a AppSqliteDatabase,
 }
 
 impl<'a> AppFarmSetupRepository<'a> {
-    pub const fn new(connection: &'a Connection) -> Self {
+    pub(crate) const fn new(connection: &'a AppSqliteDatabase) -> Self {
         Self { connection }
     }
 
     pub fn load_farm_setup(&self, account_id: &str) -> Result<FarmSetupProjection, AppSqliteError> {
         let row = self
             .connection
-            .query_row(
+            .fetch_optional(
                 "SELECT
                     farm_name,
                     location_or_service_area,
@@ -32,21 +32,20 @@ impl<'a> AppFarmSetupRepository<'a> {
                  FROM account_farm_setups
                  WHERE account_id = ?1
                  LIMIT 1",
-                [account_id],
+                crate::app_sqlite_params![account_id],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, i64>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                        row.get::<_, Option<String>>(6)?,
-                        row.get::<_, Option<String>>(7)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<i64, _>(2)?,
+                        row.try_get::<i64, _>(3)?,
+                        row.try_get::<i64, _>(4)?,
+                        row.try_get::<Option<String>, _>(5)?,
+                        row.try_get::<Option<String>, _>(6)?,
+                        row.try_get::<Option<String>, _>(7)?,
                     ))
                 },
             )
-            .optional()
             .map_err(|source| AppSqliteError::Query {
                 operation: "load account farm setup",
                 source,
@@ -96,7 +95,7 @@ impl<'a> AppFarmSetupRepository<'a> {
         }
 
         self.connection
-            .execute(
+            .execute_statement(
                 "INSERT INTO account_farm_setups (
                     account_id,
                     farm_name,
@@ -119,7 +118,7 @@ impl<'a> AppFarmSetupRepository<'a> {
                     saved_farm_display_name = excluded.saved_farm_display_name,
                     saved_farm_readiness = excluded.saved_farm_readiness,
                     updated_at = excluded.updated_at",
-                params![
+                crate::app_sqlite_params![
                     account_id,
                     projection.draft.farm_name,
                     projection.draft.location_or_service_area,
@@ -165,9 +164,9 @@ impl<'a> AppFarmSetupRepository<'a> {
 
     pub fn clear_farm_setup(&self, account_id: &str) -> Result<(), AppSqliteError> {
         self.connection
-            .execute(
+            .execute_statement(
                 "DELETE FROM account_farm_setups WHERE account_id = ?1",
-                [account_id],
+                crate::app_sqlite_params![account_id],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "clear account farm setup",
@@ -286,7 +285,7 @@ mod tests {
     fn farm_setup_round_trips_saved_farm_state() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let saved_farm = FarmSummary {
-            farm_id: FarmId::new(),
+            farm_id: FarmId::generate(),
             display_name: "North field farm".to_owned(),
             readiness: FarmReadiness::Ready,
         };

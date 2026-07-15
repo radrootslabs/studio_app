@@ -5,7 +5,9 @@ use radroots_studio_app_sync::{
     SyncConflictResolutionStatus, SyncConflictSeverity, SyncOperationKind,
 };
 use radroots_studio_app_view::{FarmId, FulfillmentWindowId, OrderId, ProductId};
-use rusqlite::{Connection, OptionalExtension, params};
+use sqlx::Row;
+
+use crate::{AppSqliteDatabase, OptionalSqliteResult};
 use uuid::Uuid;
 
 use crate::AppSqliteError;
@@ -28,12 +30,35 @@ pub struct StoredRelayIngestCursor {
     pub cursor_since_unix_seconds: Option<i64>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AppRelayIngestSuccessInput<'a> {
+    pub scope_key: &'a str,
+    pub relay_url: &'a str,
+    pub cursor_since_unix_seconds: i64,
+    pub last_event_created_at_unix_seconds: Option<i64>,
+    pub started_at: &'a str,
+    pub started_unix_seconds: i64,
+    pub completed_at: &'a str,
+    pub completed_unix_seconds: i64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AppRelayIngestFailureInput<'a> {
+    pub scope_key: &'a str,
+    pub relay_url: &'a str,
+    pub started_at: &'a str,
+    pub started_unix_seconds: i64,
+    pub completed_at: &'a str,
+    pub completed_unix_seconds: i64,
+    pub error_message: &'a str,
+}
+
 pub struct AppSyncRepository<'a> {
-    connection: &'a Connection,
+    connection: &'a AppSqliteDatabase,
 }
 
 impl<'a> AppSyncRepository<'a> {
-    pub const fn new(connection: &'a Connection) -> Self {
+    pub(crate) const fn new(connection: &'a AppSqliteDatabase) -> Self {
         Self { connection }
     }
 
@@ -72,7 +97,7 @@ impl<'a> AppSyncRepository<'a> {
                     attempt_count = 0,
                     state = 'pending',
                     last_error_message = NULL",
-                params![
+                crate::app_sqlite_params![
                     operation_id,
                     account_id,
                     operation.operation_key.as_str(),
@@ -100,8 +125,8 @@ impl<'a> AppSyncRepository<'a> {
                     AND operation_key = ?2
                     AND state IN ('pending', 'in_progress', 'failed', 'blocked', 'retryable')
                  LIMIT 1",
-                params![account_id, operation.operation_key.as_str()],
-                |row| row.get::<_, String>(0),
+                crate::app_sqlite_params![account_id, operation.operation_key.as_str()],
+                |row| row.try_get::<String, _>(0),
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "load pending sync operation id after enqueue",
@@ -140,17 +165,17 @@ impl<'a> AppSyncRepository<'a> {
         let rows = statement
             .query_map([account_id], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, u32>(8)?,
-                    row.get::<_, String>(9)?,
-                    row.get::<_, Option<String>>(10)?,
+                    row.try_get::<String, _>(0)?,
+                    row.try_get::<String, _>(1)?,
+                    row.try_get::<String, _>(2)?,
+                    row.try_get::<String, _>(3)?,
+                    row.try_get::<String, _>(4)?,
+                    row.try_get::<String, _>(5)?,
+                    row.try_get::<String, _>(6)?,
+                    row.try_get::<String, _>(7)?,
+                    row.try_get::<u32, _>(8)?,
+                    row.try_get::<String, _>(9)?,
+                    row.try_get::<Option<String>, _>(10)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -216,7 +241,7 @@ impl<'a> AppSyncRepository<'a> {
                     state = 'retryable',
                     last_error_message = ?5
                  WHERE account_id = ?1 AND id = ?2",
-                params![
+                crate::app_sqlite_params![
                     account_id,
                     operation_id,
                     available_at,
@@ -241,7 +266,7 @@ impl<'a> AppSyncRepository<'a> {
             .connection
             .execute(
                 "DELETE FROM local_outbox WHERE account_id = ?1 AND id = ?2",
-                params![account_id, operation_id],
+                crate::app_sqlite_params![account_id, operation_id],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "dequeue pending sync operation",
@@ -270,11 +295,11 @@ impl<'a> AppSyncRepository<'a> {
                 [account_id],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, Option<String>>(4)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<Option<String>, _>(1)?,
+                        row.try_get::<Option<String>, _>(2)?,
+                        row.try_get::<Option<String>, _>(3)?,
+                        row.try_get::<Option<String>, _>(4)?,
                     ))
                 },
             )
@@ -325,7 +350,7 @@ impl<'a> AppSyncRepository<'a> {
                     last_sync_completed_at = excluded.last_sync_completed_at,
                     last_remote_cursor = excluded.last_remote_cursor,
                     last_error_message = excluded.last_error_message",
-                params![
+                crate::app_sqlite_params![
                     account_id,
                     sync_checkpoint_state_value(checkpoint.state),
                     checkpoint.last_sync_started_at,
@@ -357,8 +382,8 @@ impl<'a> AppSyncRepository<'a> {
                          FROM app_relay_ingest_freshness
                          WHERE scope_key = ?1 AND relay_url = ?2
                          LIMIT 1",
-                        params![scope_key, relay_url.as_str()],
-                        |row| row.get::<_, Option<i64>>(0),
+                        crate::app_sqlite_params![scope_key, relay_url.as_str()],
+                        |row| row.try_get::<Option<i64>, _>(0),
                     )
                     .optional()
                     .map_err(|source| AppSqliteError::Query {
@@ -404,14 +429,7 @@ impl<'a> AppSyncRepository<'a> {
 
     pub fn record_relay_ingest_success(
         &self,
-        scope_key: &str,
-        relay_url: &str,
-        cursor_since_unix_seconds: i64,
-        last_event_created_at_unix_seconds: Option<i64>,
-        started_at: &str,
-        started_unix_seconds: i64,
-        completed_at: &str,
-        completed_unix_seconds: i64,
+        input: AppRelayIngestSuccessInput<'_>,
     ) -> Result<(), AppSqliteError> {
         self.connection
             .execute(
@@ -442,15 +460,15 @@ impl<'a> AppSyncRepository<'a> {
                     last_success_unix_seconds = excluded.last_success_unix_seconds,
                     last_error_message = NULL,
                     updated_at = excluded.updated_at",
-                params![
-                    scope_key,
-                    relay_url,
-                    cursor_since_unix_seconds,
-                    last_event_created_at_unix_seconds,
-                    started_at,
-                    started_unix_seconds,
-                    completed_at,
-                    completed_unix_seconds,
+                crate::app_sqlite_params![
+                    input.scope_key,
+                    input.relay_url,
+                    input.cursor_since_unix_seconds,
+                    input.last_event_created_at_unix_seconds,
+                    input.started_at,
+                    input.started_unix_seconds,
+                    input.completed_at,
+                    input.completed_unix_seconds,
                 ],
             )
             .map_err(|source| AppSqliteError::Query {
@@ -463,13 +481,7 @@ impl<'a> AppSyncRepository<'a> {
 
     pub fn record_relay_ingest_failure(
         &self,
-        scope_key: &str,
-        relay_url: &str,
-        started_at: &str,
-        started_unix_seconds: i64,
-        completed_at: &str,
-        completed_unix_seconds: i64,
-        error_message: &str,
+        input: AppRelayIngestFailureInput<'_>,
     ) -> Result<(), AppSqliteError> {
         self.connection
             .execute(
@@ -496,14 +508,14 @@ impl<'a> AppSyncRepository<'a> {
                     last_fetch_completed_unix_seconds = excluded.last_fetch_completed_unix_seconds,
                     last_error_message = excluded.last_error_message,
                     updated_at = excluded.updated_at",
-                params![
-                    scope_key,
-                    relay_url,
-                    started_at,
-                    started_unix_seconds,
-                    completed_at,
-                    completed_unix_seconds,
-                    error_message,
+                crate::app_sqlite_params![
+                    input.scope_key,
+                    input.relay_url,
+                    input.started_at,
+                    input.started_unix_seconds,
+                    input.completed_at,
+                    input.completed_unix_seconds,
+                    input.error_message,
                 ],
             )
             .map_err(|source| AppSqliteError::Query {
@@ -536,17 +548,17 @@ impl<'a> AppSyncRepository<'a> {
                  FROM app_relay_ingest_freshness
                  WHERE scope_key = ?1 AND relay_url = ?2
                  LIMIT 1",
-                params![scope_key, relay_url],
+                crate::app_sqlite_params![scope_key, relay_url],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<i64>>(1)?,
-                        row.get::<_, Option<i64>>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                        row.get::<_, Option<i64>>(5)?,
-                        row.get::<_, Option<String>>(6)?,
-                        row.get::<_, Option<String>>(7)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<Option<i64>, _>(1)?,
+                        row.try_get::<Option<i64>, _>(2)?,
+                        row.try_get::<Option<String>, _>(3)?,
+                        row.try_get::<Option<String>, _>(4)?,
+                        row.try_get::<Option<i64>, _>(5)?,
+                        row.try_get::<Option<String>, _>(6)?,
+                        row.try_get::<Option<String>, _>(7)?,
                     ))
                 },
             )
@@ -625,7 +637,7 @@ impl<'a> AppSyncRepository<'a> {
                     detected_at,
                     resolved_at
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-                params![
+                crate::app_sqlite_params![
                     conflict_id,
                     account_id,
                     conflict.aggregate.aggregate_kind(),
@@ -698,16 +710,16 @@ impl<'a> AppSyncRepository<'a> {
         let rows = statement
             .query_map([account_id], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, Option<String>>(9)?,
+                    row.try_get::<String, _>(0)?,
+                    row.try_get::<String, _>(1)?,
+                    row.try_get::<String, _>(2)?,
+                    row.try_get::<String, _>(3)?,
+                    row.try_get::<String, _>(4)?,
+                    row.try_get::<String, _>(5)?,
+                    row.try_get::<String, _>(6)?,
+                    row.try_get::<Option<String>, _>(7)?,
+                    row.try_get::<String, _>(8)?,
+                    row.try_get::<Option<String>, _>(9)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -773,7 +785,7 @@ impl<'a> AppSyncRepository<'a> {
                 "UPDATE local_conflicts
                  SET resolution_status = ?3, resolved_at = ?4
                  WHERE account_id = ?1 AND id = ?2",
-                params![
+                crate::app_sqlite_params![
                     account_id,
                     conflict_id,
                     sync_conflict_resolution_status_value(resolution),
@@ -1008,7 +1020,9 @@ mod tests {
     };
     use radroots_studio_app_view::{FarmId, ProductId};
 
-    use crate::{AppSqliteStore, DatabaseTarget};
+    use crate::{
+        AppRelayIngestFailureInput, AppRelayIngestSuccessInput, AppSqliteStore, DatabaseTarget,
+    };
 
     #[test]
     fn checkpoints_are_selected_account_scoped() {
@@ -1064,27 +1078,27 @@ mod tests {
         );
 
         repository
-            .record_relay_ingest_success(
-                "direct_relay_ingest",
-                "wss://relay-a.example",
-                1_010,
-                Some(1_009),
-                "2026-05-25T20:00:00Z",
-                1_000,
-                "2026-05-25T20:00:02Z",
-                1_002,
-            )
+            .record_relay_ingest_success(AppRelayIngestSuccessInput {
+                scope_key: "direct_relay_ingest",
+                relay_url: "wss://relay-a.example",
+                cursor_since_unix_seconds: 1_010,
+                last_event_created_at_unix_seconds: Some(1_009),
+                started_at: "2026-05-25T20:00:00Z",
+                started_unix_seconds: 1_000,
+                completed_at: "2026-05-25T20:00:02Z",
+                completed_unix_seconds: 1_002,
+            })
             .expect("success should record");
         repository
-            .record_relay_ingest_failure(
-                "direct_relay_ingest",
-                "wss://relay-b.example",
-                "2026-05-25T20:00:00Z",
-                1_000,
-                "2026-05-25T20:00:02Z",
-                1_002,
-                "relay timeout",
-            )
+            .record_relay_ingest_failure(AppRelayIngestFailureInput {
+                scope_key: "direct_relay_ingest",
+                relay_url: "wss://relay-b.example",
+                started_at: "2026-05-25T20:00:00Z",
+                started_unix_seconds: 1_000,
+                completed_at: "2026-05-25T20:00:02Z",
+                completed_unix_seconds: 1_002,
+                error_message: "relay timeout",
+            })
             .expect("failure should record");
 
         let cursors = repository
@@ -1125,13 +1139,13 @@ mod tests {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let repository = store.sync_repository();
         let first = PendingSyncOperation::new(
-            SyncAggregateRef::Farm(FarmId::new()),
+            SyncAggregateRef::Farm(FarmId::generate()),
             SyncOperationKind::Upsert,
             "{\"farm\":\"a\"}",
             "2026-04-20T18:00:00Z",
         );
         let second = PendingSyncOperation::new(
-            SyncAggregateRef::Product(ProductId::new()),
+            SyncAggregateRef::Product(ProductId::generate()),
             SyncOperationKind::Delete,
             "{\"product\":\"b\"}",
             "2026-04-20T18:05:00Z",
@@ -1211,7 +1225,7 @@ mod tests {
     fn outbox_enqueue_upserts_active_operation_by_deterministic_key() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let repository = store.sync_repository();
-        let product_id = ProductId::new();
+        let product_id = ProductId::generate();
         let first = PendingSyncOperation::new(
             SyncAggregateRef::Product(product_id),
             SyncOperationKind::Upsert,
@@ -1260,7 +1274,7 @@ mod tests {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let repository = store.sync_repository();
         let first = SyncConflict {
-            aggregate: SyncAggregateRef::Farm(FarmId::new()),
+            aggregate: SyncAggregateRef::Farm(FarmId::generate()),
             kind: SyncConflictKind::RevisionMismatch,
             severity: SyncConflictSeverity::Blocking,
             resolution: SyncConflictResolutionStatus::Unresolved,
@@ -1270,7 +1284,7 @@ mod tests {
             resolved_at: None,
         };
         let second = SyncConflict {
-            aggregate: SyncAggregateRef::Product(ProductId::new()),
+            aggregate: SyncAggregateRef::Product(ProductId::generate()),
             kind: SyncConflictKind::RemoteValidationReject,
             severity: SyncConflictSeverity::ReviewRequired,
             resolution: SyncConflictResolutionStatus::Unresolved,
@@ -1334,7 +1348,7 @@ mod tests {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let repository = store.sync_repository();
         let first = SyncConflict {
-            aggregate: SyncAggregateRef::Farm(FarmId::new()),
+            aggregate: SyncAggregateRef::Farm(FarmId::generate()),
             kind: SyncConflictKind::RevisionMismatch,
             severity: SyncConflictSeverity::Blocking,
             resolution: SyncConflictResolutionStatus::Unresolved,
@@ -1344,7 +1358,7 @@ mod tests {
             resolved_at: None,
         };
         let second = SyncConflict {
-            aggregate: SyncAggregateRef::Product(ProductId::new()),
+            aggregate: SyncAggregateRef::Product(ProductId::generate()),
             kind: SyncConflictKind::RemoteValidationReject,
             severity: SyncConflictSeverity::ReviewRequired,
             resolution: SyncConflictResolutionStatus::Unresolved,

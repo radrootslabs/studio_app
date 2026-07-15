@@ -2,16 +2,16 @@ use radroots_studio_app_view::{
     AccountSurfaceActivationProjection, ActiveSurface, FarmId, FarmerActivationProjection,
     SelectedSurfaceProjection,
 };
-use rusqlite::{Connection, OptionalExtension, params};
+use sqlx::Row;
 
-use crate::AppSqliteError;
+use crate::{AppSqliteDatabase, AppSqliteError};
 
 pub struct AppActivationRepository<'a> {
-    connection: &'a Connection,
+    connection: &'a AppSqliteDatabase,
 }
 
 impl<'a> AppActivationRepository<'a> {
-    pub const fn new(connection: &'a Connection) -> Self {
+    pub(crate) const fn new(connection: &'a AppSqliteDatabase) -> Self {
         Self { connection }
     }
 
@@ -21,21 +21,20 @@ impl<'a> AppActivationRepository<'a> {
     ) -> Result<Option<AccountSurfaceActivationProjection>, AppSqliteError> {
         let row = self
             .connection
-            .query_row(
+            .fetch_optional(
                 "SELECT account_id, selected_surface, farmer_farm_id
                  FROM account_surface_activations
                  WHERE account_id = ?1
                  LIMIT 1",
-                [account_id],
+                crate::app_sqlite_params![account_id],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<Option<String>, _>(2)?,
                     ))
                 },
             )
-            .optional()
             .map_err(|source| AppSqliteError::Query {
                 operation: "load account surface activation",
                 source,
@@ -64,7 +63,7 @@ impl<'a> AppActivationRepository<'a> {
         projection: &AccountSurfaceActivationProjection,
     ) -> Result<(), AppSqliteError> {
         self.connection
-            .execute(
+            .execute_statement(
                 "INSERT INTO account_surface_activations (
                     account_id,
                     selected_surface,
@@ -75,7 +74,7 @@ impl<'a> AppActivationRepository<'a> {
                     selected_surface = excluded.selected_surface,
                     farmer_farm_id = excluded.farmer_farm_id,
                     updated_at = excluded.updated_at",
-                params![
+                crate::app_sqlite_params![
                     projection.account_id,
                     projection.active_surface().storage_key(),
                     projection
@@ -94,9 +93,9 @@ impl<'a> AppActivationRepository<'a> {
 
     pub fn clear_surface_activation(&self, account_id: &str) -> Result<(), AppSqliteError> {
         self.connection
-            .execute(
+            .execute_statement(
                 "DELETE FROM account_surface_activations WHERE account_id = ?1",
-                [account_id],
+                crate::app_sqlite_params![account_id],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "clear account surface activation",
@@ -157,7 +156,7 @@ mod tests {
         let projection = AccountSurfaceActivationProjection::new(
             "acct_farmer",
             SelectedSurfaceProjection::new(ActiveSurface::Farmer),
-            FarmerActivationProjection::active(FarmId::new()),
+            FarmerActivationProjection::active(FarmId::generate()),
         );
 
         store
@@ -178,7 +177,7 @@ mod tests {
         let first = AccountSurfaceActivationProjection::new(
             "acct_surface",
             SelectedSurfaceProjection::new(ActiveSurface::Farmer),
-            FarmerActivationProjection::active(FarmId::new()),
+            FarmerActivationProjection::active(FarmId::generate()),
         );
         let second = AccountSurfaceActivationProjection::new(
             "acct_surface",

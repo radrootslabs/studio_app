@@ -9,7 +9,9 @@ use radroots_studio_app_view::{
     PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
     PackDayScreenQueryState, ProductId, TradeAgreementStatus, TradeWorkflowProjection,
 };
-use rusqlite::{Connection, OptionalExtension, params};
+use sqlx::Row;
+
+use crate::{AppSqliteDatabase, OptionalSqliteResult};
 
 use super::{
     order_detail::{order_detail_economics, order_detail_item_row, order_validation_receipts},
@@ -19,7 +21,7 @@ use super::{
 use crate::AppSqliteError;
 
 pub struct AppOrdersRepository<'a> {
-    connection: &'a Connection,
+    connection: &'a AppSqliteDatabase,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -40,7 +42,7 @@ pub struct SellerOrderDecisionLineExport {
 }
 
 impl<'a> AppOrdersRepository<'a> {
-    pub const fn new(connection: &'a Connection) -> Self {
+    pub(crate) const fn new(connection: &'a AppSqliteDatabase) -> Self {
         Self { connection }
     }
 
@@ -90,22 +92,22 @@ impl<'a> AppOrdersRepository<'a> {
                  left join pickup_locations pl on pl.id = fw.pickup_location_id
                  where o.farm_id = ?1 and o.id = ?2
                  limit 1",
-                params![farm_id.to_string(), order_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string(), order_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                        row.get::<_, String>(6)?,
-                        row.get::<_, String>(7)?,
-                        row.get::<_, String>(8)?,
-                        row.get::<_, String>(9)?,
-                        row.get::<_, Option<String>>(10)?,
-                        row.get::<_, Option<String>>(11)?,
-                        row.get::<_, Option<String>>(12)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
+                        row.try_get::<String, _>(3)?,
+                        row.try_get::<String, _>(4)?,
+                        row.try_get::<Option<String>, _>(5)?,
+                        row.try_get::<String, _>(6)?,
+                        row.try_get::<String, _>(7)?,
+                        row.try_get::<String, _>(8)?,
+                        row.try_get::<String, _>(9)?,
+                        row.try_get::<Option<String>, _>(10)?,
+                        row.try_get::<Option<String>, _>(11)?,
+                        row.try_get::<Option<String>, _>(12)?,
                     ))
                 },
             )
@@ -185,12 +187,12 @@ impl<'a> AppOrdersRepository<'a> {
                  from orders
                  where farm_id = ?1 and id = ?2
                  limit 1",
-                params![farm_id.to_string(), order_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string(), order_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
                     ))
                 },
             )
@@ -305,25 +307,25 @@ impl<'a> AppOrdersRepository<'a> {
             })?;
         let rows = statement
             .query_map(
-                params![
+                crate::app_sqlite_params![
                     farm_id.to_string(),
                     fulfillment_window_id.map(|id| id.to_string())
                 ],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, String>(6)?,
-                        row.get::<_, String>(7)?,
-                        row.get::<_, String>(8)?,
-                        row.get::<_, String>(9)?,
-                        row.get::<_, Option<String>>(10)?,
-                        row.get::<_, Option<String>>(11)?,
-                        row.get::<_, Option<String>>(12)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<Option<String>, _>(2)?,
+                        row.try_get::<String, _>(3)?,
+                        row.try_get::<String, _>(4)?,
+                        row.try_get::<String, _>(5)?,
+                        row.try_get::<String, _>(6)?,
+                        row.try_get::<String, _>(7)?,
+                        row.try_get::<String, _>(8)?,
+                        row.try_get::<String, _>(9)?,
+                        row.try_get::<Option<String>, _>(10)?,
+                        row.try_get::<Option<String>, _>(11)?,
+                        row.try_get::<Option<String>, _>(12)?,
                     ))
                 },
             )
@@ -411,14 +413,14 @@ impl<'a> AppOrdersRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map(params![order_id], |row| {
+            .query_map(crate::app_sqlite_params![order_id], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<u32>>(4)?,
-                    row.get::<_, Option<String>>(5)?,
+                    row.try_get::<String, _>(0)?,
+                    row.try_get::<String, _>(1)?,
+                    row.try_get::<i64, _>(2)?,
+                    row.try_get::<String, _>(3)?,
+                    row.try_get::<Option<u32>, _>(4)?,
+                    row.try_get::<Option<String>, _>(5)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -469,11 +471,11 @@ impl<'a> AppOrdersRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map(params![order_id.to_string()], |row| {
+            .query_map(crate::app_sqlite_params![order_id.to_string()], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, Option<String>>(2)?,
+                    row.try_get::<String, _>(0)?,
+                    row.try_get::<i64, _>(1)?,
+                    row.try_get::<Option<String>, _>(2)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -518,8 +520,8 @@ impl<'a> AppOrdersRepository<'a> {
             .connection
             .query_row(
                 "select stock_count from products where id = ?1 limit 1",
-                params![product_id.to_string()],
-                |row| row.get::<_, Option<i64>>(0),
+                crate::app_sqlite_params![product_id.to_string()],
+                |row| row.try_get::<Option<i64>, _>(0),
             )
             .optional()
             .map_err(|source| AppSqliteError::Query {
@@ -556,9 +558,10 @@ impl<'a> AppOrdersRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map(params![excluding_order_id.to_string()], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
+            .query_map(
+                crate::app_sqlite_params![excluding_order_id.to_string()],
+                |row| Ok((row.try_get::<String, _>(0)?, row.try_get::<i64, _>(1)?)),
+            )
             .map_err(|source| AppSqliteError::Query {
                 operation: "query seller order decision reservations",
                 source,
@@ -602,12 +605,12 @@ impl<'a> AppOrdersRepository<'a> {
                  from fulfillment_windows
                  where farm_id = ?1 and id = ?2
                  limit 1",
-                params![farm_id.to_string(), fulfillment_window_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string(), fulfillment_window_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
                     ))
                 },
             )
@@ -641,12 +644,12 @@ impl<'a> AppOrdersRepository<'a> {
                  where farm_id = ?1 and starts_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  order by starts_at asc, id asc
                  limit 1",
-                params![farm_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
                     ))
                 },
             )
@@ -682,12 +685,12 @@ impl<'a> AppOrdersRepository<'a> {
                    and o.status in ('needs_action', 'scheduled', 'packed')
                  order by fw.starts_at asc, fw.id asc
                  limit 1",
-                params![farm_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
                     ))
                 },
             )
@@ -729,15 +732,15 @@ impl<'a> AppOrdersRepository<'a> {
                  left join pickup_locations pl on pl.id = fw.pickup_location_id
                  where fw.farm_id = ?1 and fw.id = ?2
                  limit 1",
-                params![farm_id.to_string(), fulfillment_window_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string(), fulfillment_window_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, String>(5)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
+                        row.try_get::<Option<String>, _>(3)?,
+                        row.try_get::<String, _>(4)?,
+                        row.try_get::<String, _>(5)?,
                     ))
                 },
             )
@@ -790,12 +793,12 @@ impl<'a> AppOrdersRepository<'a> {
             })?;
         let rows = statement
             .query_map(
-                params![farm_id.to_string(), fulfillment_window_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string(), fulfillment_window_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, u32>(1)?,
-                        row.get::<_, String>(2)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<u32, _>(1)?,
+                        row.try_get::<String, _>(2)?,
                     ))
                 },
             )
@@ -847,14 +850,14 @@ impl<'a> AppOrdersRepository<'a> {
             })?;
         let rows = statement
             .query_map(
-                params![farm_id.to_string(), fulfillment_window_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string(), fulfillment_window_id.to_string()],
                 |row| {
                     Ok(PackDayPackListRow {
-                        title: row.get(1)?,
+                        title: row.try_get(1)?,
                         quantity_display: format!(
                             "{}: {}",
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(2)?
+                            row.try_get::<String, _>(0)?,
+                            row.try_get::<String, _>(2)?
                         ),
                     })
                 },
@@ -893,12 +896,12 @@ impl<'a> AppOrdersRepository<'a> {
             })?;
         let rows = statement
             .query_map(
-                params![farm_id.to_string(), fulfillment_window_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string(), fulfillment_window_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, u32>(1)?,
-                        row.get::<_, String>(2)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<u32, _>(1)?,
+                        row.try_get::<String, _>(2)?,
                     ))
                 },
             )
@@ -957,16 +960,16 @@ impl<'a> AppOrdersRepository<'a> {
             })?;
         let rows = statement
             .query_map(
-                params![farm_id.to_string(), fulfillment_window_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string(), fulfillment_window_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, u32>(5)?,
-                        row.get::<_, String>(6)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
+                        row.try_get::<String, _>(3)?,
+                        row.try_get::<String, _>(4)?,
+                        row.try_get::<u32, _>(5)?,
+                        row.try_get::<String, _>(6)?,
                     ))
                 },
             )
@@ -1023,12 +1026,12 @@ impl<'a> AppOrdersRepository<'a> {
             })?;
         let rows = statement
             .query_map(
-                params![farm_id.to_string(), fulfillment_window_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string(), fulfillment_window_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
                     ))
                 },
             )
@@ -1075,13 +1078,13 @@ impl<'a> AppOrdersRepository<'a> {
             })?;
         let rows = statement
             .query_map(
-                params![farm_id.to_string(), fulfillment_window_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string(), fulfillment_window_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
+                        row.try_get::<String, _>(3)?,
                     ))
                 },
             )
@@ -1273,24 +1276,22 @@ fn empty_string_to_none(value: Option<String>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::{AppSqliteDatabase, AppSqliteError, AppSqliteStore, DatabaseTarget};
     use radroots_studio_app_view::{
         FarmId, FulfillmentWindowId, OrderId, OrderPrimaryAction, OrderStatus, OrdersFilter,
         OrdersScreenQueryState, PackDayOutputOrderState, PackDayProductTotalRow,
         PackDayScreenQueryState, PickupLocationId, TradeAgreementStatus, TradeInventoryStatus,
         TradeRevisionStatus, TradeWorkflowSource,
     };
-    use rusqlite::{Connection, params};
-
-    use crate::{AppSqliteError, AppSqliteStore, DatabaseTarget};
 
     #[test]
     fn orders_list_loads_summary_rows_and_window_filter_truthfully() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
-        let farm_id = FarmId::new();
-        let other_farm_id = FarmId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let other_window_id = FulfillmentWindowId::new();
+        let farm_id = FarmId::generate();
+        let other_farm_id = FarmId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
+        let other_window_id = FulfillmentWindowId::generate();
 
         insert_farm(
             connection,
@@ -1330,7 +1331,7 @@ mod tests {
 
         insert_order(
             connection,
-            OrderId::new(),
+            OrderId::generate(),
             farm_id,
             Some(fulfillment_window_id),
             "R-100",
@@ -1340,7 +1341,7 @@ mod tests {
         );
         insert_order(
             connection,
-            OrderId::new(),
+            OrderId::generate(),
             farm_id,
             Some(fulfillment_window_id),
             "R-101",
@@ -1350,7 +1351,7 @@ mod tests {
         );
         insert_order(
             connection,
-            OrderId::new(),
+            OrderId::generate(),
             farm_id,
             Some(fulfillment_window_id),
             "R-102",
@@ -1360,7 +1361,7 @@ mod tests {
         );
         insert_order(
             connection,
-            OrderId::new(),
+            OrderId::generate(),
             farm_id,
             Some(other_window_id),
             "R-103",
@@ -1370,7 +1371,7 @@ mod tests {
         );
         insert_order(
             connection,
-            OrderId::new(),
+            OrderId::generate(),
             farm_id,
             None,
             "R-104",
@@ -1380,7 +1381,7 @@ mod tests {
         );
         insert_order(
             connection,
-            OrderId::new(),
+            OrderId::generate(),
             other_farm_id,
             Some(fulfillment_window_id),
             "R-999",
@@ -1423,9 +1424,9 @@ mod tests {
     fn order_detail_loads_items_and_context() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
-        let farm_id = FarmId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let order_id = OrderId::new();
+        let farm_id = FarmId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
+        let order_id = OrderId::generate();
 
         insert_farm(
             connection,
@@ -1502,8 +1503,8 @@ mod tests {
     fn seller_order_projections_fail_closed_for_invalid_workflow_revision() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
-        let farm_id = FarmId::new();
-        let order_id = OrderId::new();
+        let farm_id = FarmId::generate();
+        let order_id = OrderId::generate();
 
         insert_farm(
             connection,
@@ -1568,8 +1569,8 @@ mod tests {
     fn seller_order_projections_read_workflow_display_snapshot() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
-        let farm_id = FarmId::new();
-        let order_id = OrderId::new();
+        let farm_id = FarmId::generate();
+        let order_id = OrderId::generate();
 
         insert_farm(
             connection,
@@ -1649,8 +1650,8 @@ mod tests {
     fn seller_order_projections_fail_closed_for_invalid_workflow_snapshot_keys() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
-        let farm_id = FarmId::new();
-        let order_id = OrderId::new();
+        let farm_id = FarmId::generate();
+        let order_id = OrderId::generate();
 
         insert_farm(
             connection,
@@ -1718,11 +1719,11 @@ mod tests {
     fn pack_day_defaults_to_next_window_and_projects_totals_pack_list_and_roster() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
-        let farm_id = FarmId::new();
-        let next_window_id = FulfillmentWindowId::new();
-        let later_window_id = FulfillmentWindowId::new();
-        let scheduled_order_id = OrderId::new();
-        let packed_order_id = OrderId::new();
+        let farm_id = FarmId::generate();
+        let next_window_id = FulfillmentWindowId::generate();
+        let later_window_id = FulfillmentWindowId::generate();
+        let scheduled_order_id = OrderId::generate();
+        let packed_order_id = OrderId::generate();
 
         insert_farm(
             connection,
@@ -1774,7 +1775,7 @@ mod tests {
         );
         insert_order(
             connection,
-            OrderId::new(),
+            OrderId::generate(),
             farm_id,
             Some(next_window_id),
             "R-102",
@@ -1784,7 +1785,7 @@ mod tests {
         );
         insert_order(
             connection,
-            OrderId::new(),
+            OrderId::generate(),
             farm_id,
             Some(later_window_id),
             "R-200",
@@ -1862,10 +1863,10 @@ mod tests {
     fn pack_day_output_source_projects_canonical_records_without_screen_strings() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
-        let farm_id = FarmId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let scheduled_order_id = OrderId::new();
-        let packed_order_id = OrderId::new();
+        let farm_id = FarmId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
+        let scheduled_order_id = OrderId::generate();
+        let packed_order_id = OrderId::generate();
 
         insert_farm(
             connection,
@@ -1907,7 +1908,7 @@ mod tests {
         );
         insert_order(
             connection,
-            OrderId::new(),
+            OrderId::generate(),
             farm_id,
             Some(fulfillment_window_id),
             "R-102",
@@ -1996,8 +1997,8 @@ mod tests {
     fn orders_list_stays_aligned_with_today_needs_action_order_boundary() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
-        let farm_id = FarmId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let farm_id = FarmId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
 
         insert_farm(
             connection,
@@ -2019,7 +2020,7 @@ mod tests {
         for index in 0..5 {
             insert_order(
                 connection,
-                OrderId::new(),
+                OrderId::generate(),
                 farm_id,
                 Some(fulfillment_window_id),
                 &format!("R-10{index}"),
@@ -2059,7 +2060,7 @@ mod tests {
     }
 
     fn insert_farm(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         farm_id: FarmId,
         display_name: &str,
         readiness: &str,
@@ -2076,18 +2077,18 @@ mod tests {
                     created_at,
                     updated_at
                  ) values (?1, ?2, ?3, 'UTC', 'USD', ?4, ?4)",
-                params![farm_id.to_string(), display_name, readiness, created_at],
+                crate::app_sqlite_params![farm_id.to_string(), display_name, readiness, created_at],
             )
             .expect("farm insert should succeed");
     }
 
     fn insert_pickup_location(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         farm_id: FarmId,
         label: &str,
         is_default: bool,
     ) -> PickupLocationId {
-        let pickup_location_id = PickupLocationId::new();
+        let pickup_location_id = PickupLocationId::generate();
 
         connection
             .execute(
@@ -2101,7 +2102,7 @@ mod tests {
                     created_at,
                     updated_at
                  ) values (?1, ?2, ?3, '14 County Road', null, ?4, '2026-04-17T08:00:00Z', '2026-04-17T08:00:00Z')",
-                params![
+                crate::app_sqlite_params![
                     pickup_location_id.to_string(),
                     farm_id.to_string(),
                     label,
@@ -2113,8 +2114,9 @@ mod tests {
         pickup_location_id
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn insert_window(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         fulfillment_window_id: FulfillmentWindowId,
         farm_id: FarmId,
         pickup_location_id: Option<PickupLocationId>,
@@ -2137,7 +2139,7 @@ mod tests {
                     label,
                     order_cutoff_at
                  ) values (?1, ?2, ?3, ?4, null, ?3, ?3, ?5, ?6, ?7)",
-                params![
+                crate::app_sqlite_params![
                     fulfillment_window_id.to_string(),
                     farm_id.to_string(),
                     starts_at,
@@ -2150,8 +2152,9 @@ mod tests {
             .expect("fulfillment window insert should succeed");
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn insert_order(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         order_id: OrderId,
         farm_id: FarmId,
         fulfillment_window_id: Option<FulfillmentWindowId>,
@@ -2171,7 +2174,7 @@ mod tests {
                     status,
                     updated_at
                  ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
+                crate::app_sqlite_params![
                     order_id.to_string(),
                     farm_id.to_string(),
                     fulfillment_window_id.map(|id| id.to_string()),
@@ -2185,20 +2188,20 @@ mod tests {
     }
 
     fn set_order_workflow_revision(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         order_id: OrderId,
         workflow_revision: &str,
     ) {
         connection
             .execute(
                 "update orders set workflow_revision = ?1 where id = ?2",
-                params![workflow_revision, order_id.to_string()],
+                crate::app_sqlite_params![workflow_revision, order_id.to_string()],
             )
             .expect("order workflow revision update should succeed");
     }
 
     fn corrupt_order_workflow_revision(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         order_id: OrderId,
         workflow_revision: &str,
     ) {
@@ -2212,7 +2215,7 @@ mod tests {
     }
 
     fn set_order_workflow_display_projection(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         order_id: OrderId,
         agreement: &str,
         inventory: &str,
@@ -2227,7 +2230,7 @@ mod tests {
                      workflow_provenance_source = ?3,
                      workflow_provenance_last_event_id = ?4
                  where id = ?5",
-                params![
+                crate::app_sqlite_params![
                     agreement,
                     inventory,
                     provenance_source,
@@ -2239,7 +2242,7 @@ mod tests {
     }
 
     fn corrupt_order_workflow_display_projection(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         order_id: OrderId,
         column: &str,
         value: &str,
@@ -2256,7 +2259,10 @@ mod tests {
             _ => panic!("unsupported workflow display projection column {column}"),
         };
         connection
-            .execute(statement, params![value, order_id.to_string()])
+            .execute(
+                statement,
+                crate::app_sqlite_params![value, order_id.to_string()],
+            )
             .expect("order workflow display projection corruption should succeed");
         connection
             .execute_batch("pragma ignore_check_constraints = off")
@@ -2273,8 +2279,9 @@ mod tests {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn insert_order_line(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         line_id: &str,
         order_id: OrderId,
         title: &str,
@@ -2296,7 +2303,7 @@ mod tests {
                     price_currency,
                     sort_index
                  ) values (?1, ?2, ?3, ?4, ?5, ?6, 650, 'USD', ?7)",
-                params![
+                crate::app_sqlite_params![
                     line_id,
                     order_id.to_string(),
                     title,

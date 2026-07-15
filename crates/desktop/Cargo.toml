@@ -42,6 +42,7 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+radroots_studio_app_sqlite = { workspace = true, features = ["test-support"] }
 tracing-subscriber.workspace = true
 
 [lints]

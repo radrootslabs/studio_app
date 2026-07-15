@@ -1,4 +1,6 @@
-use rusqlite::{Connection, OptionalExtension, params};
+use sqlx::Row;
+
+use crate::{AppSqliteDatabase, OptionalSqliteResult};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -111,11 +113,11 @@ pub struct AppSdkStoredWorkflowReceipt {
 }
 
 pub struct AppSdkWorkflowReceiptRepository<'a> {
-    connection: &'a Connection,
+    connection: &'a AppSqliteDatabase,
 }
 
 impl<'a> AppSdkWorkflowReceiptRepository<'a> {
-    pub const fn new(connection: &'a Connection) -> Self {
+    pub(crate) const fn new(connection: &'a AppSqliteDatabase) -> Self {
         Self { connection }
     }
 
@@ -164,7 +166,7 @@ impl<'a> AppSdkWorkflowReceiptRepository<'a> {
                     workflow_state = excluded.workflow_state,
                     updated_at = excluded.updated_at,
                     detail_json = excluded.detail_json",
-                params![
+                crate::app_sqlite_params![
                     receipt_id,
                     input.source_kind.storage_key(),
                     input.source_record_id.as_str(),
@@ -213,7 +215,7 @@ impl<'a> AppSdkWorkflowReceiptRepository<'a> {
                  WHERE source_kind = ?1
                     AND source_record_id = ?2
                  LIMIT 1",
-                params![source_kind.storage_key(), source_record_id],
+                crate::app_sqlite_params![source_kind.storage_key(), source_record_id],
                 decode_receipt_row,
             )
             .optional()
@@ -224,30 +226,32 @@ impl<'a> AppSdkWorkflowReceiptRepository<'a> {
     }
 }
 
-fn decode_receipt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AppSdkStoredWorkflowReceipt> {
-    let source_kind: String = row.get(1)?;
-    let outbox_ids_json: String = row.get(4)?;
-    let workflow_state: String = row.get(8)?;
-    let detail_json: String = row.get(11)?;
+fn decode_receipt_row(
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<AppSdkStoredWorkflowReceipt, sqlx::Error> {
+    let source_kind: String = row.try_get(1)?;
+    let outbox_ids_json: String = row.try_get(4)?;
+    let workflow_state: String = row.try_get(8)?;
+    let detail_json: String = row.try_get(11)?;
     Ok(AppSdkStoredWorkflowReceipt {
-        id: row.get(0)?,
+        id: row.try_get(0)?,
         source_kind: AppSdkWorkflowReceiptSourceKind::parse(source_kind.as_str())
             .map_err(decode_app_error)?,
-        source_record_id: row.get(2)?,
-        sdk_operation_kind: row.get(3)?,
+        source_record_id: row.try_get(2)?,
+        sdk_operation_kind: row.try_get(3)?,
         sdk_outbox_event_ids: serde_json::from_str(outbox_ids_json.as_str()).map_err(|source| {
             decode_app_error(AppSqliteError::DecodeJson {
                 field: "app_sdk_workflow_receipts.sdk_outbox_event_ids_json",
                 source,
             })
         })?,
-        expected_event_id: row.get(5)?,
-        actor_pubkey: row.get(6)?,
-        idempotency_digest_prefix: row.get(7)?,
+        expected_event_id: row.try_get(5)?,
+        actor_pubkey: row.try_get(6)?,
+        idempotency_digest_prefix: row.try_get(7)?,
         workflow_state: AppSdkWorkflowReceiptState::parse(workflow_state.as_str())
             .map_err(decode_app_error)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        created_at: row.try_get(9)?,
+        updated_at: row.try_get(10)?,
         detail_json: serde_json::from_str(detail_json.as_str()).map_err(|source| {
             decode_app_error(AppSqliteError::DecodeJson {
                 field: "app_sdk_workflow_receipts.detail_json",
@@ -257,8 +261,8 @@ fn decode_receipt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AppSdkStoredW
     })
 }
 
-fn decode_app_error(error: AppSqliteError) -> rusqlite::Error {
-    rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
+fn decode_app_error(error: AppSqliteError) -> sqlx::Error {
+    sqlx::Error::Decode(Box::new(error))
 }
 
 #[cfg(test)]

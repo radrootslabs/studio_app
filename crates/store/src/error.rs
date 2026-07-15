@@ -16,28 +16,28 @@ pub enum AppSqliteError {
     OpenPath {
         path: PathBuf,
         #[source]
-        source: rusqlite::Error,
+        source: sqlx::Error,
     },
     #[error("failed to open in-memory sqlite database")]
     OpenInMemory {
         #[source]
-        source: rusqlite::Error,
+        source: sqlx::Error,
     },
     #[error("failed to configure sqlite busy timeout")]
     ConfigureBusyTimeout {
         #[source]
-        source: rusqlite::Error,
+        source: sqlx::Error,
     },
     #[error("failed to apply sqlite pragma `{pragma}`")]
     ApplyPragma {
         pragma: &'static str,
         #[source]
-        source: rusqlite::Error,
+        source: sqlx::Error,
     },
     #[error("failed to read sqlite schema version")]
     ReadSchemaVersion {
         #[source]
-        source: rusqlite::Error,
+        source: sqlx::Error,
     },
     #[error(
         "sqlite schema version {current} is newer than supported version {latest}; manual migration is required"
@@ -47,31 +47,31 @@ pub enum AppSqliteError {
     BeginMigration {
         version: u32,
         #[source]
-        source: rusqlite::Error,
+        source: sqlx::Error,
     },
     #[error("failed to execute sqlite migration {version}")]
     ExecuteMigration {
         version: u32,
         #[source]
-        source: rusqlite::Error,
+        source: sqlx::Error,
     },
     #[error("failed to record sqlite schema version {version}")]
     RecordSchemaVersion {
         version: u32,
         #[source]
-        source: rusqlite::Error,
+        source: sqlx::Error,
     },
     #[error("failed to commit sqlite migration {version}")]
     CommitMigration {
         version: u32,
         #[source]
-        source: rusqlite::Error,
+        source: sqlx::Error,
     },
     #[error("failed to execute sqlite query for {operation}")]
     Query {
         operation: &'static str,
         #[source]
-        source: rusqlite::Error,
+        source: sqlx::Error,
     },
     #[error("failed to encode sqlite JSON column `{field}`")]
     EncodeJson {

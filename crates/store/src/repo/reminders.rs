@@ -3,18 +3,20 @@ use radroots_studio_app_view::{
     ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
     ReminderUrgency,
 };
-use rusqlite::{Connection, params};
+use sqlx::Row;
+
+use crate::AppSqliteDatabase;
 use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::AppSqliteError;
 
 pub struct AppRemindersRepository<'a> {
-    connection: &'a Connection,
+    connection: &'a AppSqliteDatabase,
 }
 
 impl<'a> AppRemindersRepository<'a> {
-    pub const fn new(connection: &'a Connection) -> Self {
+    pub(crate) const fn new(connection: &'a AppSqliteDatabase) -> Self {
         Self { connection }
     }
 
@@ -47,21 +49,24 @@ impl<'a> AppRemindersRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map(params![account_id, farm_id.to_string()], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, Option<String>>(9)?,
-                    row.get::<_, String>(10)?,
-                ))
-            })
+            .query_map(
+                crate::app_sqlite_params![account_id, farm_id.to_string()],
+                |row| {
+                    Ok((
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<Option<String>, _>(1)?,
+                        row.try_get::<Option<String>, _>(2)?,
+                        row.try_get::<String, _>(3)?,
+                        row.try_get::<String, _>(4)?,
+                        row.try_get::<String, _>(5)?,
+                        row.try_get::<String, _>(6)?,
+                        row.try_get::<String, _>(7)?,
+                        row.try_get::<String, _>(8)?,
+                        row.try_get::<Option<String>, _>(9)?,
+                        row.try_get::<String, _>(10)?,
+                    ))
+                },
+            )
             .map_err(|source| AppSqliteError::Query {
                 operation: "query reminder schedule",
                 source,
@@ -125,26 +130,26 @@ impl<'a> AppRemindersRepository<'a> {
         projection: &ReminderFeedProjection,
         log_entries: &[ReminderLogEntryProjection],
     ) -> Result<(), AppSqliteError> {
-        let transaction =
-            self.connection
-                .unchecked_transaction()
-                .map_err(|source| AppSqliteError::Query {
-                    operation: "begin reminder schedule replacement",
-                    source,
-                })?;
-
-        transaction
-            .execute(
-                "DELETE FROM reminder_schedules WHERE account_id = ?1 AND farm_id = ?2",
-                params![account_id, farm_id.to_string()],
-            )
+        self.connection
+            .execute_batch("BEGIN IMMEDIATE")
             .map_err(|source| AppSqliteError::Query {
-                operation: "clear reminder schedule",
+                operation: "begin reminder schedule replacement",
                 source,
             })?;
 
-        {
-            let mut statement = transaction
+        let result = (|| -> Result<(), AppSqliteError> {
+            self.connection
+                .execute(
+                    "DELETE FROM reminder_schedules WHERE account_id = ?1 AND farm_id = ?2",
+                    crate::app_sqlite_params![account_id, farm_id.to_string()],
+                )
+                .map_err(|source| AppSqliteError::Query {
+                    operation: "clear reminder schedule",
+                    source,
+                })?;
+
+            let mut statement = self
+                .connection
                 .prepare(
                     "INSERT INTO reminder_schedules (
                         reminder_id,
@@ -169,7 +174,7 @@ impl<'a> AppRemindersRepository<'a> {
 
             for reminder in &projection.items {
                 statement
-                    .execute(params![
+                    .execute(crate::app_sqlite_params![
                         reminder.reminder_id.to_string(),
                         account_id,
                         reminder.farm_id.to_string(),
@@ -191,14 +196,13 @@ impl<'a> AppRemindersRepository<'a> {
                         source,
                     })?;
             }
-        }
 
-        for entry in log_entries {
-            let log_entry_id = Uuid::now_v7().to_string();
+            for entry in log_entries {
+                let log_entry_id = Uuid::now_v7().to_string();
 
-            transaction
-                .execute(
-                    "INSERT INTO reminder_log_entries (
+                self.connection
+                    .execute(
+                        "INSERT INTO reminder_log_entries (
                         log_entry_id,
                         account_id,
                         farm_id,
@@ -209,26 +213,34 @@ impl<'a> AppRemindersRepository<'a> {
                         delivery_state,
                         detail
                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                    params![
-                        log_entry_id,
-                        account_id,
-                        farm_id.to_string(),
-                        entry.reminder_id.to_string(),
-                        entry.kind.storage_key(),
-                        entry.title,
-                        entry.recorded_at,
-                        entry.delivery_state.storage_key(),
-                        entry.detail,
-                    ],
-                )
-                .map_err(|source| AppSqliteError::Query {
-                    operation: "record reminder log entry",
-                    source,
-                })?;
+                        crate::app_sqlite_params![
+                            log_entry_id,
+                            account_id,
+                            farm_id.to_string(),
+                            entry.reminder_id.to_string(),
+                            entry.kind.storage_key(),
+                            entry.title,
+                            entry.recorded_at,
+                            entry.delivery_state.storage_key(),
+                            entry.detail,
+                        ],
+                    )
+                    .map_err(|source| AppSqliteError::Query {
+                        operation: "record reminder log entry",
+                        source,
+                    })?;
+            }
+
+            Ok(())
+        })();
+
+        if let Err(error) = result {
+            let _ = self.connection.execute_batch("ROLLBACK");
+            return Err(error);
         }
 
-        transaction
-            .commit()
+        self.connection
+            .execute_batch("COMMIT")
             .map_err(|source| AppSqliteError::Query {
                 operation: "commit reminder schedule replacement",
                 source,
@@ -258,7 +270,7 @@ impl<'a> AppRemindersRepository<'a> {
                     delivery_state,
                     detail
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                params![
+                crate::app_sqlite_params![
                     log_entry_id,
                     account_id,
                     farm_id.to_string(),
@@ -305,15 +317,15 @@ impl<'a> AppRemindersRepository<'a> {
             })?;
         let rows = statement
             .query_map(
-                params![account_id, farm_id.to_string(), limit as i64],
+                crate::app_sqlite_params![account_id, farm_id.to_string(), limit as i64],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, Option<String>>(5)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
+                        row.try_get::<String, _>(3)?,
+                        row.try_get::<String, _>(4)?,
+                        row.try_get::<Option<String>, _>(5)?,
                     ))
                 },
             )
@@ -425,11 +437,11 @@ mod tests {
     fn reminder_schedule_round_trips_and_is_account_scoped() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let repository = AppRemindersRepository::new(store.connection());
-        let farm_id = FarmId::new();
-        let other_farm_id = FarmId::new();
-        let order_id = OrderId::new();
+        let farm_id = FarmId::generate();
+        let other_farm_id = FarmId::generate();
+        let order_id = OrderId::generate();
         let reminder = ReminderDeadlineProjection {
-            reminder_id: ReminderId::new(),
+            reminder_id: ReminderId::generate(),
             farm_id,
             order_id: Some(order_id),
             fulfillment_window_id: None,
@@ -482,9 +494,9 @@ mod tests {
     fn reminder_log_records_and_loads_recent_entries() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let repository = AppRemindersRepository::new(store.connection());
-        let farm_id = FarmId::new();
-        let first_reminder_id = ReminderId::new();
-        let second_reminder_id = ReminderId::new();
+        let farm_id = FarmId::generate();
+        let first_reminder_id = ReminderId::generate();
+        let second_reminder_id = ReminderId::generate();
 
         repository
             .record_reminder_log_entry(

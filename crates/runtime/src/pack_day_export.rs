@@ -87,7 +87,7 @@ pub fn prepare_pack_day_export_bundle_at_data_root(
         .collect::<Vec<_>>();
     let bundle = PackDayExportBundle {
         fulfillment_window_id: source.fulfillment_window.fulfillment_window_id,
-        export_instance_id: PackDayExportInstanceId::new(),
+        export_instance_id: PackDayExportInstanceId::generate(),
         generated_at_utc: generated_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         bundle_directory: bundle_directory.to_string_lossy().into_owned(),
         artifacts,
@@ -413,8 +413,8 @@ mod tests {
     }
 
     fn sample_source() -> PackDayOutputSource {
-        let farm_id = FarmId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let farm_id = FarmId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
         PackDayOutputSource {
             fulfillment_window: PackDayOutputWindow {
                 fulfillment_window_id,
@@ -436,7 +436,7 @@ mod tests {
             ],
             pack_list: vec![
                 PackDayOutputPackListEntry {
-                    order_id: OrderId::new(),
+                    order_id: OrderId::generate(),
                     order_number: "R-1001".to_owned(),
                     customer_display_name: "Casey".to_owned(),
                     order_state: PackDayOutputOrderState::Scheduled,
@@ -444,7 +444,7 @@ mod tests {
                     quantity: PackDayOutputQuantity::new(2, "bags"),
                 },
                 PackDayOutputPackListEntry {
-                    order_id: OrderId::new(),
+                    order_id: OrderId::generate(),
                     order_number: "R-1002".to_owned(),
                     customer_display_name: "Taylor".to_owned(),
                     order_state: PackDayOutputOrderState::Packed,
@@ -454,13 +454,13 @@ mod tests {
             ],
             pickup_roster: vec![
                 PackDayOutputCustomerOrder {
-                    order_id: OrderId::new(),
+                    order_id: OrderId::generate(),
                     order_number: "R-1001".to_owned(),
                     customer_display_name: "Casey".to_owned(),
                     order_state: PackDayOutputOrderState::Scheduled,
                 },
                 PackDayOutputCustomerOrder {
-                    order_id: OrderId::new(),
+                    order_id: OrderId::generate(),
                     order_number: "R-1002".to_owned(),
                     customer_display_name: "Taylor".to_owned(),
                     order_state: PackDayOutputOrderState::Packed,

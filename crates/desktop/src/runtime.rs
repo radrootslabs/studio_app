@@ -58,7 +58,7 @@ use radroots_sdk::{
     TRADE_REVISION_DECISION_OPERATION_KIND, TRADE_REVISION_PROPOSAL_OPERATION_KIND,
     TRADE_SUBMIT_OPERATION_KIND, TargetSet,
 };
-use radroots_sql_core::SqliteExecutor;
+use radroots_sql_core::SqlxSqliteExecutor;
 use radroots_studio_app_core::{
     AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
     AppRuntimePathsError, AppRuntimeSnapshot, AppSdkConfig, AppSdkDiagnostics,
@@ -75,10 +75,11 @@ use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
 };
 use radroots_studio_app_sqlite::{
-    APP_ACTIVITY_CONTEXT_LIMIT, AppLocalInteropImportReport, AppSdkWorkflowReceiptInput,
-    AppSdkWorkflowReceiptSourceKind, AppSdkWorkflowReceiptState, AppSqliteError, AppSqliteStore,
-    BuyerOrderRuntimeStoreExport, BuyerOrderRuntimeStoreLine, BuyerRepeatDemandApplyOutcome,
-    DatabaseTarget, SelectedBuyerOrderScope, SellerOrderDecisionExport, StoredPendingSyncOperation,
+    APP_ACTIVITY_CONTEXT_LIMIT, AppLocalInteropImportReport, AppRelayIngestFailureInput,
+    AppRelayIngestSuccessInput, AppSdkWorkflowReceiptInput, AppSdkWorkflowReceiptSourceKind,
+    AppSdkWorkflowReceiptState, AppSqliteError, AppSqliteStore, BuyerOrderRuntimeStoreExport,
+    BuyerOrderRuntimeStoreLine, BuyerRepeatDemandApplyOutcome, DatabaseTarget,
+    SelectedBuyerOrderScope, SellerOrderDecisionExport, StoredPendingSyncOperation,
     StoredRelayIngestCursor, StoredSyncConflict, derive_farm_rules_readiness,
     projected_order_id_from_trade_request,
 };
@@ -4220,27 +4221,27 @@ impl DesktopAppRuntimeState {
                 .map_or(started_unix_seconds, |last_event_created_at| {
                     started_unix_seconds.max(last_event_created_at)
                 });
-            sqlite_store.record_relay_ingest_success(
-                APP_DIRECT_RELAY_INGEST_SCOPE_KEY,
-                relay.relay_url.as_str(),
+            sqlite_store.record_relay_ingest_success(AppRelayIngestSuccessInput {
+                scope_key: APP_DIRECT_RELAY_INGEST_SCOPE_KEY,
+                relay_url: relay.relay_url.as_str(),
                 cursor_since_unix_seconds,
-                relay.last_event_created_at_unix_seconds,
+                last_event_created_at_unix_seconds: relay.last_event_created_at_unix_seconds,
                 started_at,
                 started_unix_seconds,
                 completed_at,
                 completed_unix_seconds,
-            )?;
+            })?;
         }
         for failure in &receipt.failed_relays {
-            sqlite_store.record_relay_ingest_failure(
-                APP_DIRECT_RELAY_INGEST_SCOPE_KEY,
-                failure.relay_url.as_str(),
+            sqlite_store.record_relay_ingest_failure(AppRelayIngestFailureInput {
+                scope_key: APP_DIRECT_RELAY_INGEST_SCOPE_KEY,
+                relay_url: failure.relay_url.as_str(),
                 started_at,
                 started_unix_seconds,
                 completed_at,
                 completed_unix_seconds,
-                failure.error.as_str(),
-            )?;
+                error_message: failure.error.as_str(),
+            })?;
         }
 
         Ok(())
@@ -5910,7 +5911,7 @@ impl DesktopAppRuntimeState {
 
     fn open_shared_runtime_store_store(
         &self,
-    ) -> Result<Option<RuntimeStore<SqliteExecutor>>, AppSqliteError> {
+    ) -> Result<Option<RuntimeStore<SqlxSqliteExecutor>>, AppSqliteError> {
         let Some(shared_accounts_paths) = self.shared_accounts_paths.as_ref() else {
             return Ok(None);
         };
@@ -5925,7 +5926,7 @@ impl DesktopAppRuntimeState {
                 source,
             })?;
         }
-        let executor = SqliteExecutor::open(database_path.as_path()).map_err(|source| {
+        let executor = SqlxSqliteExecutor::open(database_path.as_path()).map_err(|source| {
             AppSqliteError::RuntimeStoreSql {
                 operation: "open shared runtime store database",
                 source,
@@ -6246,7 +6247,7 @@ impl DesktopAppRuntimeState {
                 source,
             })?;
         }
-        let executor = SqliteExecutor::open(database_path.as_path()).map_err(|source| {
+        let executor = SqlxSqliteExecutor::open(database_path.as_path()).map_err(|source| {
             AppSqliteError::RuntimeStoreSql {
                 operation: "open shared runtime store database",
                 source,
@@ -6289,7 +6290,7 @@ impl DesktopAppRuntimeState {
                 source,
             })?;
         }
-        let executor = SqliteExecutor::open(database_path.as_path()).map_err(|source| {
+        let executor = SqlxSqliteExecutor::open(database_path.as_path()).map_err(|source| {
             AppSqliteError::RuntimeStoreSql {
                 operation: "open shared runtime store database",
                 source,
@@ -9880,7 +9881,7 @@ mod tests {
         TRADE_DECISION_OPERATION_KIND, TRADE_REVISION_DECISION_OPERATION_KIND,
         TRADE_SUBMIT_OPERATION_KIND,
     };
-    use radroots_sql_core::{SqlExecutor, SqliteExecutor};
+    use radroots_sql_core::{SqlExecutor, SqlxSqliteExecutor};
     use radroots_studio_app_core::{
         AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePlatform,
         AppSdkLifecycleState, AppSdkProjectionLifecycleState, AppSdkPublicFarmLocation,
@@ -10169,8 +10170,8 @@ mod tests {
         farm_pubkey: String,
         source: &str,
     ) -> AppPublishPayload {
-        let farm_id = FarmId::new();
-        let product_id = ProductId::new();
+        let farm_id = FarmId::generate();
+        let product_id = ProductId::generate();
         AppPublishPayload::Listing(AppListingPublishPayload {
             context: AppPublishContext::new(account_id.to_owned(), source),
             product_id,
@@ -10185,7 +10186,7 @@ mod tests {
             price_minor_units: Some(750),
             price_currency: "USD".to_owned(),
             stock_quantity: Some(12),
-            availability_window_id: Some(FulfillmentWindowId::new()),
+            availability_window_id: Some(FulfillmentWindowId::generate()),
             availability_starts_at: Some("2099-05-25T14:00:00Z".to_owned()),
             availability_ends_at: Some("2099-05-25T18:00:00Z".to_owned()),
             fulfillment_method: Some("pickup".to_owned()),
@@ -10463,7 +10464,7 @@ mod tests {
         let account_id = manager
             .generate_identity(Some("Farmer".to_owned()), true)
             .expect("local signing account should generate");
-        let farm_id = FarmId::new();
+        let farm_id = FarmId::generate();
         let payload = AppPublishPayload::FarmProfile(AppFarmProfilePublishPayload {
             context: AppPublishContext::new(account_id.to_string(), "farm_setup")
                 .with_source_local_event_id("app:local_work:farm:direct"),
@@ -10538,13 +10539,13 @@ mod tests {
             .expect("buyer signer lookup should succeed")
             .expect("buyer account should have local signer");
         let seller_identity = RadrootsIdentity::generate();
-        let product_id = ProductId::new();
-        let order_id = OrderId::new();
+        let product_id = ProductId::generate();
+        let order_id = OrderId::generate();
         let listing_event_id = "1".repeat(64);
         let listing_addr = format!(
             "30402:{}:{}",
             seller_identity.public_key_hex(),
-            super::d_tag_from_uuid(ProductId::new().as_uuid())
+            super::d_tag_from_uuid(ProductId::generate().as_uuid())
         );
         let order_document = RadrootsOrderRequest {
             order_id: test_order_id(order_id.to_string().as_str()),
@@ -10584,7 +10585,7 @@ mod tests {
             context: AppPublishContext::new(account_id.to_string(), "place_personal_order")
                 .with_source_local_event_id("app:local_work:order_request:direct"),
             order_id,
-            farm_id: FarmId::new(),
+            farm_id: FarmId::generate(),
             status: Some("needs_action".to_owned()),
             order_document_json: Some(json!({"document": {"order": order_document}})),
             listing_addr: Some(listing_addr),
@@ -10633,8 +10634,8 @@ mod tests {
         let buyer_pubkey = "1111111111111111111111111111111111111111111111111111111111111111";
         let payload = AppPublishPayload::OrderDecision(AppOrderDecisionPublishPayload {
             context: AppPublishContext::new(account_id.to_string(), "seller_order_decision"),
-            app_order_id: OrderId::new(),
-            farm_id: FarmId::new(),
+            app_order_id: OrderId::generate(),
+            farm_id: FarmId::generate(),
             trade_order_id: "order-1".to_owned(),
             request_event_id: test_event_id_seed("order-request-event-1"),
             listing_event_id: Some(test_event_id_seed("listing-event-1")),
@@ -10685,8 +10686,8 @@ mod tests {
             .get_signing_identity(&seller_account_id)
             .expect("seller signer lookup should succeed")
             .expect("seller account should have local signer");
-        let app_order_id = OrderId::new();
-        let farm_id = FarmId::new();
+        let app_order_id = OrderId::generate();
+        let farm_id = FarmId::generate();
         let listing_addr = format!(
             "30402:{}:AAAAAAAAAAAAAAAAAAAAAg",
             seller_identity.public_key_hex()
@@ -10908,8 +10909,8 @@ mod tests {
             .expect("seller signing lookup should succeed")
             .expect("seller account should have local signer");
         let seller_pubkey = identity.public_key_hex();
-        let farm_id = FarmId::new();
-        let product_id = ProductId::new();
+        let farm_id = FarmId::generate();
+        let product_id = ProductId::generate();
         let listing_d_tag = super::d_tag_from_uuid(product_id.as_uuid());
         let projected_product_id = deterministic_cli_listing_product_id(
             Some(seller_pubkey.as_str()),
@@ -10929,7 +10930,7 @@ mod tests {
             price_minor_units: Some(450),
             price_currency: "USD".to_owned(),
             stock_quantity: Some(6),
-            availability_window_id: Some(FulfillmentWindowId::new()),
+            availability_window_id: Some(FulfillmentWindowId::generate()),
             availability_starts_at: Some("2099-04-25T14:00:00Z".to_owned()),
             availability_ends_at: Some("2099-04-25T18:00:00Z".to_owned()),
             fulfillment_method: Some("pickup".to_owned()),
@@ -11117,7 +11118,7 @@ mod tests {
             .account
             .account_id
             .clone();
-        let pending_farm_id = FarmId::new();
+        let pending_farm_id = FarmId::generate();
         runtime
             .lock_state_mut()
             .enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
@@ -11220,7 +11221,7 @@ mod tests {
             PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
                 .expect("typed listing publish work should serialize");
         let unsupported_operation = PendingSyncOperation::new(
-            SyncAggregateRef::Product(ProductId::new()),
+            SyncAggregateRef::Product(ProductId::generate()),
             SyncOperationKind::Delete,
             "{}",
             "2026-05-24T12:01:00Z",
@@ -11316,8 +11317,8 @@ mod tests {
         let seller_pubkey = "2222222222222222222222222222222222222222222222222222222222222222";
         let payload = AppPublishPayload::OrderRequest(AppOrderRequestPublishPayload {
             context: AppPublishContext::new(account_id.to_string(), "order_missing_listing_relay"),
-            order_id: OrderId::new(),
-            farm_id: FarmId::new(),
+            order_id: OrderId::generate(),
+            farm_id: FarmId::generate(),
             status: Some("needs_action".to_owned()),
             order_document_json: Some(json!({"document": {"order": {}}})),
             listing_addr: Some(format!("30402:{seller_pubkey}:listing-key")),
@@ -11326,7 +11327,7 @@ mod tests {
             buyer_pubkey: Some(identity.public_key_hex()),
             seller_pubkey: Some(seller_pubkey.to_owned()),
             items: vec![AppOrderRequestItemPayload {
-                product_id: ProductId::new(),
+                product_id: ProductId::generate(),
                 quantity: 1,
             }],
             currency_code: Some("USD".to_owned()),
@@ -11390,7 +11391,7 @@ mod tests {
     fn runtime_direct_relay_transport_rejects_missing_account_publish_work() {
         let relay = ThreadedAckRelay::spawn();
         let manager = RadrootsNostrAccountsManager::new_in_memory();
-        let farm_id = FarmId::new();
+        let farm_id = FarmId::generate();
         let missing_account_id = RadrootsIdentity::generate().id();
         let payload = AppPublishPayload::FarmProfile(AppFarmProfilePublishPayload {
             context: AppPublishContext::new(missing_account_id.to_string(), "farm_setup"),
@@ -11426,7 +11427,7 @@ mod tests {
             .expect("watch-only account");
         let payload = AppPublishPayload::FarmProfile(AppFarmProfilePublishPayload {
             context: AppPublishContext::new(account_id.to_string(), "farm_setup"),
-            farm_id: FarmId::new(),
+            farm_id: FarmId::generate(),
             display_name: "North field farm".to_owned(),
             readiness: Some(FarmReadiness::Ready),
         });
@@ -11472,7 +11473,7 @@ mod tests {
             .expect("mismatched secret");
         let payload = AppPublishPayload::FarmProfile(AppFarmProfilePublishPayload {
             context: AppPublishContext::new(account_id.to_string(), "farm_setup"),
-            farm_id: FarmId::new(),
+            farm_id: FarmId::generate(),
             display_name: "North field farm".to_owned(),
             readiness: Some(FarmReadiness::Ready),
         });
@@ -11811,8 +11812,8 @@ mod tests {
     fn runtime_product_publishable_save_enqueues_typed_listing_publish_work() {
         let (runtime, paths) = bootstrapped_runtime("publishable_product_listing_work");
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
-        let pickup_location_id = PickupLocationId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let pickup_location_id = PickupLocationId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
 
         runtime
             .save_farm_rules_projection(FarmRulesProjection {
@@ -11958,8 +11959,8 @@ mod tests {
     fn runtime_product_publishable_save_returns_error_when_sdk_listing_enqueue_fails() {
         let (runtime, paths) = bootstrapped_runtime("publishable_product_listing_sdk_failure");
         let (_account_id, farm_id) = provision_ready_farmer_account(&runtime);
-        let pickup_location_id = PickupLocationId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let pickup_location_id = PickupLocationId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
 
         runtime
             .save_farm_rules_projection(FarmRulesProjection {
@@ -12128,8 +12129,8 @@ mod tests {
     fn runtime_product_stock_update_retries_sdk_listing_enqueue_after_local_save() {
         let (runtime, paths) = bootstrapped_runtime("stock_listing_sdk_retry");
         let (_account_id, farm_id) = provision_ready_farmer_account(&runtime);
-        let pickup_location_id = PickupLocationId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let pickup_location_id = PickupLocationId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
 
         runtime
             .save_farm_rules_projection(FarmRulesProjection {
@@ -12275,9 +12276,9 @@ mod tests {
     fn runtime_product_stale_availability_save_records_blocker_without_publish_work() {
         let (runtime, paths) = bootstrapped_runtime("stale_product_listing_work");
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
-        let pickup_location_id = PickupLocationId::new();
-        let active_window_id = FulfillmentWindowId::new();
-        let stale_window_id = FulfillmentWindowId::new();
+        let pickup_location_id = PickupLocationId::generate();
+        let active_window_id = FulfillmentWindowId::generate();
+        let stale_window_id = FulfillmentWindowId::generate();
 
         runtime
             .save_farm_rules_projection(FarmRulesProjection {
@@ -12335,8 +12336,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .execute_test_sql("PRAGMA foreign_keys = OFF;")
             .expect("foreign keys should disable for stale fixture");
         let save_result = runtime.save_product_editor_draft(ProductEditorDraft {
             title: "Salad mix".to_owned(),
@@ -12354,8 +12354,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch("PRAGMA foreign_keys = ON;")
+            .execute_test_sql("PRAGMA foreign_keys = ON;")
             .expect("foreign keys should restore");
         assert!(save_result.expect("stale product editor save should succeed"));
 
@@ -12586,7 +12585,7 @@ mod tests {
     fn runtime_partial_sync_result_dequeues_successful_prefix_only() {
         let runtime = memory_runtime();
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
-        let product_id = ProductId::new();
+        let product_id = ProductId::generate();
         runtime
             .lock_state_mut()
             .enqueue_selected_account_sync_operations(vec![
@@ -13257,8 +13256,8 @@ mod tests {
         let database_path = paths
             .shared_runtime_store_database_path()
             .expect("shared runtime store path");
-        let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let executor = SqlxSqliteExecutor::open(database_path.as_path())
+            .expect("open shared runtime store db");
         let store = RuntimeStore::new(executor);
         store.migrate_up().expect("migrate shared runtime store");
         store
@@ -13299,7 +13298,7 @@ mod tests {
     #[test]
     fn runtime_app_local_work_without_resolved_pubkey_is_non_exportable() {
         let (runtime, paths) = bootstrapped_runtime("app_local_work_unresolved_pubkey");
-        let farm_id = FarmId::new();
+        let farm_id = FarmId::generate();
         let account = SelectedAccountProjection::new(
             AccountSummary {
                 account_id: "acct_unresolved".to_owned(),
@@ -13329,7 +13328,7 @@ mod tests {
                 .expect("unresolved farm local work should append");
             state
                 .append_app_listing_local_work_record(
-                    ProductId::new(),
+                    ProductId::generate(),
                     &ProductEditorDraft {
                         title: "Eggs".to_owned(),
                         subtitle: "Fresh eggs".to_owned(),
@@ -14086,8 +14085,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&format!(
+            .execute_test_sql(&format!(
                 "update products
                  set availability_window_id = '{fulfillment_window_id}'
                  where id = '{product_id}'"
@@ -14200,8 +14198,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&format!(
+            .execute_test_sql(&format!(
                 "update orders
                  set status = 'packed', updated_at = '2026-04-20T09:45:00Z'
                  where id = '{order_id}' and farm_id = '{farm_id}'"
@@ -14252,7 +14249,7 @@ mod tests {
         );
         let mut persisted_state = runtime.lock_state().state_store.persisted_state().clone();
         persisted_state.seller.orders_query.fulfillment_window_id =
-            Some(FulfillmentWindowId::new());
+            Some(FulfillmentWindowId::generate());
         let mut repository =
             FileBackedAppStateRepository::new(paths.app.data.join(APP_STATE_FILE_NAME));
         repository
@@ -14287,7 +14284,7 @@ mod tests {
 
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
         let mut persisted_state = runtime.lock_state().state_store.persisted_state().clone();
-        let stale_fulfillment_window_id = FulfillmentWindowId::new();
+        let stale_fulfillment_window_id = FulfillmentWindowId::generate();
         persisted_state.seller.pack_day_query.fulfillment_window_id =
             Some(stale_fulfillment_window_id);
         let mut repository =
@@ -14346,12 +14343,12 @@ mod tests {
         let cloned_runtime = runtime.clone();
         let today_agenda = TodayAgendaProjection {
             farm: Some(FarmSummary {
-                farm_id: radroots_studio_app_view::FarmId::new(),
+                farm_id: radroots_studio_app_view::FarmId::generate(),
                 display_name: "North field farm".to_owned(),
                 readiness: FarmReadiness::Incomplete,
             }),
             summary: Some(TodaySummary {
-                farm_id: radroots_studio_app_view::FarmId::new(),
+                farm_id: radroots_studio_app_view::FarmId::generate(),
                 orders_needing_action: 2,
                 low_stock_products: 1,
                 draft_products: 3,
@@ -14546,8 +14543,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch("DROP TABLE activity_events")
+            .execute_test_sql("DROP TABLE activity_events")
             .expect("activity table should drop");
 
         assert!(matches!(
@@ -14701,8 +14697,8 @@ mod tests {
     fn runtime_personal_search_queries_refresh_repository_backed_marketplace_projection() {
         let runtime = memory_runtime();
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
-        let pickup_location_id = PickupLocationId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let pickup_location_id = PickupLocationId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
         let sql = format!(
             "insert into pickup_locations (
                 id,
@@ -14762,8 +14758,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&sql)
+            .execute_test_sql(&sql)
             .expect("buyer search workspace should seed");
         let salad_mix_id = seed_product(
             &runtime,
@@ -14788,8 +14783,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&format!(
+            .execute_test_sql(&format!(
                 "update products
                  set availability_window_id = '{fulfillment_window_id}'
                  where id in ('{salad_mix_id}', '{pea_shoots_id}')"
@@ -14875,8 +14869,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&format!(
+            .execute_test_sql(&format!(
                 "update products
                  set availability_window_id = '{fulfillment_window_id}'
                  where id = '{product_id}'"
@@ -14969,8 +14962,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&format!(
+            .execute_test_sql(&format!(
                 "update products
                  set availability_window_id = '{first_window_id}'
                  where id = '{first_product_id}'"
@@ -14987,7 +14979,7 @@ mod tests {
                 .expect("first buyer product should add to cart")
         );
 
-        let other_farm_id = FarmId::new();
+        let other_farm_id = FarmId::generate();
         runtime
             .lock_state()
             .sqlite_store
@@ -15020,8 +15012,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&format!(
+            .execute_test_sql(&format!(
                 "update products
                  set availability_window_id = '{second_window_id}'
                  where id = '{second_product_id}'"
@@ -15136,8 +15127,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&format!(
+            .execute_test_sql(&format!(
                 "update products
                  set availability_window_id = '{fulfillment_window_id}'
                  where id = '{product_id}'"
@@ -15211,8 +15201,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&format!(
+            .execute_test_sql(&format!(
                 "update products
                  set availability_window_id = '{fulfillment_window_id}'
                  where id = '{product_id}'"
@@ -15306,7 +15295,7 @@ mod tests {
     #[test]
     fn runtime_guest_order_review_requires_account_before_order_write() {
         let runtime = memory_runtime();
-        let farm_id = FarmId::new();
+        let farm_id = FarmId::generate();
         runtime
             .lock_state()
             .sqlite_store
@@ -15344,8 +15333,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&format!(
+            .execute_test_sql(&format!(
                 "update products
                  set availability_window_id = '{fulfillment_window_id}'
                  where id = '{product_id}'"
@@ -15416,20 +15404,14 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .query_row("select count(*) from orders", [], |row| row.get(0))
+            .query_test_i64("select count(*) from orders")
             .expect("order count should load");
         let coordination_count: i64 = runtime
             .lock_state()
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .query_row(
-                "select count(*) from buyer_order_coordination_records",
-                [],
-                |row| row.get(0),
-            )
+            .query_test_i64("select count(*) from buyer_order_coordination_records")
             .expect("coordination count should load");
         assert_eq!(order_count, 0);
         assert_eq!(coordination_count, 0);
@@ -15797,11 +15779,9 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute(
-                "update products set listing_bin_id = 'mutated-bin' where id = ?1",
-                [product_id.to_string()],
-            )
+            .execute_test_sql(&format!(
+                "update products set listing_bin_id = 'mutated-bin' where id = '{product_id}'"
+            ))
             .expect("listing projection should mutate after cart snapshot");
         assert!(
             runtime
@@ -15969,11 +15949,9 @@ mod tests {
             let state = runtime.lock_state_mut();
             let sqlite_store = state.sqlite_store.as_ref().expect("sqlite store");
             sqlite_store
-                .connection()
-                .execute(
-                    "update orders set status = 'scheduled' where id = ?1",
-                    [order_id.to_string()],
-                )
+                .execute_test_sql(&format!(
+                    "update orders set status = 'scheduled' where id = '{order_id}'"
+                ))
                 .expect("buyer order status should mutate before retry refresh");
         }
         unblock_shared_runtime_store_database(&paths);
@@ -16217,8 +16195,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&format!(
+            .execute_test_sql(&format!(
                 "update products
                  set availability_window_id = '{fulfillment_window_id}'
                  where id = '{product_id}'"
@@ -16591,8 +16568,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&format!(
+            .execute_test_sql(&format!(
                 "update products
                  set availability_window_id = '{fulfillment_window_id}'
                  where id in ('{available_product_id}', '{unavailable_product_id}')"
@@ -16641,11 +16617,9 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute(
-                "update products set status = 'archived' where id = ?1",
-                [unavailable_product_id.to_string()],
-            )
+            .execute_test_sql(&format!(
+                "update products set status = 'archived' where id = '{unavailable_product_id}'"
+            ))
             .expect("product should archive");
 
         assert!(
@@ -16989,7 +16963,7 @@ mod tests {
                     quantity_display: "Do not trust screen strings".to_owned(),
                 }],
                 pickup_roster: vec![PackDayRosterRow {
-                    order_id: OrderId::new(),
+                    order_id: OrderId::generate(),
                     order_number: "R-999".to_owned(),
                     customer_display_name: "Bogus".to_owned(),
                 }],
@@ -17045,7 +17019,7 @@ mod tests {
     fn runtime_bootstrap_sweeps_prepared_pack_day_print_assets() {
         let paths = temp_desktop_runtime_paths("pack_day_print_bootstrap_sweep");
         let stale_root = prepared_customer_label_asset_root();
-        let stale_directory = stale_root.join(PackDayExportInstanceId::new().to_string());
+        let stale_directory = stale_root.join(PackDayExportInstanceId::generate().to_string());
         let _ = fs::remove_file(&stale_root);
         let _ = fs::remove_dir_all(&stale_root);
         fs::create_dir_all(&stale_directory).expect("stale prepared directory should create");
@@ -18248,8 +18222,8 @@ mod tests {
         let runtime = memory_runtime();
         let (_, farm_id) = provision_ready_farmer_account(&runtime);
         let (fulfillment_window_id, order_id) = seed_order_workspace(&runtime, farm_id);
-        let other_fulfillment_window_id = FulfillmentWindowId::new();
-        let other_order_id = OrderId::new();
+        let other_fulfillment_window_id = FulfillmentWindowId::generate();
+        let other_order_id = OrderId::generate();
         let sql = format!(
             "insert into fulfillment_windows (
                 id,
@@ -18299,8 +18273,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&sql)
+            .execute_test_sql(&sql)
             .expect("second orders workspace should seed");
 
         assert!(
@@ -18329,8 +18302,8 @@ mod tests {
         let runtime = memory_runtime();
         let (_, farm_id) = provision_ready_farmer_account(&runtime);
         let (fulfillment_window_id, scheduled_order_id) = seed_order_workspace(&runtime, farm_id);
-        let packed_order_id = OrderId::new();
-        let completed_order_id = OrderId::new();
+        let packed_order_id = OrderId::generate();
+        let completed_order_id = OrderId::generate();
 
         let sql = format!(
             "update orders
@@ -18376,8 +18349,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&sql)
+            .execute_test_sql(&sql)
             .expect("order should update to scheduled");
 
         assert!(
@@ -19222,10 +19194,10 @@ mod tests {
                 .expect("account should select")
         );
 
-        let default_pickup_location_id = PickupLocationId::new();
-        let market_pickup_location_id = PickupLocationId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let blackout_period_id = BlackoutPeriodId::new();
+        let default_pickup_location_id = PickupLocationId::generate();
+        let market_pickup_location_id = PickupLocationId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
+        let blackout_period_id = BlackoutPeriodId::generate();
 
         let saved_projection = runtime
             .save_farm_rules_projection(radroots_studio_app_view::FarmRulesProjection {
@@ -19628,8 +19600,8 @@ mod tests {
         if let Some(parent) = database_path.parent() {
             fs::create_dir_all(parent).expect("shared runtime store directory should create");
         }
-        let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let executor = SqlxSqliteExecutor::open(database_path.as_path())
+            .expect("open shared runtime store db");
         let store = RuntimeStore::new(executor);
         store.migrate_up().expect("migrate shared runtime store");
         let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
@@ -19745,8 +19717,8 @@ mod tests {
         if let Some(parent) = database_path.parent() {
             fs::create_dir_all(parent).expect("shared runtime store directory should create");
         }
-        let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let executor = SqlxSqliteExecutor::open(database_path.as_path())
+            .expect("open shared runtime store db");
         let store = RuntimeStore::new(executor);
         store.migrate_up().expect("migrate shared runtime store");
         let farm_key = "CCCCCCCCCCCCCCCCCCCCCC";
@@ -19892,8 +19864,8 @@ mod tests {
             .expect("selected buyer account should resolve")
             .public_identity
             .public_key_hex;
-        let farm_key = super::d_tag_from_uuid(FarmId::new().as_uuid());
-        let listing_key = super::d_tag_from_uuid(ProductId::new().as_uuid());
+        let farm_key = super::d_tag_from_uuid(FarmId::generate().as_uuid());
+        let listing_key = super::d_tag_from_uuid(ProductId::generate().as_uuid());
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
         let listing_event_id = signed_listing_event_id(label);
         let trade_order_id = format!("{label}-trade-order");
@@ -19972,7 +19944,7 @@ mod tests {
             .public_identity
             .public_key_hex;
         let buyer_pubkey = SDK_TEST_BUYER_PUBLIC_KEY_HEX.to_owned();
-        let product_id = ProductId::new();
+        let product_id = ProductId::generate();
         let trade_order_id = "seller-order-decision-1";
         let farm_key = super::d_tag_from_uuid(farm_id.as_uuid());
         let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
@@ -20038,7 +20010,7 @@ mod tests {
             .public_identity
             .public_key_hex;
         let buyer_pubkey = SDK_TEST_BUYER_PUBLIC_KEY_HEX.to_owned();
-        let product_id = ProductId::new();
+        let product_id = ProductId::generate();
         let trade_order_id = "seller-order-decision-1";
         let farm_key = super::d_tag_from_uuid(farm_id.as_uuid());
         let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
@@ -20171,8 +20143,8 @@ mod tests {
         if let Some(parent) = database_path.parent() {
             fs::create_dir_all(parent).expect("shared runtime store directory should create");
         }
-        let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let executor = SqlxSqliteExecutor::open(database_path.as_path())
+            .expect("open shared runtime store db");
         let store = RuntimeStore::new(executor);
         store.migrate_up().expect("migrate shared runtime store");
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
@@ -20277,8 +20249,8 @@ mod tests {
         if let Some(parent) = database_path.parent() {
             fs::create_dir_all(parent).expect("shared runtime store directory should create");
         }
-        let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let executor = SqlxSqliteExecutor::open(database_path.as_path())
+            .expect("open shared runtime store db");
         let store = RuntimeStore::new(executor);
         store.migrate_up().expect("migrate shared runtime store");
         let order = RadrootsOrderRequest {
@@ -20374,8 +20346,8 @@ mod tests {
         if let Some(parent) = database_path.parent() {
             fs::create_dir_all(parent).expect("shared runtime store directory should create");
         }
-        let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let executor = SqlxSqliteExecutor::open(database_path.as_path())
+            .expect("open shared runtime store db");
         let store = RuntimeStore::new(executor);
         store.migrate_up().expect("migrate shared runtime store");
         let order = RadrootsOrderRequest {
@@ -20660,8 +20632,8 @@ mod tests {
         if let Some(parent) = database_path.parent() {
             fs::create_dir_all(parent).expect("shared runtime store directory should create");
         }
-        let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let executor = SqlxSqliteExecutor::open(database_path.as_path())
+            .expect("open shared runtime store db");
         let store = RuntimeStore::new(executor);
         store.migrate_up().expect("migrate shared runtime store");
         let created_at = test_event_created_at(record_id, 1_774_000_020);
@@ -20725,8 +20697,8 @@ mod tests {
         let database_path = paths
             .shared_runtime_store_database_path()
             .expect("shared runtime store path");
-        let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let executor = SqlxSqliteExecutor::open(database_path.as_path())
+            .expect("open shared runtime store db");
         executor
             .exec(
                 "UPDATE runtime_store_record
@@ -20744,8 +20716,8 @@ mod tests {
         let database_path = paths
             .shared_runtime_store_database_path()
             .expect("shared runtime store path");
-        let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let executor = SqlxSqliteExecutor::open(database_path.as_path())
+            .expect("open shared runtime store db");
         let store = RuntimeStore::new(executor);
         store.migrate_up().expect("migrate shared runtime store");
         let pubkey = "2222222222222222222222222222222222222222222222222222222222222222";
@@ -20928,8 +20900,8 @@ mod tests {
         let database_path = paths
             .shared_runtime_store_database_path()
             .expect("shared runtime store path");
-        let executor =
-            SqliteExecutor::open(database_path.as_path()).expect("open shared runtime store db");
+        let executor = SqlxSqliteExecutor::open(database_path.as_path())
+            .expect("open shared runtime store db");
         let store = RuntimeStore::new(executor);
         store
             .list_records_after_seq(0, 100)
@@ -20973,12 +20945,9 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .query_row(
-                "select status from orders where id = ?1 limit 1",
-                [order_id.to_string()],
-                |row| row.get::<_, String>(0),
-            )
+            .query_test_string(&format!(
+                "select status from orders where id = '{order_id}' limit 1"
+            ))
             .expect("order status should load")
     }
 
@@ -20991,12 +20960,9 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .query_row(
-                "select workflow_agreement from orders where id = ?1 limit 1",
-                [order_id.to_string()],
-                |row| row.get::<_, String>(0),
-            )
+            .query_test_string(&format!(
+                "select workflow_agreement from orders where id = '{order_id}' limit 1"
+            ))
             .expect("order workflow agreement should load")
     }
 
@@ -21345,7 +21311,7 @@ mod tests {
             account_id,
             SelectedSurfaceProjection::new(active_surface),
             if farmer_active {
-                FarmerActivationProjection::active(FarmId::new())
+                FarmerActivationProjection::active(FarmId::generate())
             } else {
                 FarmerActivationProjection::inactive()
             },
@@ -21364,7 +21330,7 @@ mod tests {
         account_id: &str,
         active_surface: ActiveSurface,
     ) -> FarmId {
-        let farm_id = FarmId::new();
+        let farm_id = FarmId::generate();
         let activation = AccountSurfaceActivationProjection::new(
             account_id,
             SelectedSurfaceProjection::new(active_surface),
@@ -21389,7 +21355,7 @@ mod tests {
         stock_count: Option<u32>,
         updated_at: &str,
     ) -> radroots_studio_app_view::ProductId {
-        let product_id = radroots_studio_app_view::ProductId::new();
+        let product_id = radroots_studio_app_view::ProductId::generate();
         let stock_count = stock_count
             .map(|value| value.to_string())
             .unwrap_or_else(|| "null".to_owned());
@@ -21432,8 +21398,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&sql)
+            .execute_test_sql(&sql)
             .expect("product should seed");
 
         product_id
@@ -21446,8 +21411,8 @@ mod tests {
         farm_display_name: &str,
         fulfillment_label: &str,
     ) -> FulfillmentWindowId {
-        let pickup_location_id = PickupLocationId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let pickup_location_id = PickupLocationId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
         let sql = format!(
             "insert into pickup_locations (
                 id,
@@ -21530,8 +21495,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&sql)
+            .execute_test_sql(&sql)
             .expect("buyer marketplace support should seed");
 
         fulfillment_window_id
@@ -21609,9 +21573,9 @@ mod tests {
         runtime: &DesktopAppRuntime,
         farm_id: FarmId,
     ) -> (FulfillmentWindowId, OrderId) {
-        let pickup_location_id = PickupLocationId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let order_id = OrderId::new();
+        let pickup_location_id = PickupLocationId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
+        let order_id = OrderId::generate();
         let sql = format!(
             "insert into pickup_locations (
                 id,
@@ -21695,8 +21659,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&sql)
+            .execute_test_sql(&sql)
             .expect("orders workspace should seed");
 
         (fulfillment_window_id, order_id)
@@ -21707,8 +21670,8 @@ mod tests {
         farm_id: FarmId,
         source_fulfillment_window_id: FulfillmentWindowId,
     ) -> (FulfillmentWindowId, OrderId) {
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let order_id = OrderId::new();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
+        let order_id = OrderId::generate();
         let sql = format!(
             "insert into fulfillment_windows (
                 id,
@@ -21758,8 +21721,7 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .connection()
-            .execute_batch(&sql)
+            .execute_test_sql(&sql)
             .expect("second orders workspace should seed");
 
         (fulfillment_window_id, order_id)

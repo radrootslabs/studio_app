@@ -1,14 +1,20 @@
 #![forbid(unsafe_code)]
 
+mod db;
 mod error;
 mod interop;
 mod migrations;
 mod repo;
 mod sdk_workflow_receipts;
+#[cfg(test)]
+mod source_guards;
 mod sync;
 
-use std::{collections::BTreeSet, fs, path::PathBuf, time::Duration};
+use std::{collections::BTreeSet, fs, path::PathBuf};
 
+pub(crate) use db::{
+    AppSqliteDatabase, IntoAppSqliteParams, OptionalSqliteResult, app_sqlite_value, empty_params,
+};
 use radroots_studio_app_sync::{
     AppRelayIngestScopeFreshness, PendingSyncOperation, SyncCheckpointStatus, SyncConflict,
     SyncConflictResolutionStatus,
@@ -24,7 +30,7 @@ use radroots_studio_app_view::{
     ProductsListProjection, ProductsSort, ReminderFeedProjection, ReminderLogEntryProjection,
     ReminderLogProjection, TodayAgendaProjection,
 };
-use rusqlite::Connection;
+use sqlx::Row;
 
 pub use error::AppSqliteError;
 pub use interop::{
@@ -46,10 +52,22 @@ pub use sdk_workflow_receipts::{
     AppSdkWorkflowReceiptSourceKind, AppSdkWorkflowReceiptState,
 };
 pub use sync::{
-    AppSyncRepository, StoredPendingSyncOperation, StoredRelayIngestCursor, StoredSyncConflict,
+    AppRelayIngestFailureInput, AppRelayIngestSuccessInput, AppSyncRepository,
+    StoredPendingSyncOperation, StoredRelayIngestCursor, StoredSyncConflict,
 };
 
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
+
+macro_rules! app_sqlite_params {
+    () => {
+        $crate::empty_params()
+    };
+    ($($value:expr),+ $(,)?) => {
+        vec![$($crate::app_sqlite_value(&$value)),+]
+    };
+}
+
+pub(crate) use app_sqlite_params;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DatabaseTarget {
@@ -58,23 +76,50 @@ pub enum DatabaseTarget {
 }
 
 pub struct AppSqliteStore {
-    connection: Connection,
+    connection: AppSqliteDatabase,
 }
 
 impl AppSqliteStore {
     pub fn open(target: DatabaseTarget) -> Result<Self, AppSqliteError> {
-        let mut connection = open_connection(&target)?;
-        bootstrap_connection(&mut connection, &target)?;
+        let connection = open_connection(&target)?;
+        bootstrap_connection(&connection, &target)?;
 
         Ok(Self { connection })
     }
 
-    pub fn connection(&self) -> &Connection {
+    #[cfg(test)]
+    pub(crate) fn connection(&self) -> &AppSqliteDatabase {
         &self.connection
     }
 
-    pub fn into_connection(self) -> Connection {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn execute_test_sql(&self, sql: &str) -> Result<(), AppSqliteError> {
         self.connection
+            .execute_script(sql)
+            .map_err(|source| AppSqliteError::Query {
+                operation: "execute test sqlite script",
+                source,
+            })
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn query_test_i64(&self, sql: &str) -> Result<i64, AppSqliteError> {
+        self.connection
+            .fetch_one(sql, empty_params(), |row| row.try_get::<i64, _>(0))
+            .map_err(|source| AppSqliteError::Query {
+                operation: "query test sqlite i64",
+                source,
+            })
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn query_test_string(&self, sql: &str) -> Result<String, AppSqliteError> {
+        self.connection
+            .fetch_one(sql, empty_params(), |row| row.try_get::<String, _>(0))
+            .map_err(|source| AppSqliteError::Query {
+                operation: "query test sqlite string",
+                source,
+            })
     }
 
     pub fn schema_version(&self) -> Result<u32, AppSqliteError> {
@@ -612,46 +657,16 @@ impl AppSqliteStore {
 
     pub fn record_relay_ingest_success(
         &self,
-        scope_key: &str,
-        relay_url: &str,
-        cursor_since_unix_seconds: i64,
-        last_event_created_at_unix_seconds: Option<i64>,
-        started_at: &str,
-        started_unix_seconds: i64,
-        completed_at: &str,
-        completed_unix_seconds: i64,
+        input: AppRelayIngestSuccessInput<'_>,
     ) -> Result<(), AppSqliteError> {
-        self.sync_repository().record_relay_ingest_success(
-            scope_key,
-            relay_url,
-            cursor_since_unix_seconds,
-            last_event_created_at_unix_seconds,
-            started_at,
-            started_unix_seconds,
-            completed_at,
-            completed_unix_seconds,
-        )
+        self.sync_repository().record_relay_ingest_success(input)
     }
 
     pub fn record_relay_ingest_failure(
         &self,
-        scope_key: &str,
-        relay_url: &str,
-        started_at: &str,
-        started_unix_seconds: i64,
-        completed_at: &str,
-        completed_unix_seconds: i64,
-        error_message: &str,
+        input: AppRelayIngestFailureInput<'_>,
     ) -> Result<(), AppSqliteError> {
-        self.sync_repository().record_relay_ingest_failure(
-            scope_key,
-            relay_url,
-            started_at,
-            started_unix_seconds,
-            completed_at,
-            completed_unix_seconds,
-            error_message,
-        )
+        self.sync_repository().record_relay_ingest_failure(input)
     }
 
     pub fn record_sync_conflict(
@@ -690,24 +705,23 @@ impl AppSqliteStore {
     }
 }
 
-fn open_connection(target: &DatabaseTarget) -> Result<Connection, AppSqliteError> {
+fn open_connection(target: &DatabaseTarget) -> Result<AppSqliteDatabase, AppSqliteError> {
     match target {
-        DatabaseTarget::InMemory => {
-            Connection::open_in_memory().map_err(|source| AppSqliteError::OpenInMemory { source })
-        }
+        DatabaseTarget::InMemory => AppSqliteDatabase::open_in_memory()
+            .map_err(|source| AppSqliteError::OpenInMemory { source }),
         DatabaseTarget::Path(path) => {
-            if let Some(parent) = path.parent() {
-                if !parent.as_os_str().is_empty() {
-                    fs::create_dir_all(parent).map_err(|source| {
-                        AppSqliteError::CreateParentDirectory {
-                            path: parent.to_path_buf(),
-                            source,
-                        }
-                    })?;
-                }
+            if let Some(parent) = path.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                fs::create_dir_all(parent).map_err(|source| {
+                    AppSqliteError::CreateParentDirectory {
+                        path: parent.to_path_buf(),
+                        source,
+                    }
+                })?;
             }
 
-            Connection::open(path).map_err(|source| AppSqliteError::OpenPath {
+            AppSqliteDatabase::open_path(path).map_err(|source| AppSqliteError::OpenPath {
                 path: path.clone(),
                 source,
             })
@@ -716,20 +730,19 @@ fn open_connection(target: &DatabaseTarget) -> Result<Connection, AppSqliteError
 }
 
 fn bootstrap_connection(
-    connection: &mut Connection,
+    connection: &AppSqliteDatabase,
     target: &DatabaseTarget,
 ) -> Result<(), AppSqliteError> {
     connection
-        .busy_timeout(Duration::from_millis(SQLITE_BUSY_TIMEOUT_MS))
+        .execute_script(&format!("PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}"))
         .map_err(|source| AppSqliteError::ConfigureBusyTimeout { source })?;
-
     apply_pragma(connection, "foreign_keys", "ON")?;
     apply_pragma(connection, "synchronous", "NORMAL")?;
 
     if matches!(target, DatabaseTarget::Path(_)) {
         connection
-            .query_row("PRAGMA journal_mode = WAL", [], |row| {
-                row.get::<_, String>(0)
+            .fetch_one("PRAGMA journal_mode = WAL", empty_params(), |row| {
+                row.try_get::<String, _>(0)
             })
             .map_err(|source| AppSqliteError::ApplyPragma {
                 pragma: "journal_mode",
@@ -741,23 +754,25 @@ fn bootstrap_connection(
 }
 
 fn apply_pragma(
-    connection: &Connection,
+    connection: &AppSqliteDatabase,
     pragma: &'static str,
     value: &str,
 ) -> Result<(), AppSqliteError> {
     let sql = format!("PRAGMA {pragma} = {value}");
     connection
-        .execute_batch(&sql)
+        .execute_script(&sql)
         .map_err(|source| AppSqliteError::ApplyPragma { pragma, source })
 }
 
-fn schema_version(connection: &Connection) -> Result<u32, AppSqliteError> {
+fn schema_version(connection: &AppSqliteDatabase) -> Result<u32, AppSqliteError> {
     connection
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .fetch_one("PRAGMA user_version", empty_params(), |row| {
+            row.try_get::<u32, _>(0)
+        })
         .map_err(|source| AppSqliteError::ReadSchemaVersion { source })
 }
 
-fn apply_migrations(connection: &mut Connection) -> Result<(), AppSqliteError> {
+fn apply_migrations(connection: &AppSqliteDatabase) -> Result<(), AppSqliteError> {
     let current_version = schema_version(connection)?;
     let latest_version = migrations::latest_schema_version();
 
@@ -769,18 +784,23 @@ fn apply_migrations(connection: &mut Connection) -> Result<(), AppSqliteError> {
     }
 
     for (version, sql) in migrations::pending_migrations(current_version) {
-        let transaction = connection
-            .transaction()
+        connection
+            .execute_script("BEGIN IMMEDIATE")
             .map_err(|source| AppSqliteError::BeginMigration { version, source })?;
 
-        transaction
-            .execute_batch(sql)
-            .map_err(|source| AppSqliteError::ExecuteMigration { version, source })?;
-        transaction
-            .pragma_update(None, "user_version", version)
-            .map_err(|source| AppSqliteError::RecordSchemaVersion { version, source })?;
-        transaction
-            .commit()
+        if let Err(source) = connection.execute_script(sql) {
+            let _ = connection.execute_script("ROLLBACK");
+            return Err(AppSqliteError::ExecuteMigration { version, source });
+        }
+
+        let record_version_sql = format!("PRAGMA user_version = {version}");
+        if let Err(source) = connection.execute_script(&record_version_sql) {
+            let _ = connection.execute_script("ROLLBACK");
+            return Err(AppSqliteError::RecordSchemaVersion { version, source });
+        }
+
+        connection
+            .execute_script("COMMIT")
             .map_err(|source| AppSqliteError::CommitMigration { version, source })?;
     }
 
@@ -790,7 +810,9 @@ fn apply_migrations(connection: &mut Connection) -> Result<(), AppSqliteError> {
 #[cfg(test)]
 mod tests {
     use super::{AppSqliteStore, DatabaseTarget, latest_schema_version};
-    use rusqlite::{Connection, params};
+    use sqlx::Row;
+
+    use crate::AppSqliteDatabase;
     use std::{
         env, fs,
         path::PathBuf,
@@ -1072,7 +1094,7 @@ mod tests {
                     'acknowledged',
                     '2026-01-01T00:00:00Z'
                  )",
-                [],
+                crate::empty_params(),
             )
             .expect("local interop imports should accept validation receipt projections");
         assert_eq!(row_count(connection, "sync_checkpoints"), 0);
@@ -1132,7 +1154,7 @@ mod tests {
             .execute(
                 "INSERT INTO farms (id, display_name, readiness, created_at, updated_at)
                  VALUES (?1, 'Schema Farm', 'ready', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-                params!["farm_schema"],
+                crate::app_sqlite_params!["farm_schema"],
             )
             .expect("farm should insert");
         connection
@@ -1156,7 +1178,7 @@ mod tests {
                     'invalid',
                     'needs_review'
                  )",
-                [],
+                crate::empty_params(),
             )
             .expect("agreement-only workflow projection should insert");
         connection
@@ -1180,7 +1202,7 @@ mod tests {
                     'agreed_pending_rhi',
                     'reserved'
                  )",
-                [],
+                crate::empty_params(),
             )
             .expect("pending rhi workflow projection should insert");
 
@@ -1194,7 +1216,7 @@ mod tests {
                 updated_at,
                 workflow_agreement
              ) VALUES ('order_agreement_invalid', 'farm_schema', 'invalid', 'Buyer', 'scheduled', '2026-01-01T00:00:00Z', 'complete')",
-            [],
+            crate::empty_params(),
         );
         assert!(invalid_result.is_err());
     }
@@ -1230,7 +1252,7 @@ mod tests {
             .execute(
                 "INSERT INTO farms (id, display_name, readiness, created_at, updated_at)
                  VALUES (?1, 'Schema Farm', 'ready', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-                params!["farm_status"],
+                crate::app_sqlite_params!["farm_status"],
             )
             .expect("farm should insert");
         connection
@@ -1260,7 +1282,7 @@ mod tests {
                     '',
                     ''
                  )",
-                [],
+                crate::empty_params(),
             )
             .expect("order should insert");
         connection
@@ -1278,7 +1300,7 @@ mod tests {
                     2,
                     '2 each'
                  )",
-                [],
+                crate::empty_params(),
             )
             .expect("order line should insert");
         connection
@@ -1296,7 +1318,7 @@ mod tests {
                     '2026-01-01T00:00:00Z',
                     '2026-01-01T00:00:00Z'
                  )",
-                [],
+                crate::empty_params(),
             )
             .expect("buyer coordination should insert");
 
@@ -1312,62 +1334,62 @@ mod tests {
         connection
             .execute(
                 "UPDATE orders SET status = 'declined' WHERE id = 'order_status'",
-                [],
+                crate::empty_params(),
             )
             .expect("declined status should satisfy current check");
         connection
             .execute(
                 "UPDATE orders SET status = 'needs_review' WHERE id = 'order_status'",
-                [],
+                crate::empty_params(),
             )
             .expect("needs review status should satisfy current check");
 
         let status: String = connection
             .query_row(
                 "SELECT status FROM orders WHERE id = 'order_status'",
-                [],
-                |row| row.get(0),
+                crate::empty_params(),
+                |row| row.try_get(0),
             )
             .expect("status should load");
         assert_eq!(status, "needs_review");
         connection
             .execute(
                 "UPDATE orders SET workflow_agreement = 'agreed_pending_rhi' WHERE id = 'order_status'",
-                [],
+                crate::empty_params(),
             )
             .expect("agreed pending rhi agreement should satisfy current check");
     }
 
-    fn table_exists(connection: &Connection, table_name: &str) -> bool {
+    fn table_exists(connection: &AppSqliteDatabase, table_name: &str) -> bool {
         connection
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
                 [table_name],
-                |row| row.get::<_, i64>(0),
+                |row| row.try_get::<i64, _>(0),
             )
             .expect("table existence query should succeed")
             == 1
     }
 
-    fn row_count(connection: &Connection, table_name: &str) -> i64 {
+    fn row_count(connection: &AppSqliteDatabase, table_name: &str) -> i64 {
         let sql = format!("SELECT COUNT(*) FROM {table_name}");
         connection
-            .query_row(&sql, [], |row| row.get(0))
+            .query_row(&sql, crate::empty_params(), |row| row.try_get(0))
             .expect("row count query should succeed")
     }
 
-    fn column_exists(connection: &Connection, table_name: &str, column_name: &str) -> bool {
+    fn column_exists(connection: &AppSqliteDatabase, table_name: &str, column_name: &str) -> bool {
         let sql = format!("PRAGMA table_info({table_name})");
         let mut statement = connection
             .prepare(&sql)
             .expect("table info statement should prepare");
         let mut rows = statement
-            .query([])
+            .query(crate::empty_params())
             .expect("table info query should succeed");
 
         while let Some(row) = rows.next().expect("table info row should load") {
             if row
-                .get::<_, String>(1)
+                .try_get::<String, _>(1)
                 .expect("table info name should load")
                 == column_name
             {
@@ -1378,11 +1400,13 @@ mod tests {
         false
     }
 
-    fn foreign_key_violation_count(connection: &Connection) -> usize {
+    fn foreign_key_violation_count(connection: &AppSqliteDatabase) -> usize {
         let mut statement = connection
             .prepare("PRAGMA foreign_key_check")
             .expect("foreign key check should prepare");
-        let mut rows = statement.query([]).expect("foreign key check should run");
+        let mut rows = statement
+            .query(crate::empty_params())
+            .expect("foreign key check should run");
         let mut count = 0;
         while rows
             .next()
@@ -1394,17 +1418,17 @@ mod tests {
         count
     }
 
-    fn pragma_i64(connection: &Connection, pragma_name: &str) -> i64 {
+    fn pragma_i64(connection: &AppSqliteDatabase, pragma_name: &str) -> i64 {
         let sql = format!("PRAGMA {pragma_name}");
         connection
-            .query_row(&sql, [], |row| row.get(0))
+            .query_row(&sql, crate::empty_params(), |row| row.try_get(0))
             .expect("pragma query should succeed")
     }
 
-    fn pragma_text(connection: &Connection, pragma_name: &str) -> String {
+    fn pragma_text(connection: &AppSqliteDatabase, pragma_name: &str) -> String {
         let sql = format!("PRAGMA {pragma_name}");
         connection
-            .query_row(&sql, [], |row| row.get(0))
+            .query_row(&sql, crate::empty_params(), |row| row.try_get(0))
             .expect("pragma query should succeed")
     }
 

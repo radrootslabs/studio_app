@@ -2,31 +2,31 @@ use radroots_studio_app_view::{
     ActivityEventId, AppActivityContext, AppActivityEvent, AppActivityKind, SettingsPreference,
     SettingsSection,
 };
-use rusqlite::{Connection, params};
+use sqlx::Row;
 
-use crate::AppSqliteError;
+use crate::{AppSqliteDatabase, AppSqliteError};
 
 pub const APP_ACTIVITY_CONTEXT_LIMIT: usize = 64;
 pub const APP_ACTIVITY_RETENTION_LIMIT: i64 = 5_000;
 
 pub struct AppActivityRepository<'a> {
-    connection: &'a Connection,
+    connection: &'a AppSqliteDatabase,
 }
 
 impl<'a> AppActivityRepository<'a> {
-    pub fn new(connection: &'a Connection) -> Self {
+    pub(crate) fn new(connection: &'a AppSqliteDatabase) -> Self {
         Self { connection }
     }
 
     pub fn record(&self, kind: &AppActivityKind) -> Result<(), AppSqliteError> {
-        let activity_event_id = ActivityEventId::new().to_string();
+        let activity_event_id = ActivityEventId::generate().to_string();
         let event_kind = kind.storage_key();
         let settings_section = settings_section_value(kind);
         let settings_preference = settings_preference_value(kind);
         let preference_enabled = preference_enabled_value(kind);
 
         self.connection
-            .execute(
+            .execute_statement(
                 "INSERT INTO activity_events (
                     activity_event_id,
                     event_kind,
@@ -34,7 +34,7 @@ impl<'a> AppActivityRepository<'a> {
                     settings_preference,
                     preference_enabled
                 ) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
+                crate::app_sqlite_params![
                     activity_event_id,
                     event_kind,
                     settings_section,
@@ -53,9 +53,12 @@ impl<'a> AppActivityRepository<'a> {
     }
 
     pub fn load_recent(&self, limit: usize) -> Result<Vec<AppActivityEvent>, AppSqliteError> {
-        let mut statement = self
+        let query_limit = i64::try_from(limit).map_err(|_| AppSqliteError::InvalidProjection {
+            reason: "activity query limit exceeds sqlite integer range",
+        })?;
+        let rows = self
             .connection
-            .prepare(
+            .fetch_mapped(
                 "SELECT
                     activity_event_id,
                     recorded_at,
@@ -66,29 +69,25 @@ impl<'a> AppActivityRepository<'a> {
                  FROM activity_events
                  ORDER BY recorded_at DESC, activity_event_id DESC
                  LIMIT ?1",
-            )
-            .map_err(|source| AppSqliteError::Query {
-                operation: "prepare recent activity query",
-                source,
-            })?;
-        let rows = statement
-            .query_map([limit as i64], |row| {
-                let activity_event_id = row.get::<_, String>(0)?;
-                let recorded_at = row.get::<_, String>(1)?;
-                let event_kind = row.get::<_, String>(2)?;
-                let settings_section = row.get::<_, Option<String>>(3)?;
-                let settings_preference = row.get::<_, Option<String>>(4)?;
-                let preference_enabled = row.get::<_, Option<i64>>(5)?;
+                crate::app_sqlite_params![query_limit],
+                |row| {
+                    let activity_event_id = row.try_get::<String, _>(0)?;
+                    let recorded_at = row.try_get::<String, _>(1)?;
+                    let event_kind = row.try_get::<String, _>(2)?;
+                    let settings_section = row.try_get::<Option<String>, _>(3)?;
+                    let settings_preference = row.try_get::<Option<String>, _>(4)?;
+                    let preference_enabled = row.try_get::<Option<i64>, _>(5)?;
 
-                Ok((
-                    activity_event_id,
-                    recorded_at,
-                    event_kind,
-                    settings_section,
-                    settings_preference,
-                    preference_enabled,
-                ))
-            })
+                    Ok((
+                        activity_event_id,
+                        recorded_at,
+                        event_kind,
+                        settings_section,
+                        settings_preference,
+                        preference_enabled,
+                    ))
+                },
+            )
             .map_err(|source| AppSqliteError::Query {
                 operation: "query recent activity events",
                 source,
@@ -127,7 +126,7 @@ impl<'a> AppActivityRepository<'a> {
 
     fn trim_retained_events(&self, retention_limit: i64) -> Result<(), AppSqliteError> {
         self.connection
-            .execute(
+            .execute_statement(
                 "DELETE FROM activity_events
                  WHERE activity_event_id IN (
                      SELECT activity_event_id
@@ -135,7 +134,7 @@ impl<'a> AppActivityRepository<'a> {
                      ORDER BY recorded_at DESC, activity_event_id DESC
                      LIMIT -1 OFFSET ?1
                  )",
-                [retention_limit],
+                crate::app_sqlite_params![retention_limit],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "trim retained activity events",
@@ -266,9 +265,9 @@ fn preference_enabled_value(kind: &AppActivityKind) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use radroots_studio_app_view::{AppActivityKind, SettingsPreference, SettingsSection};
-    use rusqlite::Connection;
+    use sqlx::Row;
 
-    use crate::{AppSqliteStore, DatabaseTarget};
+    use crate::{AppSqliteDatabase, AppSqliteStore, DatabaseTarget, empty_params};
 
     use super::{APP_ACTIVITY_CONTEXT_LIMIT, APP_ACTIVITY_RETENTION_LIMIT, AppActivityRepository};
 
@@ -330,12 +329,12 @@ mod tests {
 
     #[test]
     fn activity_repository_trims_events_to_retention_limit() {
-        let connection = Connection::open_in_memory().expect("open in-memory connection");
+        let connection = AppSqliteDatabase::open_in_memory().expect("open in-memory connection");
         connection
-            .execute_batch(include_str!("../../migrations/0001_init.sql"))
+            .execute_script(include_str!("../../migrations/0001_init.sql"))
             .expect("apply init migration");
         connection
-            .execute_batch(include_str!("../../migrations/0002_activity_journal.sql"))
+            .execute_script(include_str!("../../migrations/0002_activity_journal.sql"))
             .expect("apply activity migration");
         let repository = AppActivityRepository::new(&connection);
 
@@ -350,10 +349,10 @@ mod tests {
         assert_eq!(retained, APP_ACTIVITY_RETENTION_LIMIT);
     }
 
-    fn count_rows(connection: &Connection, table_name: &str) -> i64 {
+    fn count_rows(connection: &AppSqliteDatabase, table_name: &str) -> i64 {
         let sql = format!("SELECT COUNT(*) FROM {table_name}");
         connection
-            .query_row(&sql, [], |row| row.get(0))
+            .fetch_one(&sql, empty_params(), |row| row.try_get(0))
             .expect("row count query should succeed")
     }
 }

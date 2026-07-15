@@ -292,7 +292,7 @@ fn default_farmer_surface_activation(account_id: &str) -> AccountSurfaceActivati
     AccountSurfaceActivationProjection::new(
         account_id,
         SelectedSurfaceProjection::new(ActiveSurface::Farmer),
-        FarmerActivationProjection::active(FarmId::new()),
+        FarmerActivationProjection::active(FarmId::generate()),
     )
 }
 
@@ -454,7 +454,7 @@ mod tests {
             account_id.as_str(),
             SelectedSurfaceProjection::new(ActiveSurface::Farmer),
             radroots_studio_app_view::FarmerActivationProjection::active(
-                radroots_studio_app_view::FarmId::new(),
+                radroots_studio_app_view::FarmId::generate(),
             ),
         );
         sqlite_store
@@ -592,7 +592,7 @@ mod tests {
             second_account_id.as_str(),
             SelectedSurfaceProjection::new(ActiveSurface::Farmer),
             radroots_studio_app_view::FarmerActivationProjection::active(
-                radroots_studio_app_view::FarmId::new(),
+                radroots_studio_app_view::FarmId::generate(),
             ),
         );
         sqlite_store
@@ -653,7 +653,7 @@ mod tests {
             first_account_id.as_str(),
             SelectedSurfaceProjection::new(ActiveSurface::Farmer),
             radroots_studio_app_view::FarmerActivationProjection::active(
-                radroots_studio_app_view::FarmId::new(),
+                radroots_studio_app_view::FarmId::generate(),
             ),
         );
         sqlite_store
@@ -703,7 +703,7 @@ mod tests {
                 first_account_id.as_str(),
                 SelectedSurfaceProjection::new(ActiveSurface::Farmer),
                 radroots_studio_app_view::FarmerActivationProjection::active(
-                    radroots_studio_app_view::FarmId::new(),
+                    radroots_studio_app_view::FarmId::generate(),
                 ),
             ))
             .expect("first activation should save");
@@ -712,7 +712,7 @@ mod tests {
                 second_account_id.as_str(),
                 SelectedSurfaceProjection::new(ActiveSurface::Farmer),
                 radroots_studio_app_view::FarmerActivationProjection::active(
-                    radroots_studio_app_view::FarmId::new(),
+                    radroots_studio_app_view::FarmId::generate(),
                 ),
             ))
             .expect("second activation should save");

@@ -586,7 +586,7 @@ mod tests {
     fn conflict_status_counts_only_unresolved_conflicts() {
         let conflicts = vec![
             SyncConflict {
-                aggregate: SyncAggregateRef::Product(ProductId::new()),
+                aggregate: SyncAggregateRef::Product(ProductId::generate()),
                 kind: SyncConflictKind::RevisionMismatch,
                 severity: SyncConflictSeverity::Blocking,
                 resolution: SyncConflictResolutionStatus::Unresolved,
@@ -596,7 +596,7 @@ mod tests {
                 resolved_at: None,
             },
             SyncConflict {
-                aggregate: SyncAggregateRef::Farm(FarmId::new()),
+                aggregate: SyncAggregateRef::Farm(FarmId::generate()),
                 kind: SyncConflictKind::RemoteValidationReject,
                 severity: SyncConflictSeverity::ReviewRequired,
                 resolution: SyncConflictResolutionStatus::AcceptedRemote,
@@ -618,14 +618,14 @@ mod tests {
     #[test]
     fn request_and_result_surface_conflict_status_through_typed_contracts() {
         let mut pending_operation = PendingSyncOperation::new(
-            SyncAggregateRef::Product(ProductId::new()),
+            SyncAggregateRef::Product(ProductId::generate()),
             SyncOperationKind::Upsert,
             "{\"title\":\"greens\"}",
             "2026-04-17T19:32:00Z",
         );
         pending_operation.attempt_count = 1;
         let conflict = SyncConflict {
-            aggregate: SyncAggregateRef::Product(ProductId::new()),
+            aggregate: SyncAggregateRef::Product(ProductId::generate()),
             kind: SyncConflictKind::RevisionMismatch,
             severity: SyncConflictSeverity::ReviewRequired,
             resolution: SyncConflictResolutionStatus::Unresolved,

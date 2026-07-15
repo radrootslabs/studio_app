@@ -27,7 +27,7 @@ use radroots_runtime_store::{
     PublishOutboxStatus, RelayDeliveryEvidence, RelayDeliveryState, RuntimeStore,
     RuntimeStoreRecord, RuntimeStoreRecordFamily, RuntimeStoreRecordStatus, SourceRuntime,
 };
-use radroots_sql_core::{SqlExecutor, SqliteExecutor};
+use radroots_sql_core::{SqlExecutor, SqlxSqliteExecutor};
 use radroots_studio_app_view::{
     FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
     FulfillmentWindowId, OrderId, OrderStatus, PickupLocationId, ProductId, ProductStatus,
@@ -43,7 +43,9 @@ use radroots_trade::order::{
 use radroots_trade::validation_receipt::{
     RadrootsTradeValidationReceipt, RadrootsValidationReceiptTags, validation_receipt_from_event,
 };
-use rusqlite::{Connection, OptionalExtension, params};
+use sqlx::Row;
+
+use crate::{AppSqliteDatabase, OptionalSqliteResult};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -98,11 +100,11 @@ pub struct StoredLocalInteropRecord {
 }
 
 pub struct AppLocalInteropRepository<'a> {
-    connection: &'a Connection,
+    connection: &'a AppSqliteDatabase,
 }
 
 impl<'a> AppLocalInteropRepository<'a> {
-    pub const fn new(connection: &'a Connection) -> Self {
+    pub(crate) const fn new(connection: &'a AppSqliteDatabase) -> Self {
         Self { connection }
     }
 
@@ -116,7 +118,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                 source,
             })?;
         }
-        let executor = SqliteExecutor::open(shared_database_path).map_err(|source| {
+        let executor = SqlxSqliteExecutor::open(shared_database_path).map_err(|source| {
             AppSqliteError::RuntimeStoreSql {
                 operation: "open shared runtime store database",
                 source,
@@ -212,23 +214,23 @@ impl<'a> AppLocalInteropRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map([], |row| {
+            .query_map(crate::empty_params(), |row| {
                 Ok(StoredLocalInteropRecord {
-                    record_id: row.get(0)?,
-                    local_seq: row.get(1)?,
-                    record_family: row.get(2)?,
-                    local_status: row.get(3)?,
-                    source_runtime: row.get(4)?,
-                    owner_account_id: row.get(5)?,
-                    owner_pubkey: row.get(6)?,
-                    farm_key: row.get(7)?,
-                    listing_addr: row.get(8)?,
-                    projected_kind: row.get(9)?,
-                    projected_id: row.get(10)?,
-                    event_id: row.get(11)?,
-                    event_kind: row.get(12)?,
-                    outbox_status: row.get(13)?,
-                    relay_delivery_json: row.get(14)?,
+                    record_id: row.try_get(0)?,
+                    local_seq: row.try_get(1)?,
+                    record_family: row.try_get(2)?,
+                    local_status: row.try_get(3)?,
+                    source_runtime: row.try_get(4)?,
+                    owner_account_id: row.try_get(5)?,
+                    owner_pubkey: row.try_get(6)?,
+                    farm_key: row.try_get(7)?,
+                    listing_addr: row.try_get(8)?,
+                    projected_kind: row.try_get(9)?,
+                    projected_id: row.try_get(10)?,
+                    event_id: row.try_get(11)?,
+                    event_kind: row.try_get(12)?,
+                    outbox_status: row.try_get(13)?,
+                    relay_delivery_json: row.try_get(14)?,
                 })
             })
             .map_err(|source| AppSqliteError::Query {
@@ -273,18 +275,18 @@ impl<'a> AppLocalInteropRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map(params![event_kind], |row| {
+            .query_map(crate::app_sqlite_params![event_kind], |row| {
                 Ok(StoredLocalInteropSignedEventEvidence {
-                    event_id: row.get(0)?,
-                    event_kind: row.get(1)?,
-                    local_status: row.get(2)?,
-                    outbox_status: row.get(3)?,
-                    relay_delivery_json: row.get(4)?,
-                    event_pubkey: row.get(5)?,
-                    event_created_at: row.get(6)?,
-                    event_tags_json: row.get(7)?,
-                    event_content: row.get(8)?,
-                    event_sig: row.get(9)?,
+                    event_id: row.try_get(0)?,
+                    event_kind: row.try_get(1)?,
+                    local_status: row.try_get(2)?,
+                    outbox_status: row.try_get(3)?,
+                    relay_delivery_json: row.try_get(4)?,
+                    event_pubkey: row.try_get(5)?,
+                    event_created_at: row.try_get(6)?,
+                    event_tags_json: row.try_get(7)?,
+                    event_content: row.try_get(8)?,
+                    event_sig: row.try_get(9)?,
                 })
             })
             .map_err(|source| AppSqliteError::Query {
@@ -335,18 +337,18 @@ impl<'a> AppLocalInteropRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map(params![event_id], |row| {
+            .query_map(crate::app_sqlite_params![event_id], |row| {
                 Ok(StoredLocalInteropSignedEventEvidence {
-                    event_id: row.get(0)?,
-                    event_kind: row.get(1)?,
-                    local_status: row.get(2)?,
-                    outbox_status: row.get(3)?,
-                    relay_delivery_json: row.get(4)?,
-                    event_pubkey: row.get(5)?,
-                    event_created_at: row.get(6)?,
-                    event_tags_json: row.get(7)?,
-                    event_content: row.get(8)?,
-                    event_sig: row.get(9)?,
+                    event_id: row.try_get(0)?,
+                    event_kind: row.try_get(1)?,
+                    local_status: row.try_get(2)?,
+                    outbox_status: row.try_get(3)?,
+                    relay_delivery_json: row.try_get(4)?,
+                    event_pubkey: row.try_get(5)?,
+                    event_created_at: row.try_get(6)?,
+                    event_tags_json: row.try_get(7)?,
+                    event_content: row.try_get(8)?,
+                    event_sig: row.try_get(9)?,
                 })
             })
             .map_err(|source| AppSqliteError::Query {
@@ -377,10 +379,10 @@ impl<'a> AppLocalInteropRepository<'a> {
              WHERE consumer_id = ?1
              LIMIT 1",
             [APP_LOCAL_INTEROP_CURSOR_ID],
-            |row| row.get::<_, i64>(0),
+            |row| row.try_get::<i64, _>(0),
         ) {
             Ok(last_change_seq) => Ok(last_change_seq),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0),
+            Err(sqlx::Error::RowNotFound) => Ok(0),
             Err(source) => Err(AppSqliteError::Query {
                 operation: "read app local interop projection cursor",
                 source,
@@ -402,7 +404,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                         excluded.last_change_seq
                     ),
                     updated_at = excluded.updated_at",
-                params![APP_LOCAL_INTEROP_CURSOR_ID, last_change_seq],
+                crate::app_sqlite_params![APP_LOCAL_INTEROP_CURSOR_ID, last_change_seq],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "advance app local interop projection cursor",
@@ -448,13 +450,13 @@ impl<'a> AppLocalInteropRepository<'a> {
                 let projected_kind = projection.kind;
                 let projected_id = projection.projected_id;
                 self.record_import(record, projected_kind, projected_id.clone())?;
-                if projected_kind == "listing" {
-                    if let Some(projected_id) = projected_id.as_deref() {
-                        self.finish_duplicate_listing_replacement(
-                            &superseded_listing_ids,
-                            projected_id,
-                        )?;
-                    }
+                if projected_kind == "listing"
+                    && let Some(projected_id) = projected_id.as_deref()
+                {
+                    self.finish_duplicate_listing_replacement(
+                        &superseded_listing_ids,
+                        projected_id,
+                    )?;
                 }
                 Ok(ImportOutcome::Imported)
             }
@@ -521,14 +523,17 @@ impl<'a> AppLocalInteropRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map(params![event_id, record.record_id.as_str()], |row| {
-                Ok(StoredSignedEventDuplicate {
-                    source_runtime: row.get(0)?,
-                    owner_account_id: row.get(1)?,
-                    local_status: row.get(2)?,
-                    outbox_status: row.get(3)?,
-                })
-            })
+            .query_map(
+                crate::app_sqlite_params![event_id, record.record_id.as_str()],
+                |row| {
+                    Ok(StoredSignedEventDuplicate {
+                        source_runtime: row.try_get(0)?,
+                        owner_account_id: row.try_get(1)?,
+                        local_status: row.try_get(2)?,
+                        outbox_status: row.try_get(3)?,
+                    })
+                },
+            )
             .map_err(|source| AppSqliteError::Query {
                 operation: "query duplicate local interop signed events",
                 source,
@@ -579,7 +584,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                  WHERE event_id = ?1
                     AND record_id <> ?2
                     AND record_family = 'signed_event'",
-                params![event_id, record_id],
+                crate::app_sqlite_params![event_id, record_id],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "delete superseded duplicate local interop signed event",
@@ -622,7 +627,9 @@ impl<'a> AppLocalInteropRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map(params![event_id, record_id], |row| row.get::<_, String>(0))
+            .query_map(crate::app_sqlite_params![event_id, record_id], |row| {
+                row.try_get::<String, _>(0)
+            })
             .map_err(|source| AppSqliteError::Query {
                 operation: "query superseded duplicate listing projections",
                 source,
@@ -651,7 +658,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                             WHERE projected_kind = 'listing'
                                AND projected_id = ?1
                         )",
-                    params![product_id],
+                    crate::app_sqlite_params![product_id],
                 )
                 .map_err(|source| AppSqliteError::Query {
                     operation: "delete unreferenced superseded listing product",
@@ -715,7 +722,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                         seller_pubkey = coalesce(nullif(buyer_cart_lines.seller_pubkey, ''), excluded.seller_pubkey),
                         listing_relays_json = coalesce(nullif(buyer_cart_lines.listing_relays_json, ''), excluded.listing_relays_json),
                         updated_at = excluded.updated_at",
-                    params![product_id, canonical_product_id],
+                    crate::app_sqlite_params![product_id, canonical_product_id],
                 )
                 .map_err(|source| AppSqliteError::Query {
                     operation: "migrate duplicate listing buyer cart lines",
@@ -725,7 +732,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                 .execute(
                     "DELETE FROM buyer_cart_lines
                      WHERE product_id = ?1",
-                    params![product_id],
+                    crate::app_sqlite_params![product_id],
                 )
                 .map_err(|source| AppSqliteError::Query {
                     operation: "delete migrated duplicate listing buyer cart lines",
@@ -1267,7 +1274,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     status = excluded.status,
                     buyer_context_key = coalesce(orders.buyer_context_key, excluded.buyer_context_key),
                     updated_at = excluded.updated_at",
-                params![
+                crate::app_sqlite_params![
                     order_id.to_string(),
                     farm_id.to_string(),
                     order_number.as_str(),
@@ -1310,7 +1317,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                      workflow_provenance_last_event_id = ?7,
                      updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  WHERE id = ?1",
-                params![
+                crate::app_sqlite_params![
                     workflow.order_id.to_string(),
                     status.storage_key(),
                     workflow.revision.storage_key(),
@@ -1386,7 +1393,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     reducer_output_root = excluded.reducer_output_root,
                     public_values_hash = excluded.public_values_hash,
                     event_created_at = excluded.event_created_at",
-                params![
+                crate::app_sqlite_params![
                     event.id_str(),
                     order_id.map(|order_id| order_id.to_string()),
                     tags.order_id.as_str(),
@@ -1449,7 +1456,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                  WHERE root_event_id = ?1
                     AND raw_order_id = ?2
                     AND order_id IS NULL",
-                params![root_event_id, raw_order_id, order_id.to_string()],
+                crate::app_sqlite_params![root_event_id, raw_order_id, order_id.to_string()],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "attach local interop validation receipts to request",
@@ -1469,8 +1476,8 @@ impl<'a> AppLocalInteropRepository<'a> {
                 "SELECT status, workflow_agreement, workflow_provenance_last_event_id
                  FROM orders
                  WHERE id = ?1",
-                params![order_id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                crate::app_sqlite_params![order_id.to_string()],
+                |row| Ok((row.try_get(0)?, row.try_get(1)?, row.try_get(2)?)),
             )
             .optional()
             .map_err(|source| AppSqliteError::Query {
@@ -1506,8 +1513,8 @@ impl<'a> AppLocalInteropRepository<'a> {
                     AND target_event_id = ?2
                  ORDER BY event_created_at DESC, event_id DESC
                  LIMIT 1",
-                params![order_id.to_string(), target_event_id.as_str()],
-                |row| row.get(0),
+                crate::app_sqlite_params![order_id.to_string(), target_event_id.as_str()],
+                |row| row.try_get(0),
             )
             .optional()
             .map_err(|source| AppSqliteError::Query {
@@ -1545,7 +1552,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                      workflow_provenance_last_event_id = ?6,
                      updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  WHERE id = ?1",
-                params![
+                crate::app_sqlite_params![
                     order_id.to_string(),
                     status,
                     agreement,
@@ -1589,7 +1596,7 @@ impl<'a> AppLocalInteropRepository<'a> {
         self.connection
             .execute(
                 "DELETE FROM order_lines WHERE order_id = ?1",
-                params![order_id.to_string()],
+                crate::app_sqlite_params![order_id.to_string()],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "replace local interop order lines",
@@ -1633,7 +1640,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                         seller_pubkey,
                         sort_index
                      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, null, ?13, ?14)",
-                    params![
+                    crate::app_sqlite_params![
                         format!(
                             "{}:{}",
                             order_id,
@@ -1673,7 +1680,7 @@ impl<'a> AppLocalInteropRepository<'a> {
         self.connection
             .execute(
                 "DELETE FROM order_lines WHERE order_id = ?1",
-                params![order_id.to_string()],
+                crate::app_sqlite_params![order_id.to_string()],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "replace local interop active order agreement lines",
@@ -1728,7 +1735,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                         seller_pubkey,
                         sort_index
                      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-                    params![
+                    crate::app_sqlite_params![
                         format!(
                             "{}:{}",
                             order_id,
@@ -1780,11 +1787,11 @@ impl<'a> AppLocalInteropRepository<'a> {
                  WHERE order_id = ?1
                  ORDER BY sort_index ASC, id ASC
                  LIMIT 1",
-                params![order_id.to_string()],
+                crate::app_sqlite_params![order_id.to_string()],
                 |row| {
                     Ok(ExistingOrderLineMetadata {
-                        listing_event_id: row.get::<_, Option<String>>(0)?,
-                        listing_relays_json: row.get::<_, Option<String>>(1)?,
+                        listing_event_id: row.try_get::<Option<String>, _>(0)?,
+                        listing_relays_json: row.try_get::<Option<String>, _>(1)?,
                     })
                 },
             )
@@ -1804,7 +1811,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     display_name = excluded.display_name,
                     readiness = excluded.readiness,
                     updated_at = excluded.updated_at",
-                params![
+                crate::app_sqlite_params![
                     farm.farm_id.to_string(),
                     farm.display_name.as_str(),
                     farm_readiness_storage_key(farm.readiness),
@@ -1830,7 +1837,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                         ELSE excluded.readiness
                     END,
                     updated_at = excluded.updated_at",
-                params![
+                crate::app_sqlite_params![
                     farm.farm_id.to_string(),
                     farm.display_name.as_str(),
                     farm_readiness_storage_key(farm.readiness),
@@ -1898,7 +1905,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     saved_farm_display_name = excluded.saved_farm_display_name,
                     saved_farm_readiness = excluded.saved_farm_readiness,
                     updated_at = excluded.updated_at",
-                params![
+                crate::app_sqlite_params![
                     account_id,
                     display_name.as_str(),
                     i64::from(method == FarmOrderMethod::Pickup),
@@ -1920,7 +1927,7 @@ impl<'a> AppLocalInteropRepository<'a> {
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM farms WHERE id = ?1)",
                 [farm_id.to_string()],
-                |row| row.get::<_, bool>(0),
+                |row| row.try_get::<bool, _>(0),
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "check local interop farm existence",
@@ -1941,7 +1948,7 @@ impl<'a> AppLocalInteropRepository<'a> {
             .query_row(
                 "SELECT display_name FROM farms WHERE id = ?1 LIMIT 1",
                 [farm_id.to_string()],
-                |row| row.get::<_, String>(0),
+                |row| row.try_get::<String, _>(0),
             )
             .optional()
             .map_err(|source| AppSqliteError::Query {
@@ -1958,7 +1965,7 @@ impl<'a> AppLocalInteropRepository<'a> {
             .query_row(
                 "SELECT readiness FROM farms WHERE id = ?1 LIMIT 1",
                 [farm_id.to_string()],
-                |row| row.get::<_, String>(0),
+                |row| row.try_get::<String, _>(0),
             )
             .optional()
             .map_err(|source| AppSqliteError::Query {
@@ -2022,7 +2029,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     pickup_location_id = excluded.pickup_location_id,
                     order_cutoff_at = excluded.order_cutoff_at,
                     updated_at = excluded.updated_at",
-                params![
+                crate::app_sqlite_params![
                     fulfillment_window_id.to_string(),
                     farm_id_string.as_str(),
                     starts_at.as_str(),
@@ -2065,7 +2072,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     label = excluded.label,
                     address_line = excluded.address_line,
                     updated_at = excluded.updated_at",
-                params![
+                crate::app_sqlite_params![
                     pickup_location_id.to_string(),
                     farm_id_string.as_str(),
                     location_primary,
@@ -2091,7 +2098,7 @@ impl<'a> AppLocalInteropRepository<'a> {
             .query_row(
                 "SELECT strftime('%Y-%m-%dT%H:%M:%SZ', ?1, 'unixepoch')",
                 [seconds],
-                |row| row.get::<_, Option<String>>(0),
+                |row| row.try_get::<Option<String>, _>(0),
             )
             .map_err(|source| AppSqliteError::Query { operation, source })?;
         timestamp.ok_or(AppSqliteError::InvalidProjection {
@@ -2138,7 +2145,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     END,
                     listing_bin_id = coalesce(excluded.listing_bin_id, products.listing_bin_id),
                     updated_at = excluded.updated_at",
-                params![
+                crate::app_sqlite_params![
                     projection.product_id.to_string(),
                     projection.farm_id.to_string(),
                     projection.title.as_str(),
@@ -2189,12 +2196,12 @@ impl<'a> AppLocalInteropRepository<'a> {
                 [listing_addr],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                        row.get::<_, Option<String>>(5)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
+                        row.try_get::<String, _>(3)?,
+                        row.try_get::<Option<String>, _>(4)?,
+                        row.try_get::<Option<String>, _>(5)?,
                     ))
                 },
             )
@@ -2289,7 +2296,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     AND products.id = ?1
                     AND products.farm_id = ?5
                  LIMIT 1",
-                    params![
+                    crate::app_sqlite_params![
                         product_id.to_string(),
                         farm_key,
                         listing_addr,
@@ -2298,12 +2305,12 @@ impl<'a> AppLocalInteropRepository<'a> {
                     ],
                     |row| {
                         Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                            row.get::<_, String>(3)?,
-                            row.get::<_, Option<String>>(4)?,
-                            row.get::<_, Option<String>>(5)?,
+                            row.try_get::<String, _>(0)?,
+                            row.try_get::<String, _>(1)?,
+                            row.try_get::<String, _>(2)?,
+                            row.try_get::<String, _>(3)?,
+                            row.try_get::<Option<String>, _>(4)?,
+                            row.try_get::<Option<String>, _>(5)?,
                         ))
                     },
                 )
@@ -2390,7 +2397,10 @@ impl<'a> AppLocalInteropRepository<'a> {
                         source,
                     })?;
                 let rows = statement
-                    .query_map(params![listing_addr.as_str()], listing_currentness_row)
+                    .query_map(
+                        crate::app_sqlite_params![listing_addr.as_str()],
+                        listing_currentness_row,
+                    )
                     .map_err(|source| AppSqliteError::Query {
                         operation: "query current listing-address evidence",
                         source,
@@ -2436,7 +2446,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     })?;
                 let rows = statement
                     .query_map(
-                        params![event_kind, event_pubkey.as_str()],
+                        crate::app_sqlite_params![event_kind, event_pubkey.as_str()],
                         listing_currentness_identity_row,
                     )
                     .map_err(|source| AppSqliteError::Query {
@@ -2537,7 +2547,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     outbox_status = excluded.outbox_status,
                     relay_delivery_json = excluded.relay_delivery_json,
                     imported_at = excluded.imported_at",
-                params![
+                crate::app_sqlite_params![
                     record.record_id.as_str(),
                     record.seq,
                     record.family.as_str(),
@@ -2890,35 +2900,35 @@ impl ActiveOrderEvidenceBuckets {
 }
 
 fn listing_currentness_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<StoredListingCurrentnessEvidence> {
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<StoredListingCurrentnessEvidence, sqlx::Error> {
     Ok(StoredListingCurrentnessEvidence {
-        event_id: row.get(0)?,
-        event_created_at: row.get(1)?,
-        source_runtime: row.get(2)?,
-        owner_account_id: row.get(3)?,
-        local_status: row.get(4)?,
-        outbox_status: row.get(5)?,
-        relay_delivery_json: row.get(6)?,
+        event_id: row.try_get(0)?,
+        event_created_at: row.try_get(1)?,
+        source_runtime: row.try_get(2)?,
+        owner_account_id: row.try_get(3)?,
+        local_status: row.try_get(4)?,
+        outbox_status: row.try_get(5)?,
+        relay_delivery_json: row.try_get(6)?,
     })
 }
 
 fn listing_currentness_identity_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<StoredListingCurrentnessIdentityEvidence> {
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<StoredListingCurrentnessIdentityEvidence, sqlx::Error> {
     Ok(StoredListingCurrentnessIdentityEvidence {
         currentness: StoredListingCurrentnessEvidence {
-            event_id: row.get(0)?,
-            event_created_at: row.get(1)?,
-            source_runtime: row.get(2)?,
-            owner_account_id: row.get(3)?,
-            local_status: row.get(4)?,
-            outbox_status: row.get(5)?,
-            relay_delivery_json: row.get(6)?,
+            event_id: row.try_get(0)?,
+            event_created_at: row.try_get(1)?,
+            source_runtime: row.try_get(2)?,
+            owner_account_id: row.try_get(3)?,
+            local_status: row.try_get(4)?,
+            outbox_status: row.try_get(5)?,
+            relay_delivery_json: row.try_get(6)?,
         },
-        event_tags_json: row.get(7)?,
-        event_content: row.get(8)?,
-        listing_addr: row.get(9)?,
+        event_tags_json: row.try_get(7)?,
+        event_content: row.try_get(8)?,
+        listing_addr: row.try_get(9)?,
     })
 }
 
@@ -3439,14 +3449,14 @@ fn deterministic_order_number(order_id: &str) -> String {
 }
 
 fn existing_order_number(
-    connection: &Connection,
+    connection: &AppSqliteDatabase,
     order_id: OrderId,
 ) -> Result<Option<String>, AppSqliteError> {
     connection
         .query_row(
             "SELECT order_number FROM orders WHERE id = ?1 LIMIT 1",
-            params![order_id.to_string()],
-            |row| row.get::<_, String>(0),
+            crate::app_sqlite_params![order_id.to_string()],
+            |row| row.try_get::<String, _>(0),
         )
         .optional()
         .map_err(|source| AppSqliteError::Query {
@@ -3893,7 +3903,7 @@ mod tests {
         PublishOutboxStatus, RelayDeliveryEvidence, RuntimeStore, RuntimeStoreRecordFamily,
         RuntimeStoreRecordInput, RuntimeStoreRecordStatus, RuntimeStoreRecordUpdate, SourceRuntime,
     };
-    use radroots_sql_core::SqliteExecutor;
+    use radroots_sql_core::SqlxSqliteExecutor;
     use radroots_studio_app_view::{
         BuyerContext, BuyerOrderStatus, FarmId, FarmOrderMethod, OrderId, OrderStatus,
         OrdersFilter, OrdersScreenQueryState, ProductAvailabilityState, ProductId,
@@ -3907,8 +3917,8 @@ mod tests {
         RadrootsValidationReceiptStatement, RadrootsValidationReceiptType,
         VALIDATION_RECEIPT_DOMAIN, VALIDATION_RECEIPT_VERSION, validation_receipt_event_build,
     };
-    use rusqlite::params;
     use serde_json::json;
+    use sqlx::Row;
     use uuid::Uuid;
 
     use super::{
@@ -3918,8 +3928,8 @@ mod tests {
     };
     use crate::{AppSqliteStore, BuyerRepeatDemandApplyOutcome, DatabaseTarget};
 
-    fn runtime_store_store() -> RuntimeStore<SqliteExecutor> {
-        let executor = SqliteExecutor::open_memory().expect("open runtime store memory db");
+    fn runtime_store_store() -> RuntimeStore<SqlxSqliteExecutor> {
+        let executor = SqlxSqliteExecutor::open_memory().expect("open runtime store memory db");
         let store = RuntimeStore::new(executor);
         store.migrate_up().expect("migrate runtime store store");
         store
@@ -4089,6 +4099,7 @@ mod tests {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn signed_market_listing_record(
         record_id: &str,
         owner_pubkey: &str,
@@ -4331,7 +4342,7 @@ mod tests {
             .execute(
                 "INSERT INTO farms (id, display_name, readiness, created_at, updated_at)
                  VALUES (?1, 'Origin Farm', 'ready', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-                params![farm_id.to_string()],
+                crate::app_sqlite_params![farm_id.to_string()],
             )
             .expect("seed origin farm");
         app_store
@@ -4362,7 +4373,7 @@ mod tests {
                     NULL,
                     '2026-01-01T00:00:00Z'
                  )",
-                params![product_id.to_string(), farm_id.to_string()],
+                crate::app_sqlite_params![product_id.to_string(), farm_id.to_string()],
             )
             .expect("seed origin product");
     }
@@ -4530,6 +4541,7 @@ mod tests {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn revision_decision_payload(
         revision_id: &str,
         order_id: &str,
@@ -4569,7 +4581,7 @@ mod tests {
 
     struct ValidationReceiptOrderFixture {
         app_store: AppSqliteStore,
-        events: RuntimeStore<SqliteExecutor>,
+        events: RuntimeStore<SqlxSqliteExecutor>,
         buyer_context: BuyerContext,
         seller_farm_id: FarmId,
         order_id: OrderId,
@@ -4808,6 +4820,7 @@ mod tests {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn validation_receipt_event(
         event_id: &str,
         author: &str,
@@ -4958,7 +4971,7 @@ mod tests {
             .query_row(
                 "SELECT buyer_context_key FROM orders WHERE id = ?1",
                 [order_id.to_string()],
-                |row| row.get(0),
+                |row| row.try_get(0),
             )
             .expect("load buyer context key");
 
@@ -5917,8 +5930,8 @@ mod tests {
             .connection()
             .query_row(
                 "SELECT count(*) FROM order_validation_receipts WHERE order_id IS NULL",
-                [],
-                |row| row.get(0),
+                crate::empty_params(),
+                |row| row.try_get(0),
             )
             .expect("count pending validation receipts");
         assert_eq!(pending_count, 1);
@@ -6555,7 +6568,11 @@ mod tests {
             .expect("load imported records");
         let order_count: i64 = app_store
             .connection()
-            .query_row("SELECT COUNT(*) FROM orders", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM orders",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .expect("load order count");
 
         assert_eq!(report.imported_records, 1);
@@ -6893,14 +6910,25 @@ mod tests {
         );
         let product_count: i64 = app_store
             .connection()
-            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM products",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .expect("product count");
         let product: (String, String, Option<i64>, Option<i64>) = app_store
             .connection()
             .query_row(
                 "SELECT title, status, price_minor_units, stock_count FROM products",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                crate::empty_params(),
+                |row| {
+                    Ok((
+                        row.try_get(0)?,
+                        row.try_get(1)?,
+                        row.try_get(2)?,
+                        row.try_get(3)?,
+                    ))
+                },
             )
             .expect("load product");
         assert_eq!(product_count, 1);
@@ -7109,14 +7137,18 @@ mod tests {
             .expect("load imported records");
         let product_count: i64 = app_store
             .connection()
-            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM products",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .expect("product count");
         let app_product: (String, Option<i64>) = app_store
             .connection()
             .query_row(
                 "SELECT title, stock_count FROM products WHERE id = ?1",
                 [product_uuid.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.try_get(0)?, row.try_get(1)?)),
             )
             .expect("load app product");
         let network_product_id =
@@ -7126,7 +7158,14 @@ mod tests {
             .query_row(
                 "SELECT id, farm_id, title, stock_count FROM products WHERE id = ?1",
                 [network_product_id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.try_get(0)?,
+                        row.try_get(1)?,
+                        row.try_get(2)?,
+                        row.try_get(3)?,
+                    ))
+                },
             )
             .expect("load network product");
         let buyer_listings = app_store
@@ -7260,14 +7299,25 @@ mod tests {
             .expect("import network app-origin listing");
         let product_count: i64 = app_store
             .connection()
-            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM products",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .expect("product count");
         let product: (String, String, String, Option<i64>) = app_store
             .connection()
             .query_row(
                 "SELECT id, farm_id, title, stock_count FROM products",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                crate::empty_params(),
+                |row| {
+                    Ok((
+                        row.try_get(0)?,
+                        row.try_get(1)?,
+                        row.try_get(2)?,
+                        row.try_get(3)?,
+                    ))
+                },
             )
             .expect("load product");
         let imported = app_store
@@ -7391,14 +7441,18 @@ mod tests {
             .expect("import network app-origin listing");
         let product_count: i64 = app_store
             .connection()
-            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM products",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .expect("product count");
         let app_product: (String, Option<i64>) = app_store
             .connection()
             .query_row(
                 "SELECT title, stock_count FROM products WHERE id = ?1",
                 [product_uuid.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.try_get(0)?, row.try_get(1)?)),
             )
             .expect("load app product");
         let foreign_product_id =
@@ -7408,7 +7462,7 @@ mod tests {
             .query_row(
                 "SELECT COUNT(*) FROM products WHERE id = ?1",
                 [foreign_product_id.to_string()],
-                |row| row.get(0),
+                |row| row.try_get(0),
             )
             .expect("foreign product count");
 
@@ -7459,7 +7513,11 @@ mod tests {
             deterministic_product_id(Some(seller_pubkey), listing_key.as_str());
         let network_product_count: i64 = app_store
             .connection()
-            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM products",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .expect("network product count");
         assert_eq!(network_product_count, 1);
         assert_ne!(network_product_id.as_uuid(), product_uuid);
@@ -7565,14 +7623,18 @@ mod tests {
             .expect("load imported records");
         let product_count: i64 = app_store
             .connection()
-            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM products",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .expect("product count");
         let stale_product_count: i64 = app_store
             .connection()
             .query_row(
                 "SELECT COUNT(*) FROM products WHERE id = ?1",
                 [network_product_id.to_string()],
-                |row| row.get(0),
+                |row| row.try_get(0),
             )
             .expect("stale product count");
         let listing_import = imported
@@ -7587,7 +7649,7 @@ mod tests {
             .query_row(
                 "SELECT id FROM order_lines WHERE order_id = ?1",
                 [order_id.to_string()],
-                |row| row.get(0),
+                |row| row.try_get(0),
             )
             .expect("order line id should load");
 
@@ -7734,14 +7796,18 @@ mod tests {
             .expect("load imported records");
         let product_count: i64 = app_store
             .connection()
-            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM products",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .expect("product count");
         let stale_cart_quantity: i64 = app_store
             .connection()
             .query_row(
                 "SELECT quantity FROM buyer_cart_lines WHERE product_id = ?1",
                 [network_product_id.to_string()],
-                |row| row.get(0),
+                |row| row.try_get(0),
             )
             .expect("stale cart quantity");
         let canonical_cart_count: i64 = app_store
@@ -7749,7 +7815,7 @@ mod tests {
             .query_row(
                 "SELECT COUNT(*) FROM buyer_cart_lines WHERE product_id = ?1",
                 [product_uuid.to_string()],
-                |row| row.get(0),
+                |row| row.try_get(0),
             )
             .expect("canonical cart count");
         let network_product_title: String = app_store
@@ -7757,7 +7823,7 @@ mod tests {
             .query_row(
                 "SELECT title FROM products WHERE id = ?1",
                 [network_product_id.to_string()],
-                |row| row.get(0),
+                |row| row.try_get(0),
             )
             .expect("network product title");
 
@@ -8005,9 +8071,11 @@ mod tests {
             .expect("import older listing");
         let product: (String, Option<i64>) = app_store
             .connection()
-            .query_row("SELECT title, stock_count FROM products", [], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })
+            .query_row(
+                "SELECT title, stock_count FROM products",
+                crate::empty_params(),
+                |row| Ok((row.try_get(0)?, row.try_get(1)?)),
+            )
             .expect("load product");
         let imported = app_store
             .load_local_interop_records()
@@ -8086,9 +8154,11 @@ mod tests {
             .expect("import losing listing");
         let product: (String, Option<i64>) = app_store
             .connection()
-            .query_row("SELECT title, stock_count FROM products", [], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })
+            .query_row(
+                "SELECT title, stock_count FROM products",
+                crate::empty_params(),
+                |row| Ok((row.try_get(0)?, row.try_get(1)?)),
+            )
             .expect("load product");
 
         assert_eq!(product.0, "Tie Winner Eggs");
@@ -8150,9 +8220,11 @@ mod tests {
             .expect("load imported records");
         let stored_farm: (String, String) = app_store
             .connection()
-            .query_row("SELECT id, display_name FROM farms", [], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })
+            .query_row(
+                "SELECT id, display_name FROM farms",
+                crate::empty_params(),
+                |row| Ok((row.try_get(0)?, row.try_get(1)?)),
+            )
             .expect("load farm");
 
         assert_eq!(report.imported_records, 1);
@@ -8237,9 +8309,11 @@ mod tests {
             .expect("load imported records");
         let product: (String, String) = app_store
             .connection()
-            .query_row("SELECT id, farm_id FROM products", [], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })
+            .query_row(
+                "SELECT id, farm_id FROM products",
+                crate::empty_params(),
+                |row| Ok((row.try_get(0)?, row.try_get(1)?)),
+            )
             .expect("load product");
 
         assert_eq!(report.imported_records, 1);
@@ -8522,9 +8596,11 @@ mod tests {
             .expect("import shared local work after relay");
         let stored_farm: (String, String, String) = app_store
             .connection()
-            .query_row("SELECT id, display_name, readiness FROM farms", [], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })
+            .query_row(
+                "SELECT id, display_name, readiness FROM farms",
+                crate::empty_params(),
+                |row| Ok((row.try_get(0)?, row.try_get(1)?, row.try_get(2)?)),
+            )
             .expect("load farm");
 
         assert_eq!(direct_report.imported_records, 1);
@@ -8605,9 +8681,11 @@ mod tests {
             .expect("import listing and farm");
         let stored_farm: (String, String, String) = app_store
             .connection()
-            .query_row("SELECT id, display_name, readiness FROM farms", [], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })
+            .query_row(
+                "SELECT id, display_name, readiness FROM farms",
+                crate::empty_params(),
+                |row| Ok((row.try_get(0)?, row.try_get(1)?, row.try_get(2)?)),
+            )
             .expect("load farm");
 
         assert_eq!(report.imported_records, 2);
@@ -8644,7 +8722,11 @@ mod tests {
                 .expect("import signed listing");
             let product_status: String = app_store
                 .connection()
-                .query_row("SELECT status FROM products", [], |row| row.get(0))
+                .query_row(
+                    "SELECT status FROM products",
+                    crate::empty_params(),
+                    |row| row.try_get(0),
+                )
                 .expect("load product status");
 
             assert_eq!(report.imported_records, 1);
@@ -8685,7 +8767,11 @@ mod tests {
             .expect("import observed signed listing");
         let product_status: String = app_store
             .connection()
-            .query_row("SELECT status FROM products", [], |row| row.get(0))
+            .query_row(
+                "SELECT status FROM products",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .expect("load product status");
 
         assert_eq!(report.imported_records, 1);
@@ -8717,7 +8803,11 @@ mod tests {
             .expect("load imported records");
         let product_count: i64 = app_store
             .connection()
-            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM products",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .expect("product count");
 
         assert_eq!(report.imported_records, 0);
@@ -8770,7 +8860,11 @@ mod tests {
                 .expect("import unconfirmed signed listing");
             let product_status: String = app_store
                 .connection()
-                .query_row("SELECT status FROM products", [], |row| row.get(0))
+                .query_row(
+                    "SELECT status FROM products",
+                    crate::empty_params(),
+                    |row| row.try_get(0),
+                )
                 .expect("load product status");
             let imported = app_store
                 .load_local_interop_records()
@@ -8830,7 +8924,11 @@ mod tests {
             .expect("import updated listing");
         let product_status: String = app_store
             .connection()
-            .query_row("SELECT status FROM products", [], |row| row.get(0))
+            .query_row(
+                "SELECT status FROM products",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .expect("load product status");
         let imported = app_store
             .load_local_interop_records()
@@ -8929,20 +9027,24 @@ mod tests {
             .expect("import unchanged shared runtime store into origin store");
         let origin_product_count: i64 = origin_store
             .connection()
-            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM products",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .expect("origin product count");
         let origin_product: (String, String, String, Option<i64>, Option<i64>) = origin_store
             .connection()
             .query_row(
                 "SELECT id, farm_id, title, price_minor_units, stock_count FROM products",
-                [],
+                crate::empty_params(),
                 |row| {
                     Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
+                        row.try_get(0)?,
+                        row.try_get(1)?,
+                        row.try_get(2)?,
+                        row.try_get(3)?,
+                        row.try_get(4)?,
                     ))
                 },
             )
@@ -8971,13 +9073,19 @@ mod tests {
             .expect("import shared runtime store into fresh store");
         let fresh_product_count: i64 = fresh_store
             .connection()
-            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM products",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .expect("fresh product count");
         let fresh_product: (String, String, String) = fresh_store
             .connection()
-            .query_row("SELECT id, farm_id, title FROM products", [], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })
+            .query_row(
+                "SELECT id, farm_id, title FROM products",
+                crate::empty_params(),
+                |row| Ok((row.try_get(0)?, row.try_get(1)?, row.try_get(2)?)),
+            )
             .expect("load fresh product");
         let fresh_imports = fresh_store
             .load_local_interop_records()
@@ -9031,7 +9139,9 @@ mod tests {
             .expect("load imported records");
         let farm_count: i64 = app_store
             .connection()
-            .query_row("SELECT COUNT(*) FROM farms", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM farms", crate::empty_params(), |row| {
+                row.try_get(0)
+            })
             .expect("farm count");
 
         assert_eq!(report.scanned_records, 1);
@@ -9169,20 +9279,24 @@ mod tests {
             .collect::<Vec<_>>();
         let product_count: i64 = app_store
             .connection()
-            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM products",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .expect("product count");
         let product: (String, String, String, Option<i64>, Option<i64>) = app_store
             .connection()
             .query_row(
                 "SELECT id, farm_id, status, price_minor_units, stock_count FROM products",
-                [],
+                crate::empty_params(),
                 |row| {
                     Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
+                        row.try_get(0)?,
+                        row.try_get(1)?,
+                        row.try_get(2)?,
+                        row.try_get(3)?,
+                        row.try_get(4)?,
                     ))
                 },
             )

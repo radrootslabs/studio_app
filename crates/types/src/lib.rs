@@ -54,7 +54,7 @@ macro_rules! typed_id {
         pub struct $name(Uuid);
 
         impl $name {
-            pub fn new() -> Self {
+            pub fn generate() -> Self {
                 Self(Uuid::now_v7())
             }
 

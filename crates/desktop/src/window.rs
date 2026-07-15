@@ -6350,7 +6350,7 @@ impl SettingsFarmPanelState {
 
     fn add_pickup_location(&mut self, window: &mut Window, cx: &mut Context<SettingsWindowView>) {
         let record = PickupLocationRecord {
-            pickup_location_id: PickupLocationId::new(),
+            pickup_location_id: PickupLocationId::generate(),
             farm_id: self.farm_id,
             label: String::new(),
             address_line: String::new(),
@@ -6400,7 +6400,7 @@ impl SettingsFarmPanelState {
             .map(|pickup_location| pickup_location.pickup_location_id);
         let fulfillment_window = SettingsFulfillmentWindowFormState::new(
             &SettingsFulfillmentWindowDraft {
-                fulfillment_window_id: FulfillmentWindowId::new(),
+                fulfillment_window_id: FulfillmentWindowId::generate(),
                 selected_pickup_location_id,
                 label: String::new(),
                 starts_at: String::new(),
@@ -6445,7 +6445,7 @@ impl SettingsFarmPanelState {
     fn add_blackout_period(&mut self, window: &mut Window, cx: &mut Context<SettingsWindowView>) {
         let blackout_period = SettingsBlackoutPeriodFormState::new(
             &SettingsBlackoutPeriodDraft {
-                blackout_period_id: BlackoutPeriodId::new(),
+                blackout_period_id: BlackoutPeriodId::generate(),
                 label: String::new(),
                 starts_at: String::new(),
                 ends_at: String::new(),
@@ -16387,7 +16387,7 @@ mod tests {
 
     impl TestDirectory {
         fn new() -> Self {
-            let path = std::env::temp_dir().join(FulfillmentWindowId::new().to_string());
+            let path = std::env::temp_dir().join(FulfillmentWindowId::generate().to_string());
             fs::create_dir_all(&path).unwrap();
             Self { path }
         }
@@ -16504,8 +16504,8 @@ mod tests {
 
     #[test]
     fn buyer_order_detail_focus_reopens_same_selected_detail() {
-        let order_id = OrderId::new();
-        let farm_id = FarmId::new();
+        let order_id = OrderId::generate();
+        let farm_id = FarmId::generate();
         let mut runtime = summary(
             HomeRoute::Personal,
             TodayAgendaProjection::default(),
@@ -16540,15 +16540,15 @@ mod tests {
             Some(HomeFocusedView::BuyerOrderDetail(order_id))
         );
         assert_eq!(
-            buyer_order_detail_focus_after_open(false, &runtime, OrderId::new()),
+            buyer_order_detail_focus_after_open(false, &runtime, OrderId::generate()),
             None
         );
     }
 
     #[test]
     fn farmer_order_detail_focus_reopens_same_selected_detail() {
-        let order_id = OrderId::new();
-        let farm_id = FarmId::new();
+        let order_id = OrderId::generate();
+        let farm_id = FarmId::generate();
         let mut runtime = summary(
             HomeRoute::Today,
             TodayAgendaProjection::default(),
@@ -16581,7 +16581,7 @@ mod tests {
             Some(HomeFocusedView::FarmerOrderDetail(order_id))
         );
         assert_eq!(
-            farmer_order_detail_focus_after_open(false, &runtime, OrderId::new()),
+            farmer_order_detail_focus_after_open(false, &runtime, OrderId::generate()),
             None
         );
     }
@@ -16620,7 +16620,10 @@ mod tests {
         block_shared_runtime_store_database(&paths);
 
         assert!(
-            view.open_personal_product_detail_update(PersonalSection::Browse, ProductId::new())
+            view.open_personal_product_detail_update(
+                PersonalSection::Browse,
+                ProductId::generate()
+            )
         );
         assert_eq!(
             view.buyer_workspace_notice.as_deref(),
@@ -16632,8 +16635,8 @@ mod tests {
 
     fn sample_pack_day_bundle(bundle_directory: &PathBuf) -> PackDayExportBundle {
         PackDayExportBundle {
-            fulfillment_window_id: FulfillmentWindowId::new(),
-            export_instance_id: radroots_studio_app_view::PackDayExportInstanceId::new(),
+            fulfillment_window_id: FulfillmentWindowId::generate(),
+            export_instance_id: radroots_studio_app_view::PackDayExportInstanceId::generate(),
             generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
             bundle_directory: bundle_directory.to_string_lossy().into_owned(),
             artifacts: vec![
@@ -17079,8 +17082,8 @@ mod tests {
             Some(HomeAutoFocusTarget::BuyerOrderReviewNameInput)
         );
 
-        let order_id = OrderId::new();
-        let farm_id = FarmId::new();
+        let order_id = OrderId::generate();
+        let farm_id = FarmId::generate();
         let mut buyer_orders = buyer_search.clone();
         buyer_orders.shell_projection = AppShellProjection::new(
             ActiveSurface::Personal,
@@ -17145,7 +17148,7 @@ mod tests {
             Some(HomeAutoFocusTarget::FarmerSetupStart)
         );
 
-        let farm_id = FarmId::new();
+        let farm_id = FarmId::generate();
         let incomplete_farm = FarmSummary {
             farm_id,
             display_name: String::new(),
@@ -17172,7 +17175,7 @@ mod tests {
         );
 
         let saved_farm = FarmSummary {
-            farm_id: FarmId::new(),
+            farm_id: FarmId::generate(),
             display_name: String::new(),
             readiness: FarmReadiness::Ready,
         };
@@ -17217,8 +17220,8 @@ mod tests {
             ActiveSurface::Farmer,
             ShellSection::Farmer(FarmerSection::Orders),
         );
-        let farmer_order_id = OrderId::new();
-        let farmer_order_farm_id = FarmId::new();
+        let farmer_order_id = OrderId::generate();
+        let farmer_order_farm_id = FarmId::generate();
         orders.orders_projection.list.rows = vec![OrdersListRow {
             order_id: farmer_order_id,
             farm_id: farmer_order_farm_id,
@@ -17322,14 +17325,14 @@ mod tests {
 
     #[test]
     fn farmer_home_farm_state_distinguishes_no_farm_incomplete_and_configured() {
-        let farm_id = FarmId::new();
+        let farm_id = FarmId::generate();
         let incomplete_farm = FarmSummary {
             farm_id,
             display_name: String::new(),
             readiness: FarmReadiness::Incomplete,
         };
         let configured_farm = FarmSummary {
-            farm_id: FarmId::new(),
+            farm_id: FarmId::generate(),
             display_name: String::new(),
             readiness: FarmReadiness::Ready,
         };
@@ -17382,7 +17385,7 @@ mod tests {
 
     #[test]
     fn pack_day_availability_tracks_the_contextual_window_projection() {
-        let farm_id = FarmId::new();
+        let farm_id = FarmId::generate();
         let mut runtime = summary(
             HomeRoute::Today,
             TodayAgendaProjection::default(),
@@ -17401,7 +17404,7 @@ mod tests {
 
         runtime.pack_day_projection.projection = PackDayProjection {
             fulfillment_window: Some(FulfillmentWindowSummary {
-                fulfillment_window_id: FulfillmentWindowId::new(),
+                fulfillment_window_id: FulfillmentWindowId::generate(),
                 farm_id,
                 starts_at: String::new(),
                 ends_at: String::new(),
@@ -17417,8 +17420,8 @@ mod tests {
 
     #[test]
     fn pack_day_export_action_enabled_requires_a_window_and_exportable_rows() {
-        let farm_id = FarmId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let farm_id = FarmId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
         let mut runtime = summary(
             HomeRoute::Today,
             TodayAgendaProjection::default(),
@@ -17487,10 +17490,10 @@ mod tests {
 
     #[test]
     fn pack_day_export_detail_rows_surface_bundle_and_failure_details() {
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
         let bundle = PackDayExportBundle {
             fulfillment_window_id,
-            export_instance_id: radroots_studio_app_view::PackDayExportInstanceId::new(),
+            export_instance_id: radroots_studio_app_view::PackDayExportInstanceId::generate(),
             generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
             bundle_directory: "exports/pack_day/window-1/20260423T150000Z".to_owned(),
             artifacts: vec![
@@ -18151,7 +18154,7 @@ mod tests {
     #[test]
     fn saved_farm_falls_back_to_local_projection_when_today_is_empty() {
         let saved_farm = FarmSummary {
-            farm_id: FarmId::new(),
+            farm_id: FarmId::generate(),
             display_name: String::new(),
             readiness: FarmReadiness::Ready,
         };
@@ -18388,8 +18391,8 @@ mod tests {
 
     #[test]
     fn reminder_action_target_prefers_order_detail_before_pack_day() {
-        let order_id = radroots_studio_app_view::OrderId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let order_id = radroots_studio_app_view::OrderId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
 
         assert_eq!(
             reminder_action_target(&fixture_reminder(
@@ -18448,7 +18451,7 @@ mod tests {
     fn reminder_deadline_text_uses_the_typed_due_label() {
         let reminder = fixture_reminder(
             None,
-            Some(FulfillmentWindowId::new()),
+            Some(FulfillmentWindowId::generate()),
             ReminderKind::FulfillmentWindow,
             ReminderUrgency::Upcoming,
         );
@@ -18488,7 +18491,7 @@ mod tests {
         );
         let due_soon = fixture_reminder(
             None,
-            Some(FulfillmentWindowId::new()),
+            Some(FulfillmentWindowId::generate()),
             ReminderKind::FulfillmentWindow,
             ReminderUrgency::DueSoon,
         );
@@ -18558,7 +18561,7 @@ mod tests {
         let blocking_conflict = DesktopAppSyncConflictSummary {
             conflict_id: String::new(),
             conflict: SyncConflict {
-                aggregate: SyncAggregateRef::Farm(FarmId::new()),
+                aggregate: SyncAggregateRef::Farm(FarmId::generate()),
                 kind: SyncConflictKind::RevisionMismatch,
                 severity: SyncConflictSeverity::Blocking,
                 resolution: SyncConflictResolutionStatus::Unresolved,
@@ -18571,7 +18574,7 @@ mod tests {
         let review_conflict = DesktopAppSyncConflictSummary {
             conflict_id: String::new(),
             conflict: SyncConflict {
-                aggregate: SyncAggregateRef::Order(radroots_studio_app_view::OrderId::new()),
+                aggregate: SyncAggregateRef::Order(radroots_studio_app_view::OrderId::generate()),
                 kind: SyncConflictKind::RemoteValidationReject,
                 severity: SyncConflictSeverity::ReviewRequired,
                 resolution: SyncConflictResolutionStatus::Unresolved,
@@ -18898,8 +18901,8 @@ mod tests {
         urgency: ReminderUrgency,
     ) -> ReminderDeadlineProjection {
         ReminderDeadlineProjection {
-            reminder_id: ReminderId::new(),
-            farm_id: FarmId::new(),
+            reminder_id: ReminderId::generate(),
+            farm_id: FarmId::generate(),
             order_id,
             fulfillment_window_id,
             kind,

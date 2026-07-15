@@ -681,7 +681,7 @@ mod tests {
 
     #[test]
     fn publish_payload_serializes_with_stable_kind_and_sdk_target() {
-        let farm_id = FarmId::new();
+        let farm_id = FarmId::generate();
         let payload = AppPublishPayload::FarmProfile(AppFarmProfilePublishPayload {
             context: AppPublishContext::new("acct_local", "farm_setup")
                 .with_source_local_event_id("local-event-1"),
@@ -739,7 +739,7 @@ mod tests {
     fn listing_publish_payload_reports_stable_validation_reason_codes() {
         let payload = AppPublishPayload::Listing(AppListingPublishPayload {
             context: AppPublishContext::new("", ""),
-            product_id: ProductId::new(),
+            product_id: ProductId::generate(),
             listing_d_tag: None,
             farm_id: None,
             farm_pubkey: None,
@@ -789,8 +789,8 @@ mod tests {
     fn order_request_publish_payload_requires_sdk_publish_inputs() {
         let payload = AppPublishPayload::OrderRequest(AppOrderRequestPublishPayload {
             context: AppPublishContext::new("acct_buyer", "place_personal_order"),
-            order_id: OrderId::new(),
-            farm_id: FarmId::new(),
+            order_id: OrderId::generate(),
+            farm_id: FarmId::generate(),
             status: Some("needs_action".to_owned()),
             order_document_json: None,
             listing_addr: Some(String::new()),
@@ -799,7 +799,7 @@ mod tests {
             buyer_pubkey: None,
             seller_pubkey: Some(" ".to_owned()),
             items: vec![AppOrderRequestItemPayload {
-                product_id: ProductId::new(),
+                product_id: ProductId::generate(),
                 quantity: 0,
             }],
             currency_code: None,
@@ -834,8 +834,8 @@ mod tests {
     fn order_decision_publish_payload_reports_stable_validation_reason_codes() {
         let payload = AppPublishPayload::OrderDecision(AppOrderDecisionPublishPayload {
             context: AppPublishContext::new("", ""),
-            app_order_id: OrderId::new(),
-            farm_id: FarmId::new(),
+            app_order_id: OrderId::generate(),
+            farm_id: FarmId::generate(),
             trade_order_id: " ".to_owned(),
             request_event_id: String::new(),
             listing_event_id: None,
@@ -876,8 +876,8 @@ mod tests {
 
     #[test]
     fn cancellation_publish_payload_reports_stable_validation_reason_codes() {
-        let order_id = OrderId::new();
-        let farm_id = FarmId::new();
+        let order_id = OrderId::generate();
+        let farm_id = FarmId::generate();
         let cancellation =
             AppPublishPayload::OrderCancellation(AppOrderCancellationPublishPayload {
                 context: AppPublishContext::new("", ""),
@@ -956,8 +956,8 @@ mod tests {
 
     #[test]
     fn order_revision_publish_payloads_report_stable_validation_reason_codes() {
-        let order_id = OrderId::new();
-        let farm_id = FarmId::new();
+        let order_id = OrderId::generate();
+        let farm_id = FarmId::generate();
         let economics = revision_economics();
         let valid_proposal =
             AppPublishPayload::OrderRevisionProposal(AppOrderRevisionProposalPublishPayload {
@@ -1067,7 +1067,7 @@ mod tests {
     fn existing_raw_payload_outbox_work_rejects_publish_payload() {
         let pending_operation = PendingSyncOperation {
             operation_key: "product:greens:upsert".to_owned(),
-            aggregate: SyncAggregateRef::Product(ProductId::new()),
+            aggregate: SyncAggregateRef::Product(ProductId::generate()),
             operation: SyncOperationKind::Upsert,
             payload_json: "{\"title\":\"greens\"}".to_owned(),
             created_at: "2026-04-17T19:32:00Z".to_owned(),

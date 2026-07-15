@@ -2292,7 +2292,7 @@ mod tests {
                 custody: AccountCustody::LocalManaged,
             },
             SelectedSurfaceProjection::new(ActiveSurface::Farmer),
-            FarmerActivationProjection::active(FarmId::new()),
+            FarmerActivationProjection::active(FarmId::generate()),
         );
         let activation = AccountSurfaceActivationProjection::from(&selected_account);
         let restored = SelectedAccountProjection::from_surface_activation(
@@ -2315,7 +2315,7 @@ mod tests {
                     custody: AccountCustody::LocalManaged,
                 },
                 SelectedSurfaceProjection::new(ActiveSurface::Farmer),
-                FarmerActivationProjection::active(FarmId::new()),
+                FarmerActivationProjection::active(FarmId::generate()),
             ),
         );
         let personal_identity = AppIdentityProjection::ready(
@@ -2419,7 +2419,7 @@ mod tests {
                 custody: AccountCustody::LocalManaged,
             },
             SelectedSurfaceProjection::new(ActiveSurface::Farmer),
-            FarmerActivationProjection::active(FarmId::new()),
+            FarmerActivationProjection::active(FarmId::generate()),
         );
         let signed_in_identity = AppIdentityProjection::ready(Vec::new(), selected_account.clone());
         let blocked_identity = AppIdentityProjection::blocked_with_selection(
@@ -2663,8 +2663,8 @@ mod tests {
     #[test]
     fn product_attention_stock_and_projection_states_are_explicit() {
         let row = ProductsListRow {
-            product_id: super::ProductId::new(),
-            farm_id: FarmId::new(),
+            product_id: super::ProductId::generate(),
+            farm_id: FarmId::generate(),
             title: "Pea shoots".to_owned(),
             subtitle: Some("Tray-grown".to_owned()),
             status: ProductStatus::Draft,
@@ -2723,7 +2723,7 @@ mod tests {
             price_minor_units: Some(450),
             price_currency: "USD".to_owned(),
             stock_quantity: Some(12),
-            availability_window_id: Some(super::FulfillmentWindowId::new()),
+            availability_window_id: Some(super::FulfillmentWindowId::generate()),
             status: ProductStatus::Draft,
         };
 
@@ -2934,7 +2934,7 @@ mod tests {
             "storage keys must parse exactly"
         );
 
-        let order_id = OrderId::new();
+        let order_id = OrderId::generate();
         let active_order = test_active_order_projection(RadrootsTradeWorkflowState::Committed);
         let projection = TradeWorkflowProjection::from_active_order_projection(
             order_id,
@@ -3356,9 +3356,9 @@ mod tests {
 
     #[test]
     fn pack_day_output_source_keeps_export_truth_out_of_ui_display_strings() {
-        let farm_id = FarmId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let order_id = OrderId::new();
+        let farm_id = FarmId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
+        let order_id = OrderId::generate();
         let screen_row = PackDayPackListRow {
             title: "Salad mix".to_owned(),
             quantity_display: "Casey: 2 bags".to_owned(),
@@ -3405,10 +3405,10 @@ mod tests {
 
     #[test]
     fn pack_day_export_bundle_tracks_output_directory_and_artifacts() {
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
         let bundle = PackDayExportBundle {
             fulfillment_window_id,
-            export_instance_id: PackDayExportInstanceId::new(),
+            export_instance_id: PackDayExportInstanceId::generate(),
             generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
             bundle_directory: "exports/pack_day/window-1/20260423T150000Z".to_owned(),
             artifacts: vec![
@@ -3432,9 +3432,9 @@ mod tests {
 
     #[test]
     fn orders_and_pack_day_projections_hold_truthful_execution_data() {
-        let fulfillment_window_id = super::FulfillmentWindowId::new();
-        let farm_id = FarmId::new();
-        let order_id = super::OrderId::new();
+        let fulfillment_window_id = super::FulfillmentWindowId::generate();
+        let farm_id = FarmId::generate();
+        let order_id = super::OrderId::generate();
         let order_economics = TradeEconomicsProjection {
             subtotal_minor_units: Some(1300),
             total_minor_units: Some(1300),
@@ -3530,9 +3530,9 @@ mod tests {
 
     #[test]
     fn buyer_marketplace_projections_hold_guest_capable_contract_data() {
-        let farm_id = FarmId::new();
-        let product_id = super::ProductId::new();
-        let order_id = super::OrderId::new();
+        let farm_id = FarmId::generate();
+        let product_id = super::ProductId::generate();
+        let order_id = super::OrderId::generate();
         let buyer_order_economics = TradeEconomicsProjection {
             subtotal_minor_units: Some(1300),
             total_minor_units: Some(1300),
@@ -3664,19 +3664,19 @@ mod tests {
     fn today_agenda_stays_on_the_compact_order_row_contract() {
         let today = TodayAgendaProjection {
             orders_needing_action: vec![OrderListRow {
-                order_id: super::OrderId::new(),
-                farm_id: FarmId::new(),
-                fulfillment_window_id: Some(super::FulfillmentWindowId::new()),
+                order_id: super::OrderId::generate(),
+                farm_id: FarmId::generate(),
+                fulfillment_window_id: Some(super::FulfillmentWindowId::generate()),
                 order_number: "R-1002".to_owned(),
                 customer_display_name: "Morgan".to_owned(),
                 status: OrderStatus::NeedsAction,
             }],
             ..TodayAgendaProjection::default()
         };
-        let orders_row_id = super::OrderId::new();
+        let orders_row_id = super::OrderId::generate();
         let orders_row = OrdersListRow {
             order_id: orders_row_id,
-            farm_id: FarmId::new(),
+            farm_id: FarmId::generate(),
             fulfillment_window_id: None,
             order_number: "R-2002".to_owned(),
             customer_display_name: "Robin".to_owned(),
@@ -3702,14 +3702,14 @@ mod tests {
     #[test]
     fn today_summary_attention_state_is_explicit() {
         let quiet = TodaySummary {
-            farm_id: FarmId::new(),
+            farm_id: FarmId::generate(),
             orders_needing_action: 0,
             low_stock_products: 0,
             draft_products: 0,
             reminders_due_soon: 0,
         };
         let busy = TodaySummary {
-            farm_id: FarmId::new(),
+            farm_id: FarmId::generate(),
             orders_needing_action: 1,
             low_stock_products: 0,
             draft_products: 0,
@@ -3722,11 +3722,11 @@ mod tests {
 
     #[test]
     fn reminder_and_repeat_demand_contracts_are_explicit() {
-        let farm_id = FarmId::new();
-        let order_id = OrderId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let farm_id = FarmId::generate();
+        let order_id = OrderId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
         let reminder = ReminderDeadlineProjection {
-            reminder_id: ReminderId::new(),
+            reminder_id: ReminderId::generate(),
             farm_id,
             order_id: Some(order_id),
             fulfillment_window_id: Some(fulfillment_window_id),
@@ -3781,8 +3781,8 @@ mod tests {
         let calm = TodayAgendaProjection::default();
         let with_attention = TodayAgendaProjection {
             draft_products: vec![ProductListRow {
-                product_id: super::ProductId::new(),
-                farm_id: FarmId::new(),
+                product_id: super::ProductId::generate(),
+                farm_id: FarmId::generate(),
                 title: "Spring onions".to_owned(),
                 status: super::ProductStatus::Draft,
                 stock_count: 0,
@@ -3809,16 +3809,16 @@ mod tests {
     fn today_agenda_projection_can_hold_truthful_lists() {
         let projection = TodayAgendaProjection {
             orders_needing_action: vec![OrderListRow {
-                order_id: super::OrderId::new(),
-                farm_id: FarmId::new(),
-                fulfillment_window_id: Some(super::FulfillmentWindowId::new()),
+                order_id: super::OrderId::generate(),
+                farm_id: FarmId::generate(),
+                fulfillment_window_id: Some(super::FulfillmentWindowId::generate()),
                 order_number: "R-1001".to_owned(),
                 customer_display_name: "Casey".to_owned(),
                 status: super::OrderStatus::NeedsAction,
             }],
             low_stock_products: vec![ProductListRow {
-                product_id: super::ProductId::new(),
-                farm_id: FarmId::new(),
+                product_id: super::ProductId::generate(),
+                farm_id: FarmId::generate(),
                 title: "Carrots".to_owned(),
                 status: super::ProductStatus::Published,
                 stock_count: 2,
@@ -3893,7 +3893,7 @@ mod tests {
     #[test]
     fn saved_farm_projection_is_always_ready() {
         let saved_farm = super::FarmSummary {
-            farm_id: FarmId::new(),
+            farm_id: FarmId::generate(),
             display_name: "North field farm".to_owned(),
             readiness: super::FarmReadiness::Ready,
         };
@@ -3927,8 +3927,8 @@ mod tests {
             blockers: vec![FarmReadinessBlocker::MissingOperatingRules],
             timing_conflicts: vec![FarmTimingConflict {
                 kind: FarmTimingConflictKind::BlackoutOverlapsFulfillmentWindow,
-                fulfillment_window_id: Some(super::FulfillmentWindowId::new()),
-                blackout_period_id: Some(BlackoutPeriodId::new()),
+                fulfillment_window_id: Some(super::FulfillmentWindowId::generate()),
+                blackout_period_id: Some(BlackoutPeriodId::generate()),
             }],
         };
 
@@ -3970,10 +3970,10 @@ mod tests {
 
     #[test]
     fn farm_rules_projection_represents_full_v1_inventory() {
-        let farm_id = FarmId::new();
-        let pickup_location_id = PickupLocationId::new();
-        let fulfillment_window_id = super::FulfillmentWindowId::new();
-        let blackout_period_id = BlackoutPeriodId::new();
+        let farm_id = FarmId::generate();
+        let pickup_location_id = PickupLocationId::generate();
+        let fulfillment_window_id = super::FulfillmentWindowId::generate();
+        let blackout_period_id = BlackoutPeriodId::generate();
         let projection = super::FarmRulesProjection {
             farm_profile: Some(super::FarmProfileRecord {
                 farm_id,
@@ -4088,12 +4088,12 @@ mod tests {
     #[test]
     fn activity_context_preserves_recent_event_order() {
         let first = AppActivityEvent {
-            activity_event_id: ActivityEventId::new(),
+            activity_event_id: ActivityEventId::generate(),
             recorded_at: "2026-04-18T00:00:00.000Z".to_owned(),
             kind: AppActivityKind::HomeOpened,
         };
         let second = AppActivityEvent {
-            activity_event_id: ActivityEventId::new(),
+            activity_event_id: ActivityEventId::generate(),
             recorded_at: "2026-04-18T00:01:00.000Z".to_owned(),
             kind: AppActivityKind::SettingsOpened {
                 section: SettingsSection::About,

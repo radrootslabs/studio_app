@@ -2293,7 +2293,7 @@ mod tests {
                     custody: AccountCustody::LocalManaged,
                 },
                 SelectedSurfaceProjection::new(surface),
-                FarmerActivationProjection::active(FarmId::new()),
+                FarmerActivationProjection::active(FarmId::generate()),
             ),
         )
     }
@@ -2332,7 +2332,7 @@ mod tests {
     ) -> PackDayExportBundle {
         PackDayExportBundle {
             fulfillment_window_id,
-            export_instance_id: PackDayExportInstanceId::new(),
+            export_instance_id: PackDayExportInstanceId::generate(),
             generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
             bundle_directory: "exports/pack_day/window-1/20260423T150000Z".to_owned(),
             artifacts: vec![
@@ -2487,9 +2487,9 @@ mod tests {
     fn orders_and_pack_day_queries_refresh_as_local_app_state() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
-        let farm_id = FarmId::new();
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let order_id = OrderId::new();
+        let farm_id = FarmId::generate();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
+        let order_id = OrderId::generate();
         let order_economics = TradeEconomicsProjection {
             subtotal_minor_units: Some(1300),
             total_minor_units: Some(1300),
@@ -2549,7 +2549,7 @@ mod tests {
         };
         let orders_reminders = ReminderFeedProjection {
             items: vec![radroots_studio_app_view::ReminderDeadlineProjection {
-                reminder_id: radroots_studio_app_view::ReminderId::new(),
+                reminder_id: radroots_studio_app_view::ReminderId::generate(),
                 farm_id,
                 order_id: Some(order_id),
                 fulfillment_window_id: Some(fulfillment_window_id),
@@ -2745,7 +2745,7 @@ mod tests {
     fn pack_day_export_state_is_restart_ephemeral_and_skips_persistence() {
         let mut store =
             AppStateStore::load(FailingRepository).expect("failing repository should still load");
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
         let request = sample_pack_day_export_request(fulfillment_window_id);
         let bundle = sample_pack_day_export_bundle(fulfillment_window_id);
 
@@ -2800,7 +2800,7 @@ mod tests {
     fn pack_day_print_state_is_restart_ephemeral_and_skips_persistence() {
         let mut store =
             AppStateStore::load(FailingRepository).expect("failing repository should still load");
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
         let request = sample_pack_day_print_request(
             fulfillment_window_id,
             PackDayPrintKind::PrintCustomerLabels,
@@ -2870,7 +2870,7 @@ mod tests {
     fn pack_day_batch_print_state_is_restart_ephemeral_and_skips_persistence() {
         let mut store =
             AppStateStore::load(FailingRepository).expect("failing repository should still load");
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
         let request = sample_pack_day_batch_print_request(fulfillment_window_id);
 
         assert_eq!(
@@ -2959,7 +2959,7 @@ mod tests {
     fn pack_day_host_handoff_state_is_restart_ephemeral_and_skips_persistence() {
         let mut store =
             AppStateStore::load(FailingRepository).expect("failing repository should still load");
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
         let request = sample_pack_day_host_handoff_request(
             fulfillment_window_id,
             PackDayHostHandoffKind::RevealBundle,
@@ -3017,8 +3017,8 @@ mod tests {
     fn changing_pack_day_window_clears_stale_export_state() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let next_window_id = FulfillmentWindowId::new();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
+        let next_window_id = FulfillmentWindowId::generate();
         let request = sample_pack_day_export_request(fulfillment_window_id);
 
         assert_eq!(
@@ -3052,8 +3052,8 @@ mod tests {
     fn changing_pack_day_window_clears_stale_host_handoff_state() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let next_window_id = FulfillmentWindowId::new();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
+        let next_window_id = FulfillmentWindowId::generate();
         let request = sample_pack_day_host_handoff_request(
             fulfillment_window_id,
             PackDayHostHandoffKind::OpenPickupRoster,
@@ -3090,8 +3090,8 @@ mod tests {
     fn changing_pack_day_window_clears_stale_print_state() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let next_window_id = FulfillmentWindowId::new();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
+        let next_window_id = FulfillmentWindowId::generate();
         let request =
             sample_pack_day_print_request(fulfillment_window_id, PackDayPrintKind::PrintPackSheet);
 
@@ -3126,8 +3126,8 @@ mod tests {
     fn changing_pack_day_window_clears_stale_batch_print_state() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let next_window_id = FulfillmentWindowId::new();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
+        let next_window_id = FulfillmentWindowId::generate();
         let request = sample_pack_day_batch_print_request(fulfillment_window_id);
 
         assert_eq!(
@@ -3161,7 +3161,7 @@ mod tests {
     fn changing_pack_day_export_state_clears_stale_host_handoff_state() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
         let export_request = sample_pack_day_export_request(fulfillment_window_id);
         let host_handoff_request = sample_pack_day_host_handoff_request(
             fulfillment_window_id,
@@ -3202,7 +3202,7 @@ mod tests {
     fn changing_pack_day_export_state_clears_stale_print_state() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
         let export_request = sample_pack_day_export_request(fulfillment_window_id);
         let print_request = sample_pack_day_print_request(
             fulfillment_window_id,
@@ -3241,7 +3241,7 @@ mod tests {
     fn changing_pack_day_export_state_clears_stale_batch_print_state() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
         let export_request = sample_pack_day_export_request(fulfillment_window_id);
         let batch_request = sample_pack_day_batch_print_request(fulfillment_window_id);
 
@@ -3277,9 +3277,9 @@ mod tests {
     fn replacing_pack_day_projection_with_new_window_clears_stale_host_handoff_state() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
-        let farm_id = FarmId::new();
-        let current_window_id = FulfillmentWindowId::new();
-        let next_window_id = FulfillmentWindowId::new();
+        let farm_id = FarmId::generate();
+        let current_window_id = FulfillmentWindowId::generate();
+        let next_window_id = FulfillmentWindowId::generate();
         let request = sample_pack_day_host_handoff_request(
             current_window_id,
             PackDayHostHandoffKind::OpenCustomerLabels,
@@ -3320,9 +3320,9 @@ mod tests {
     fn replacing_pack_day_projection_with_new_window_clears_stale_print_state() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
-        let farm_id = FarmId::new();
-        let current_window_id = FulfillmentWindowId::new();
-        let next_window_id = FulfillmentWindowId::new();
+        let farm_id = FarmId::generate();
+        let current_window_id = FulfillmentWindowId::generate();
+        let next_window_id = FulfillmentWindowId::generate();
         let request =
             sample_pack_day_print_request(current_window_id, PackDayPrintKind::PrintCustomerLabels);
 
@@ -3361,9 +3361,9 @@ mod tests {
     fn replacing_pack_day_projection_with_new_window_clears_stale_batch_print_state() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
-        let farm_id = FarmId::new();
-        let current_window_id = FulfillmentWindowId::new();
-        let next_window_id = FulfillmentWindowId::new();
+        let farm_id = FarmId::generate();
+        let current_window_id = FulfillmentWindowId::generate();
+        let next_window_id = FulfillmentWindowId::generate();
         let request = sample_pack_day_batch_print_request(current_window_id);
 
         assert_eq!(
@@ -3474,7 +3474,7 @@ mod tests {
     fn product_editor_state_transitions_are_explicit() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
-        let product_id = ProductId::new();
+        let product_id = ProductId::generate();
         let ready_draft = ProductEditorDraft {
             title: "Heirloom tomatoes".to_owned(),
             subtitle: "Brandywine".to_owned(),
@@ -3483,7 +3483,7 @@ mod tests {
             price_minor_units: Some(450),
             price_currency: "USD".to_owned(),
             stock_quantity: Some(12),
-            availability_window_id: Some(FulfillmentWindowId::new()),
+            availability_window_id: Some(FulfillmentWindowId::generate()),
             status: radroots_studio_app_view::ProductStatus::Draft,
         };
 
@@ -3558,11 +3558,11 @@ mod tests {
     fn product_editor_publish_blockers_require_current_fulfillment_window() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
-        let farm_id = FarmId::new();
-        let pickup_location_id = PickupLocationId::new();
-        let active_window_id = FulfillmentWindowId::new();
-        let stale_window_id = FulfillmentWindowId::new();
-        let product_id = ProductId::new();
+        let farm_id = FarmId::generate();
+        let pickup_location_id = PickupLocationId::generate();
+        let active_window_id = FulfillmentWindowId::generate();
+        let stale_window_id = FulfillmentWindowId::generate();
+        let product_id = ProductId::generate();
         let publishable_draft = ProductEditorDraft {
             title: "Salad mix".to_owned(),
             subtitle: "Spring blend".to_owned(),
@@ -4045,7 +4045,7 @@ mod tests {
     fn replace_today_agenda_updates_in_memory_state_without_touching_repository() {
         let mut store =
             AppStateStore::load(FailingRepository).expect("failing repository should still load");
-        let farm_id = FarmId::new();
+        let farm_id = FarmId::generate();
         let today = TodayAgendaProjection {
             farm: Some(radroots_studio_app_view::FarmSummary {
                 farm_id,
@@ -4138,7 +4138,7 @@ mod tests {
     fn saved_farm_in_today_projection_synchronizes_ready_home_route() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
-        let farm_id = FarmId::new();
+        let farm_id = FarmId::generate();
 
         assert_eq!(
             store.apply(AppStateCommand::replace_identity_projection(
@@ -4268,7 +4268,7 @@ mod tests {
         );
         let conflicts = vec![
             SyncConflict {
-                aggregate: radroots_studio_app_sync::SyncAggregateRef::Farm(FarmId::new()),
+                aggregate: radroots_studio_app_sync::SyncAggregateRef::Farm(FarmId::generate()),
                 kind: SyncConflictKind::RevisionMismatch,
                 severity: SyncConflictSeverity::Blocking,
                 resolution: SyncConflictResolutionStatus::Unresolved,
@@ -4278,7 +4278,7 @@ mod tests {
                 resolved_at: None,
             },
             SyncConflict {
-                aggregate: radroots_studio_app_sync::SyncAggregateRef::Farm(FarmId::new()),
+                aggregate: radroots_studio_app_sync::SyncAggregateRef::Farm(FarmId::generate()),
                 kind: SyncConflictKind::RemoteValidationReject,
                 severity: SyncConflictSeverity::ReviewRequired,
                 resolution: SyncConflictResolutionStatus::AcceptedRemote,

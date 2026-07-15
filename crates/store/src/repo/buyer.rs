@@ -10,7 +10,9 @@ use radroots_studio_app_view::{
     ProductPricePresentation, ProductStatus, ProductStockState, ProductStockSummary,
     RepeatDemandEligibility, RepeatDemandHandoffProjection,
 };
-use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
+use sqlx::Row;
+
+use crate::{AppSqliteDatabase, OptionalSqliteResult};
 use serde_json::Value;
 
 use super::{
@@ -147,11 +149,11 @@ pub struct BuyerOrderCoordinationRecord {
 }
 
 pub struct AppBuyerRepository<'a> {
-    connection: &'a Connection,
+    connection: &'a AppSqliteDatabase,
 }
 
 impl<'a> AppBuyerRepository<'a> {
-    pub const fn new(connection: &'a Connection) -> Self {
+    pub(crate) const fn new(connection: &'a AppSqliteDatabase) -> Self {
         Self { connection }
     }
 
@@ -231,7 +233,7 @@ impl<'a> AppBuyerRepository<'a> {
                  on conflict(buyer_context_key) do update set
                     farm_id = excluded.farm_id,
                     updated_at = excluded.updated_at",
-                params![context_key.as_str(), farm_id.map(|id| id.to_string())],
+                crate::app_sqlite_params![context_key.as_str(), farm_id.map(|id| id.to_string())],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "save buyer cart header",
@@ -240,7 +242,7 @@ impl<'a> AppBuyerRepository<'a> {
         self.connection
             .execute(
                 "delete from buyer_cart_lines where buyer_context_key = ?1",
-                params![context_key.as_str()],
+                crate::app_sqlite_params![context_key.as_str()],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "clear buyer cart lines",
@@ -267,7 +269,7 @@ impl<'a> AppBuyerRepository<'a> {
                         seller_pubkey,
                         updated_at
                      ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
-                    params![
+                    crate::app_sqlite_params![
                         context_key.as_str(),
                         line.product_id.to_string(),
                         i64::from(line.quantity),
@@ -297,7 +299,7 @@ impl<'a> AppBuyerRepository<'a> {
         self.connection
             .execute(
                 "delete from buyer_cart_lines where buyer_context_key = ?1",
-                params![context_key.as_str()],
+                crate::app_sqlite_params![context_key.as_str()],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "delete buyer cart lines",
@@ -311,7 +313,7 @@ impl<'a> AppBuyerRepository<'a> {
                     buyer_order_note = '',
                     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  where buyer_context_key = ?1",
-                params![context_key.as_str()],
+                crate::app_sqlite_params![context_key.as_str()],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "clear buyer cart header",
@@ -369,7 +371,7 @@ impl<'a> AppBuyerRepository<'a> {
                     updated_at
                  ) values (?1, null, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
                  on conflict(buyer_context_key) do nothing",
-                params![context_key.as_str()],
+                crate::app_sqlite_params![context_key.as_str()],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "ensure buyer order review header",
@@ -386,7 +388,7 @@ impl<'a> AppBuyerRepository<'a> {
                     buyer_order_note_public_confirmed = ?6,
                     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  where buyer_context_key = ?1",
-                params![
+                crate::app_sqlite_params![
                     context_key.as_str(),
                     draft.name.trim(),
                     draft.email.trim(),
@@ -424,7 +426,7 @@ impl<'a> AppBuyerRepository<'a> {
             reason: "buyer cart farm is missing",
         })?;
         let fulfillment_window_id = shared_fulfillment_window_id(&line_records)?;
-        let order_id = OrderId::new();
+        let order_id = OrderId::generate();
         let order_number = self.next_order_number(farm_id)?;
 
         self.connection
@@ -464,7 +466,7 @@ impl<'a> AppBuyerRepository<'a> {
                         ?9,
                         ?10
                      )",
-                    params![
+                    crate::app_sqlite_params![
                         order_id.to_string(),
                         farm_id.to_string(),
                         fulfillment_window_id.map(|id| id.to_string()),
@@ -503,7 +505,7 @@ impl<'a> AppBuyerRepository<'a> {
                             seller_pubkey,
                             sort_index
                          ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-                        params![
+                        crate::app_sqlite_params![
                             format!("{}:{}", order_id, line.listing.product_id),
                             order_id.to_string(),
                             line.listing.title,
@@ -530,7 +532,7 @@ impl<'a> AppBuyerRepository<'a> {
             self.connection
                 .execute(
                     "delete from buyer_cart_lines where buyer_context_key = ?1",
-                    params![context_key.as_str()],
+                    crate::app_sqlite_params![context_key.as_str()],
                 )
                 .map_err(|source| AppSqliteError::Query {
                     operation: "clear buyer cart lines after order review",
@@ -545,7 +547,7 @@ impl<'a> AppBuyerRepository<'a> {
                         buyer_order_note_public_confirmed = 0,
                         updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                      where buyer_context_key = ?1",
-                    params![context_key.as_str()],
+                    crate::app_sqlite_params![context_key.as_str()],
                 )
                 .map_err(|source| AppSqliteError::Query {
                     operation: "reset buyer cart header after order review",
@@ -593,16 +595,16 @@ impl<'a> AppBuyerRepository<'a> {
                  from buyer_order_coordination_records
                  where buyer_context_key = ?1 and order_id = ?2
                  limit 1",
-                params![context_key.as_str(), order_id.to_string()],
+                crate::app_sqlite_params![context_key.as_str(), order_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                        row.get::<_, i64>(5)?,
-                        row.get::<_, Option<String>>(6)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<Option<String>, _>(2)?,
+                        row.try_get::<String, _>(3)?,
+                        row.try_get::<Option<String>, _>(4)?,
+                        row.try_get::<i64, _>(5)?,
+                        row.try_get::<Option<String>, _>(6)?,
                     ))
                 },
             )
@@ -640,15 +642,15 @@ impl<'a> AppBuyerRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map(params![context_key.as_str()], |row| {
+            .query_map(crate::app_sqlite_params![context_key.as_str()], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, Option<String>>(6)?,
+                    row.try_get::<String, _>(0)?,
+                    row.try_get::<String, _>(1)?,
+                    row.try_get::<Option<String>, _>(2)?,
+                    row.try_get::<String, _>(3)?,
+                    row.try_get::<Option<String>, _>(4)?,
+                    row.try_get::<i64, _>(5)?,
+                    row.try_get::<Option<String>, _>(6)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -721,7 +723,7 @@ impl<'a> AppBuyerRepository<'a> {
                     synced_at = null
                  where buyer_order_coordination_records.buyer_context_key = excluded.buyer_context_key
                     and buyer_order_coordination_records.state <> 'synced'",
-                params![
+                crate::app_sqlite_params![
                     order_id.to_string(),
                     context_key.as_str(),
                     record_id,
@@ -752,7 +754,7 @@ impl<'a> AppBuyerRepository<'a> {
                     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
                     synced_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  where buyer_context_key = ?1 and order_id = ?2",
-                params![context_key.as_str(), order_id.to_string()],
+                crate::app_sqlite_params![context_key.as_str(), order_id.to_string()],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "mark buyer order coordination synced",
@@ -779,7 +781,11 @@ impl<'a> AppBuyerRepository<'a> {
                     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
                     synced_at = null
                  where buyer_context_key = ?1 and order_id = ?2",
-                params![context_key.as_str(), order_id.to_string(), error_message],
+                crate::app_sqlite_params![
+                    context_key.as_str(),
+                    order_id.to_string(),
+                    error_message
+                ],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "mark buyer order coordination failed",
@@ -836,21 +842,21 @@ impl<'a> AppBuyerRepository<'a> {
                     source,
                 })?;
         let rows = statement
-            .query_map(params_from_iter(context_keys.iter()), |row| {
+            .query_map(context_keys.to_vec(), |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, String>(9)?,
-                    row.get::<_, Option<String>>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, Option<String>>(12)?,
+                    row.try_get::<String, _>(0)?,
+                    row.try_get::<String, _>(1)?,
+                    row.try_get::<String, _>(2)?,
+                    row.try_get::<String, _>(3)?,
+                    row.try_get::<String, _>(4)?,
+                    row.try_get::<String, _>(5)?,
+                    row.try_get::<String, _>(6)?,
+                    row.try_get::<String, _>(7)?,
+                    row.try_get::<Option<String>, _>(8)?,
+                    row.try_get::<String, _>(9)?,
+                    row.try_get::<Option<String>, _>(10)?,
+                    row.try_get::<Option<String>, _>(11)?,
+                    row.try_get::<Option<String>, _>(12)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -968,22 +974,22 @@ impl<'a> AppBuyerRepository<'a> {
         params.push(order_id.to_string());
         let record = self
             .connection
-            .query_row(query.as_str(), params_from_iter(params.iter()), |row| {
+            .query_row(query.as_str(), params, |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, Option<String>>(9)?,
-                    row.get::<_, String>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, Option<String>>(12)?,
-                    row.get::<_, Option<String>>(13)?,
+                    row.try_get::<String, _>(0)?,
+                    row.try_get::<String, _>(1)?,
+                    row.try_get::<String, _>(2)?,
+                    row.try_get::<String, _>(3)?,
+                    row.try_get::<String, _>(4)?,
+                    row.try_get::<String, _>(5)?,
+                    row.try_get::<String, _>(6)?,
+                    row.try_get::<String, _>(7)?,
+                    row.try_get::<String, _>(8)?,
+                    row.try_get::<Option<String>, _>(9)?,
+                    row.try_get::<String, _>(10)?,
+                    row.try_get::<Option<String>, _>(11)?,
+                    row.try_get::<Option<String>, _>(12)?,
+                    row.try_get::<Option<String>, _>(13)?,
                 ))
             })
             .optional()
@@ -1088,25 +1094,25 @@ impl<'a> AppBuyerRepository<'a> {
                  left join fulfillment_windows fw on fw.id = o.fulfillment_window_id
                  where o.buyer_context_key = ?1 and o.id = ?2
                  limit 1",
-                params![context_key.as_str(), order_id.to_string()],
+                crate::app_sqlite_params![context_key.as_str(), order_id.to_string()],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, String>(6)?,
-                        row.get::<_, String>(7)?,
-                        row.get::<_, String>(8)?,
-                        row.get::<_, bool>(9)?,
-                        row.get::<_, String>(10)?,
-                        row.get::<_, String>(11)?,
-                        row.get::<_, Option<String>>(12)?,
-                        row.get::<_, Option<String>>(13)?,
-                        row.get::<_, Option<String>>(14)?,
-                        row.get::<_, Option<String>>(15)?,
+                        row.try_get::<String, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
+                        row.try_get::<String, _>(3)?,
+                        row.try_get::<Option<String>, _>(4)?,
+                        row.try_get::<String, _>(5)?,
+                        row.try_get::<String, _>(6)?,
+                        row.try_get::<String, _>(7)?,
+                        row.try_get::<String, _>(8)?,
+                        row.try_get::<bool, _>(9)?,
+                        row.try_get::<String, _>(10)?,
+                        row.try_get::<String, _>(11)?,
+                        row.try_get::<Option<String>, _>(12)?,
+                        row.try_get::<Option<String>, _>(13)?,
+                        row.try_get::<Option<String>, _>(14)?,
+                        row.try_get::<Option<String>, _>(15)?,
                     ))
                 },
             )
@@ -1293,9 +1299,11 @@ impl<'a> AppBuyerRepository<'a> {
 
     fn current_utc_timestamp(&self) -> Result<String, AppSqliteError> {
         self.connection
-            .query_row("select strftime('%Y-%m-%dT%H:%M:%SZ', 'now')", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "select strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+                crate::empty_params(),
+                |row| row.try_get(0),
+            )
             .map_err(|source| AppSqliteError::Query {
                 operation: "load buyer current utc timestamp",
                 source,
@@ -1324,7 +1332,7 @@ impl<'a> AppBuyerRepository<'a> {
                     strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
                     strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  )",
-                params![order_id.to_string(), context_key],
+                crate::app_sqlite_params![order_id.to_string(), context_key],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "insert pending buyer order coordination record",
@@ -1428,33 +1436,33 @@ impl<'a> AppBuyerRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map([], |row| {
+            .query_map(crate::empty_params(), |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, Option<u32>>(8)?,
-                    row.get::<_, String>(9)?,
-                    row.get::<_, Option<String>>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, Option<String>>(12)?,
-                    row.get::<_, Option<String>>(13)?,
-                    row.get::<_, Option<String>>(14)?,
-                    row.get::<_, Option<String>>(15)?,
-                    row.get::<_, Option<u32>>(16)?,
-                    row.get::<_, Option<String>>(17)?,
-                    row.get::<_, Option<String>>(18)?,
-                    row.get::<_, Option<String>>(19)?,
-                    row.get::<_, Option<String>>(20)?,
-                    row.get::<_, Option<String>>(21)?,
-                    row.get::<_, i64>(22)?,
-                    row.get::<_, i64>(23)?,
-                    row.get::<_, i64>(24)?,
+                    row.try_get::<String, _>(0)?,
+                    row.try_get::<String, _>(1)?,
+                    row.try_get::<String, _>(2)?,
+                    row.try_get::<String, _>(3)?,
+                    row.try_get::<String, _>(4)?,
+                    row.try_get::<String, _>(5)?,
+                    row.try_get::<String, _>(6)?,
+                    row.try_get::<String, _>(7)?,
+                    row.try_get::<Option<u32>, _>(8)?,
+                    row.try_get::<String, _>(9)?,
+                    row.try_get::<Option<String>, _>(10)?,
+                    row.try_get::<Option<String>, _>(11)?,
+                    row.try_get::<Option<String>, _>(12)?,
+                    row.try_get::<Option<String>, _>(13)?,
+                    row.try_get::<Option<String>, _>(14)?,
+                    row.try_get::<Option<String>, _>(15)?,
+                    row.try_get::<Option<u32>, _>(16)?,
+                    row.try_get::<Option<String>, _>(17)?,
+                    row.try_get::<Option<String>, _>(18)?,
+                    row.try_get::<Option<String>, _>(19)?,
+                    row.try_get::<Option<String>, _>(20)?,
+                    row.try_get::<Option<String>, _>(21)?,
+                    row.try_get::<i64, _>(22)?,
+                    row.try_get::<i64, _>(23)?,
+                    row.try_get::<i64, _>(24)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -1582,15 +1590,15 @@ impl<'a> AppBuyerRepository<'a> {
                  from buyer_carts
                  where buyer_context_key = ?1
                  limit 1",
-                params![context_key],
+                crate::app_sqlite_params![context_key],
                 |row| {
                     Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, bool>(5)?,
+                        row.try_get::<Option<String>, _>(0)?,
+                        row.try_get::<String, _>(1)?,
+                        row.try_get::<String, _>(2)?,
+                        row.try_get::<String, _>(3)?,
+                        row.try_get::<String, _>(4)?,
+                        row.try_get::<bool, _>(5)?,
                     ))
                 },
             )
@@ -1723,34 +1731,34 @@ impl<'a> AppBuyerRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map(params![context_key], |row| {
+            .query_map(crate::app_sqlite_params![context_key], |row| {
                 Ok((
-                    row.get::<_, u32>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, Option<u32>>(9)?,
-                    row.get::<_, String>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, Option<String>>(12)?,
-                    row.get::<_, Option<String>>(13)?,
-                    row.get::<_, Option<String>>(14)?,
-                    row.get::<_, Option<String>>(15)?,
-                    row.get::<_, Option<String>>(16)?,
-                    row.get::<_, Option<u32>>(17)?,
-                    row.get::<_, Option<String>>(18)?,
-                    row.get::<_, Option<String>>(19)?,
-                    row.get::<_, Option<String>>(20)?,
-                    row.get::<_, Option<String>>(21)?,
-                    row.get::<_, Option<String>>(22)?,
-                    row.get::<_, i64>(23)?,
-                    row.get::<_, i64>(24)?,
-                    row.get::<_, i64>(25)?,
+                    row.try_get::<u32, _>(0)?,
+                    row.try_get::<String, _>(1)?,
+                    row.try_get::<String, _>(2)?,
+                    row.try_get::<String, _>(3)?,
+                    row.try_get::<String, _>(4)?,
+                    row.try_get::<String, _>(5)?,
+                    row.try_get::<String, _>(6)?,
+                    row.try_get::<String, _>(7)?,
+                    row.try_get::<String, _>(8)?,
+                    row.try_get::<Option<u32>, _>(9)?,
+                    row.try_get::<String, _>(10)?,
+                    row.try_get::<Option<String>, _>(11)?,
+                    row.try_get::<Option<String>, _>(12)?,
+                    row.try_get::<Option<String>, _>(13)?,
+                    row.try_get::<Option<String>, _>(14)?,
+                    row.try_get::<Option<String>, _>(15)?,
+                    row.try_get::<Option<String>, _>(16)?,
+                    row.try_get::<Option<u32>, _>(17)?,
+                    row.try_get::<Option<String>, _>(18)?,
+                    row.try_get::<Option<String>, _>(19)?,
+                    row.try_get::<Option<String>, _>(20)?,
+                    row.try_get::<Option<String>, _>(21)?,
+                    row.try_get::<Option<String>, _>(22)?,
+                    row.try_get::<i64, _>(23)?,
+                    row.try_get::<i64, _>(24)?,
+                    row.try_get::<i64, _>(25)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -1862,14 +1870,14 @@ impl<'a> AppBuyerRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map(params![order_id], |row| {
+            .query_map(crate::app_sqlite_params![order_id], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<u32>>(4)?,
-                    row.get::<_, Option<String>>(5)?,
+                    row.try_get::<String, _>(0)?,
+                    row.try_get::<String, _>(1)?,
+                    row.try_get::<i64, _>(2)?,
+                    row.try_get::<String, _>(3)?,
+                    row.try_get::<Option<u32>, _>(4)?,
+                    row.try_get::<Option<String>, _>(5)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -1934,21 +1942,21 @@ impl<'a> AppBuyerRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map(params![order_id_string.as_str()], |row| {
+            .query_map(crate::app_sqlite_params![order_id_string.as_str()], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, Option<u32>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, Option<String>>(9)?,
-                    row.get::<_, Option<String>>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, Option<String>>(12)?,
+                    row.try_get::<String, _>(0)?,
+                    row.try_get::<String, _>(1)?,
+                    row.try_get::<i64, _>(2)?,
+                    row.try_get::<String, _>(3)?,
+                    row.try_get::<String, _>(4)?,
+                    row.try_get::<Option<u32>, _>(5)?,
+                    row.try_get::<Option<String>, _>(6)?,
+                    row.try_get::<Option<String>, _>(7)?,
+                    row.try_get::<Option<String>, _>(8)?,
+                    row.try_get::<Option<String>, _>(9)?,
+                    row.try_get::<Option<String>, _>(10)?,
+                    row.try_get::<Option<String>, _>(11)?,
+                    row.try_get::<Option<String>, _>(12)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -2024,11 +2032,11 @@ impl<'a> AppBuyerRepository<'a> {
                 source,
             })?;
         let rows = statement
-            .query_map(params![order_id.to_string()], |row| {
+            .query_map(crate::app_sqlite_params![order_id.to_string()], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, Option<String>>(2)?,
+                    row.try_get::<String, _>(0)?,
+                    row.try_get::<i64, _>(1)?,
+                    row.try_get::<Option<String>, _>(2)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -2084,8 +2092,8 @@ impl<'a> AppBuyerRepository<'a> {
         let mut params = context_keys.to_vec();
         params.push(order_id.to_string());
         self.connection
-            .query_row(query.as_str(), params_from_iter(params.iter()), |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            .query_row(query.as_str(), params, |row| {
+                Ok((row.try_get::<String, _>(0)?, row.try_get::<String, _>(1)?))
             })
             .optional()
             .map_err(|source| AppSqliteError::Query {
@@ -2187,8 +2195,8 @@ impl<'a> AppBuyerRepository<'a> {
         self.connection
             .query_row(
                 "select display_name from farms where id = ?1 limit 1",
-                params![farm_id.to_string()],
-                |row| row.get::<_, String>(0),
+                crate::app_sqlite_params![farm_id.to_string()],
+                |row| row.try_get::<String, _>(0),
             )
             .optional()
             .map_err(|source| AppSqliteError::Query {
@@ -2206,8 +2214,8 @@ impl<'a> AppBuyerRepository<'a> {
                  where farm_id = ?1
                    and order_number like 'R-%'
                    and substr(order_number, 3) glob '[0-9]*'",
-                params![farm_id.to_string()],
-                |row| row.get::<_, i64>(0),
+                crate::app_sqlite_params![farm_id.to_string()],
+                |row| row.try_get::<i64, _>(0),
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "load next buyer order number",
@@ -2978,7 +2986,9 @@ mod tests {
         OrderId, PickupLocationId, ProductId, ProductPricePresentation, TradeAgreementStatus,
         TradeInventoryStatus, TradeRevisionStatus, TradeWorkflowSource,
     };
-    use rusqlite::{Connection, params};
+    use sqlx::Row;
+
+    use crate::AppSqliteDatabase;
     use serde_json::json;
 
     use crate::{
@@ -2994,11 +3004,11 @@ mod tests {
     #[test]
     fn buyer_order_review_requires_public_note_confirmation() {
         let cart = BuyerCartProjection {
-            farm_id: Some(FarmId::new()),
+            farm_id: Some(FarmId::generate()),
             farm_display_name: Some("Willow Farm".to_owned()),
             lines: vec![BuyerCartLineProjection {
-                product_id: ProductId::new(),
-                farm_id: FarmId::new(),
+                product_id: ProductId::generate(),
+                farm_id: FarmId::generate(),
                 farm_display_name: "Willow Farm".to_owned(),
                 title: "Salad mix".to_owned(),
                 quantity: 1,
@@ -3219,8 +3229,8 @@ mod tests {
         let connection = store.connection();
         let repository = AppBuyerRepository::new(connection);
         let farm_id = insert_farm(connection, "Willow Farm", "ready");
-        let account_order_id = OrderId::new();
-        let relay_order_id = OrderId::new();
+        let account_order_id = OrderId::generate();
+        let relay_order_id = OrderId::generate();
         let linked_context_key = format!("nostr:{LINKED_BUYER_PUBKEY}");
         insert_order(
             connection,
@@ -3491,7 +3501,7 @@ mod tests {
         connection
             .execute(
                 "update products set status = 'archived' where id = ?1",
-                params![unavailable_product_id.to_string()],
+                crate::app_sqlite_params![unavailable_product_id.to_string()],
             )
             .expect("product should archive");
 
@@ -3618,7 +3628,10 @@ mod tests {
         connection
             .execute(
                 "update orders set buyer_context_key = ?1 where id = ?2",
-                params![format!("nostr:{LINKED_BUYER_PUBKEY}"), order_id.to_string()],
+                crate::app_sqlite_params![
+                    format!("nostr:{LINKED_BUYER_PUBKEY}"),
+                    order_id.to_string()
+                ],
             )
             .expect("linked order context should mutate");
 
@@ -3640,8 +3653,8 @@ mod tests {
         let nostr_cart_line_count: u32 = connection
             .query_row(
                 "select count(*) from buyer_cart_lines where buyer_context_key = ?1",
-                params![format!("nostr:{LINKED_BUYER_PUBKEY}")],
-                |row| row.get(0),
+                crate::app_sqlite_params![format!("nostr:{LINKED_BUYER_PUBKEY}")],
+                |row| row.try_get(0),
             )
             .expect("nostr cart line count should load");
 
@@ -3733,7 +3746,7 @@ mod tests {
         connection
             .execute(
                 "update products set stock_count = 1 where id = ?1",
-                params![product_id.to_string()],
+                crate::app_sqlite_params![product_id.to_string()],
             )
             .expect("product stock should lower");
 
@@ -3774,7 +3787,7 @@ mod tests {
 
         insert_order(
             connection,
-            OrderId::new(),
+            OrderId::generate(),
             farm_id,
             "R-100",
             "needs_action",
@@ -3785,7 +3798,7 @@ mod tests {
         );
         insert_order(
             connection,
-            OrderId::new(),
+            OrderId::generate(),
             farm_id,
             "R-101",
             "scheduled",
@@ -3796,7 +3809,7 @@ mod tests {
         );
         insert_order(
             connection,
-            OrderId::new(),
+            OrderId::generate(),
             farm_id,
             "R-102",
             "packed",
@@ -3826,7 +3839,7 @@ mod tests {
         let repository = AppBuyerRepository::new(connection);
         let context = BuyerContext::Guest;
         let farm_id = insert_farm(connection, "Willow Farm", "ready");
-        let order_id = OrderId::new();
+        let order_id = OrderId::generate();
 
         insert_order(
             connection,
@@ -3879,8 +3892,8 @@ mod tests {
         let repository = AppBuyerRepository::new(connection);
         let context = BuyerContext::account("acct_buyer");
         let farm_id = insert_farm(connection, "Willow Farm", "ready");
-        let order_id = OrderId::new();
-        let product_id = ProductId::new();
+        let order_id = OrderId::generate();
+        let product_id = ProductId::generate();
 
         insert_order(
             connection,
@@ -3949,7 +3962,7 @@ mod tests {
         let repository = AppBuyerRepository::new(connection);
         let context = BuyerContext::account("acct_buyer");
         let farm_id = insert_farm(connection, "Willow Farm", "ready");
-        let order_id = OrderId::new();
+        let order_id = OrderId::generate();
 
         insert_order(
             connection,
@@ -4004,8 +4017,8 @@ mod tests {
     #[test]
     fn buyer_cart_rejects_cross_farm_lines() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
-        let farm_id = FarmId::new();
-        let other_farm_id = FarmId::new();
+        let farm_id = FarmId::generate();
+        let other_farm_id = FarmId::generate();
 
         let error = repository_error(&store, farm_id, other_farm_id);
 
@@ -4024,7 +4037,7 @@ mod tests {
                     farm_id: Some(farm_id),
                     farm_display_name: Some("Willow Farm".to_owned()),
                     lines: vec![radroots_studio_app_view::BuyerCartLineProjection {
-                        product_id: ProductId::new(),
+                        product_id: ProductId::generate(),
                         farm_id: other_farm_id,
                         farm_display_name: "Other Farm".to_owned(),
                         title: "Mismatch".to_owned(),
@@ -4045,8 +4058,8 @@ mod tests {
             .expect_err("cross-farm cart should fail")
     }
 
-    fn insert_farm(connection: &Connection, display_name: &str, readiness: &str) -> FarmId {
-        let farm_id = FarmId::new();
+    fn insert_farm(connection: &AppSqliteDatabase, display_name: &str, readiness: &str) -> FarmId {
+        let farm_id = FarmId::generate();
 
         connection
             .execute(
@@ -4059,7 +4072,7 @@ mod tests {
                     created_at,
                     updated_at
                  ) values (?1, ?2, ?3, 'UTC', 'USD', '2026-04-20T08:00:00Z', '2026-04-20T08:00:00Z')",
-                params![farm_id.to_string(), display_name, readiness],
+                crate::app_sqlite_params![farm_id.to_string(), display_name, readiness],
             )
             .expect("farm insert should succeed");
 
@@ -4067,11 +4080,11 @@ mod tests {
     }
 
     fn insert_pickup_location(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         farm_id: FarmId,
         label: &str,
     ) -> PickupLocationId {
-        let pickup_location_id = PickupLocationId::new();
+        let pickup_location_id = PickupLocationId::generate();
 
         connection
             .execute(
@@ -4085,7 +4098,7 @@ mod tests {
                     created_at,
                     updated_at
                  ) values (?1, ?2, ?3, '14 County Road', null, 1, '2026-04-20T08:00:00Z', '2026-04-20T08:00:00Z')",
-                params![pickup_location_id.to_string(), farm_id.to_string(), label],
+                crate::app_sqlite_params![pickup_location_id.to_string(), farm_id.to_string(), label],
             )
             .expect("pickup location insert should succeed");
 
@@ -4093,14 +4106,14 @@ mod tests {
     }
 
     fn insert_window(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         farm_id: FarmId,
         pickup_location_id: Option<PickupLocationId>,
         label: &str,
         starts_at: &str,
         ends_at: &str,
     ) -> FulfillmentWindowId {
-        let fulfillment_window_id = FulfillmentWindowId::new();
+        let fulfillment_window_id = FulfillmentWindowId::generate();
 
         connection
             .execute(
@@ -4116,7 +4129,7 @@ mod tests {
                     label,
                     order_cutoff_at
                  ) values (?1, ?2, ?3, ?4, null, ?3, ?3, ?5, ?6, ?3)",
-                params![
+                crate::app_sqlite_params![
                     fulfillment_window_id.to_string(),
                     farm_id.to_string(),
                     starts_at,
@@ -4131,7 +4144,7 @@ mod tests {
     }
 
     fn insert_farm_setup_binding(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         account_id: &str,
         farm_id: FarmId,
         pickup_enabled: bool,
@@ -4152,7 +4165,7 @@ mod tests {
                     saved_farm_readiness,
                     updated_at
                  ) values (?1, 'Willow Farm', 'County Road', ?2, ?3, ?4, ?5, 'Willow Farm', 'ready', '2026-04-20T08:00:00Z')",
-                params![
+                crate::app_sqlite_params![
                     account_id,
                     i64::from(pickup_enabled),
                     i64::from(delivery_enabled),
@@ -4175,11 +4188,11 @@ mod tests {
     }
 
     fn insert_product(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         farm_id: FarmId,
         product: SeedProduct<'_>,
     ) -> ProductId {
-        let product_id = ProductId::new();
+        let product_id = ProductId::generate();
 
         connection
             .execute(
@@ -4196,7 +4209,7 @@ mod tests {
                     availability_window_id,
                     updated_at
                  ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, '2026-04-20T09:00:00Z')",
-                params![
+                crate::app_sqlite_params![
                     product_id.to_string(),
                     farm_id.to_string(),
                     product.title,
@@ -4214,8 +4227,9 @@ mod tests {
         product_id
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn insert_order(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         order_id: OrderId,
         farm_id: FarmId,
         order_number: &str,
@@ -4240,7 +4254,7 @@ mod tests {
                     buyer_phone,
                     buyer_order_note
                  ) values (?1, ?2, null, ?3, 'Casey', ?4, '2026-04-20T10:00:00Z', ?5, ?6, ?7, ?8)",
-                params![
+                crate::app_sqlite_params![
                     order_id.to_string(),
                     farm_id.to_string(),
                     order_number,
@@ -4255,20 +4269,20 @@ mod tests {
     }
 
     fn set_order_workflow_revision(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         order_id: OrderId,
         workflow_revision: &str,
     ) {
         connection
             .execute(
                 "update orders set workflow_revision = ?1 where id = ?2",
-                params![workflow_revision, order_id.to_string()],
+                crate::app_sqlite_params![workflow_revision, order_id.to_string()],
             )
             .expect("order workflow revision update should succeed");
     }
 
     fn set_order_workflow_display_projection(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         order_id: OrderId,
         agreement: &str,
         inventory: &str,
@@ -4283,7 +4297,7 @@ mod tests {
                      workflow_provenance_source = ?3,
                      workflow_provenance_last_event_id = ?4
                  where id = ?5",
-                params![
+                crate::app_sqlite_params![
                     agreement,
                     inventory,
                     provenance_source,
@@ -4294,8 +4308,9 @@ mod tests {
             .expect("order workflow display projection update should succeed");
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn insert_order_line(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         order_id: OrderId,
         product_id: ProductId,
         title: &str,
@@ -4317,7 +4332,7 @@ mod tests {
                     price_currency,
                     sort_index
                  ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0)",
-                params![
+                crate::app_sqlite_params![
                     format!("{order_id}:{product_id}"),
                     order_id.to_string(),
                     title,
@@ -4332,7 +4347,7 @@ mod tests {
     }
 
     fn corrupt_order_workflow_revision(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         order_id: OrderId,
         workflow_revision: &str,
     ) {
@@ -4346,7 +4361,7 @@ mod tests {
     }
 
     fn corrupt_order_workflow_display_projection(
-        connection: &Connection,
+        connection: &AppSqliteDatabase,
         order_id: OrderId,
         column: &str,
         value: &str,
@@ -4363,7 +4378,10 @@ mod tests {
             _ => panic!("unsupported workflow display projection column {column}"),
         };
         connection
-            .execute(statement, params![value, order_id.to_string()])
+            .execute(
+                statement,
+                crate::app_sqlite_params![value, order_id.to_string()],
+            )
             .expect("order workflow display projection corruption should succeed");
         connection
             .execute_batch("pragma ignore_check_constraints = off")
@@ -4380,11 +4398,11 @@ mod tests {
         }
     }
 
-    fn row_count(connection: &Connection, table_name: &str) -> i64 {
+    fn row_count(connection: &AppSqliteDatabase, table_name: &str) -> i64 {
         let sql = format!("SELECT COUNT(*) FROM {table_name}");
 
         connection
-            .query_row(&sql, [], |row| row.get(0))
+            .query_row(&sql, crate::empty_params(), |row| row.try_get(0))
             .expect("row count query should succeed")
     }
 }
