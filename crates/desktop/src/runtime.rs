@@ -4358,7 +4358,7 @@ impl DesktopAppRuntimeState {
                     relay_url_policy: sdk_relay_url_policy_for_targets(&self.nostr_relay_urls),
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
                 };
-                self.enqueue_app_sdk_farm_publish(request)
+                self.enqueue_desktop_runtime_farm_publish(request)
                     .map(|receipt| (actor_pubkey, receipt))
                     .map_err(sync_transport_error_from_sdk_runtime_error)
             });
@@ -4404,7 +4404,7 @@ impl DesktopAppRuntimeState {
                     relay_url_policy: sdk_relay_url_policy_for_targets(&self.nostr_relay_urls),
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
                 };
-                self.enqueue_app_sdk_listing_publish(request)
+                self.enqueue_desktop_runtime_listing_publish(request)
                     .map(|receipt| (actor_pubkey, receipt))
                     .map_err(sync_transport_error_from_sdk_runtime_error)
             });
@@ -4461,7 +4461,7 @@ impl DesktopAppRuntimeState {
                     confirm_public_note: payload.confirm_public_note,
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
                 };
-                self.enqueue_app_sdk_trade_propose(request)
+                self.enqueue_desktop_runtime_trade_propose(request)
                     .map(|receipt| (actor_pubkey, receipt))
                     .map_err(sync_transport_error_from_sdk_runtime_error)
             });
@@ -4507,7 +4507,7 @@ impl DesktopAppRuntimeState {
                     confirm_public_note: payload.confirm_public_note,
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
                 };
-                self.enqueue_app_sdk_trade_decision(request)
+                self.enqueue_desktop_runtime_trade_decision(request)
                     .map(|receipt| (actor_pubkey, receipt))
                     .map_err(sync_transport_error_from_sdk_runtime_error)
             });
@@ -4553,7 +4553,7 @@ impl DesktopAppRuntimeState {
                     confirm_public_note: payload.confirm_public_note,
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
                 };
-                self.enqueue_app_sdk_trade_cancellation(request)
+                self.enqueue_desktop_runtime_trade_cancellation(request)
                     .map(|receipt| (actor_pubkey, receipt))
                     .map_err(sync_transport_error_from_sdk_runtime_error)
             });
@@ -4585,42 +4585,42 @@ impl DesktopAppRuntimeState {
         signing_identity_for_publish_payload(accounts_manager, payload)
     }
 
-    fn enqueue_app_sdk_farm_publish(
+    fn enqueue_desktop_runtime_farm_publish(
         &self,
         request: DesktopRuntimeFarmPublishRequest,
     ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
-        self.with_app_sdk_runtime(|runtime| runtime.enqueue_farm_publish(request))
+        self.with_desktop_runtime_supervisor(|runtime| runtime.enqueue_farm_publish(request))
     }
 
-    fn enqueue_app_sdk_listing_publish(
+    fn enqueue_desktop_runtime_listing_publish(
         &self,
         request: DesktopRuntimeListingPublishRequest,
     ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
-        self.with_app_sdk_runtime(|runtime| runtime.enqueue_listing_publish(request))
+        self.with_desktop_runtime_supervisor(|runtime| runtime.enqueue_listing_publish(request))
     }
 
-    fn enqueue_app_sdk_trade_propose(
+    fn enqueue_desktop_runtime_trade_propose(
         &self,
         request: DesktopRuntimeTradeProposeRequest,
     ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
-        self.with_app_sdk_runtime(|runtime| runtime.trade_propose(request))
+        self.with_desktop_runtime_supervisor(|runtime| runtime.trade_propose(request))
     }
 
-    fn enqueue_app_sdk_trade_decision(
+    fn enqueue_desktop_runtime_trade_decision(
         &self,
         request: DesktopRuntimeTradeDecisionRequest,
     ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
-        self.with_app_sdk_runtime(|runtime| runtime.trade_decide(request))
+        self.with_desktop_runtime_supervisor(|runtime| runtime.trade_decide(request))
     }
 
-    fn enqueue_app_sdk_trade_cancellation(
+    fn enqueue_desktop_runtime_trade_cancellation(
         &self,
         request: DesktopRuntimeTradeCancellationRequest,
     ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
-        self.with_app_sdk_runtime(|runtime| runtime.trade_cancel(request))
+        self.with_desktop_runtime_supervisor(|runtime| runtime.trade_cancel(request))
     }
 
-    fn with_app_sdk_runtime<T>(
+    fn with_desktop_runtime_supervisor<T>(
         &self,
         command: impl FnOnce(&DesktopRuntimeSupervisor) -> Result<T, DesktopRuntimeSupervisorError>,
     ) -> Result<T, DesktopRuntimeSupervisorError> {
@@ -9451,12 +9451,12 @@ mod tests {
         assert_eq!(value["missing_provenance_relays"], json!([relay_url]));
     }
 
-    fn assert_migrated_payload_uses_sdk_runtime(error: AppSyncTransportError) {
+    fn assert_publish_payload_uses_desktop_runtime_supervisor(error: AppSyncTransportError) {
         match error {
             AppSyncTransportError::Failed { message } => {
                 assert_eq!(message, APP_SYNC_PUBLISH_USES_SDK_RUNTIME_MESSAGE)
             }
-            unexpected => panic!("unexpected migrated payload error: {unexpected}"),
+            unexpected => panic!("unexpected publish payload error: {unexpected}"),
         }
     }
 
@@ -9779,7 +9779,7 @@ mod tests {
             })
             .expect_err("direct relay farm publish should use DesktopRuntimeSupervisor");
 
-        assert_migrated_payload_uses_sdk_runtime(error);
+        assert_publish_payload_uses_desktop_runtime_supervisor(error);
         assert_eq!(relay_a.event_count(), 0);
         assert_eq!(relay_b.event_count(), 0);
     }
@@ -9814,7 +9814,7 @@ mod tests {
             })
             .expect_err("direct relay listing publish should use DesktopRuntimeSupervisor");
 
-        assert_migrated_payload_uses_sdk_runtime(error);
+        assert_publish_payload_uses_desktop_runtime_supervisor(error);
         assert_eq!(relay.event_count(), 0);
     }
 
@@ -9907,7 +9907,7 @@ mod tests {
             })
             .expect_err("direct relay order request publish should use DesktopRuntimeSupervisor");
 
-        assert_migrated_payload_uses_sdk_runtime(error);
+        assert_publish_payload_uses_desktop_runtime_supervisor(error);
         assert_eq!(relay.event_count(), 0);
     }
 
@@ -9955,7 +9955,7 @@ mod tests {
             })
             .expect_err("direct relay order decision publish should use DesktopRuntimeSupervisor");
 
-        assert_migrated_payload_uses_sdk_runtime(error);
+        assert_publish_payload_uses_desktop_runtime_supervisor(error);
         assert_eq!(relay.event_count(), 0);
     }
 
@@ -10027,7 +10027,7 @@ mod tests {
             })
             .expect_err("direct relay lifecycle publish should use DesktopRuntimeSupervisor");
 
-        assert_migrated_payload_uses_sdk_runtime(error);
+        assert_publish_payload_uses_desktop_runtime_supervisor(error);
         assert_eq!(relay.event_count(), 0);
     }
 
@@ -10466,7 +10466,7 @@ mod tests {
             })
             .expect_err("publish work should use DesktopRuntimeSupervisor before partial progress");
 
-        assert_migrated_payload_uses_sdk_runtime(error);
+        assert_publish_payload_uses_desktop_runtime_supervisor(error);
         assert_eq!(relay.event_count(), 0);
     }
 
@@ -10577,7 +10577,7 @@ mod tests {
             })
             .expect_err("direct relay order request should use DesktopRuntimeSupervisor");
 
-        assert_migrated_payload_uses_sdk_runtime(error);
+        assert_publish_payload_uses_desktop_runtime_supervisor(error);
         assert_eq!(relay.event_count(), 0);
     }
 
@@ -10611,7 +10611,7 @@ mod tests {
             })
             .expect_err("payload account publish work should use DesktopRuntimeSupervisor");
 
-        assert_migrated_payload_uses_sdk_runtime(error);
+        assert_publish_payload_uses_desktop_runtime_supervisor(error);
         assert_eq!(relay.event_count(), 0);
     }
 
@@ -10641,7 +10641,7 @@ mod tests {
             })
             .expect_err("missing account publish work should use DesktopRuntimeSupervisor");
 
-        assert_migrated_payload_uses_sdk_runtime(error);
+        assert_publish_payload_uses_desktop_runtime_supervisor(error);
         assert_eq!(relay.event_count(), 0);
     }
 
@@ -10673,7 +10673,7 @@ mod tests {
             })
             .expect_err("watch-only account publish work should use DesktopRuntimeSupervisor");
 
-        assert_migrated_payload_uses_sdk_runtime(error);
+        assert_publish_payload_uses_desktop_runtime_supervisor(error);
         assert_eq!(relay.event_count(), 0);
     }
 
@@ -10719,7 +10719,7 @@ mod tests {
             })
             .expect_err("mismatched custody publish work should use DesktopRuntimeSupervisor");
 
-        assert_migrated_payload_uses_sdk_runtime(error);
+        assert_publish_payload_uses_desktop_runtime_supervisor(error);
         assert_eq!(relay.event_count(), 0);
     }
 

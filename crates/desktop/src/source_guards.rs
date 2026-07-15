@@ -1556,7 +1556,7 @@ fn app_production_sdk_boundary_usage_is_exception_scoped() {
 }
 
 #[test]
-fn app_sdk_trade_propose_request_stays_product_shaped() {
+fn desktop_runtime_trade_propose_request_stays_product_shaped() {
     let source = read_source_path(app_root().join("crates/runtime/src/sdk.rs").as_path());
     let request = struct_block(source.as_str(), "DesktopRuntimeTradeProposeRequest");
 
@@ -2005,7 +2005,7 @@ fn production_source_scanner_keeps_production_violations() {
 }
 
 #[test]
-fn app_sdk_boundary_exception_entries_are_complete_and_current() {
+fn sdk_boundary_exception_entries_are_complete_and_current() {
     let app_root = app_root();
     let mut entries = BTreeSet::new();
 
