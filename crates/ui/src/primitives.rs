@@ -14,6 +14,8 @@ use std::rc::Rc;
 
 use crate::APP_UI_THEME;
 
+type AppPillTabClickHandler = dyn Fn(&usize, &mut Window, &mut App);
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AppButtonVariant {
     Secondary,
@@ -378,7 +380,7 @@ pub fn app_pill_tabs(
     on_click: impl Fn(&usize, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    let on_click: Rc<dyn Fn(&usize, &mut Window, &mut App)> = Rc::new(on_click);
+    let on_click: Rc<AppPillTabClickHandler> = Rc::new(on_click);
     let tabs = tabs.into_iter().collect::<Vec<_>>();
     let height_px = APP_UI_THEME.components.app_button.sizing.height_px;
     let radius_px = height_px / 2.0;
@@ -415,7 +417,7 @@ pub fn app_pill_tabs(
                     .active(rgb(primary.active_background).into())
             } else {
                 ButtonCustomVariant::new(cx)
-                    .color(transparent_black().into())
+                    .color(transparent_black())
                     .foreground(rgb(inactive_foreground).into())
                     .border(transparent_black())
                     .hover(rgb(inactive_hover_background).into())
@@ -673,11 +675,11 @@ pub fn app_checkbox_field(
             Button::new((checkbox_id, 0usize))
                 .custom(
                     ButtonCustomVariant::new(cx)
-                        .color(transparent_black().into())
+                        .color(transparent_black())
                         .foreground(rgb(APP_UI_THEME.foundation.text.primary).into())
                         .border(transparent_black())
-                        .hover(transparent_black().into())
-                        .active(transparent_black().into()),
+                        .hover(transparent_black())
+                        .active(transparent_black()),
                 )
                 .rounded(ButtonRounded::Size(px(0.0)))
                 .w_full()
@@ -1153,11 +1155,11 @@ pub fn app_button_text(
     Button::new(id)
         .custom(
             ButtonCustomVariant::new(cx)
-                .color(transparent_black().into())
+                .color(transparent_black())
                 .foreground(rgb(APP_UI_THEME.foundation.text.secondary).into())
                 .border(transparent_black())
-                .hover(transparent_black().into())
-                .active(transparent_black().into()),
+                .hover(transparent_black())
+                .active(transparent_black()),
         )
         .rounded(ButtonRounded::Size(px(0.0)))
         .on_click(on_click)
@@ -1212,7 +1214,7 @@ pub fn app_button_list_row(
                 .color(if is_selected {
                     selected_background.into()
                 } else {
-                    transparent_black().into()
+                    transparent_black()
                 })
                 .foreground(rgb(APP_UI_THEME.foundation.text.primary).into())
                 .border(transparent_black())

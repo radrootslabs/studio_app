@@ -501,9 +501,7 @@ impl DesktopAppRuntime {
             .sdk_runtime
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(runtime) = sdk_runtime.as_ref() else {
-            return None;
-        };
+        let runtime = sdk_runtime.as_ref()?;
         DesktopRuntimeDiagnostics::from_snapshot(runtime.snapshot())
     }
 
@@ -1274,10 +1272,10 @@ pub struct DesktopRuntimeSupervisorIssueSummary {
 impl DesktopRuntimeSupervisorIssueSummary {
     fn from_issue(issue: &DesktopRuntimeIssue) -> Self {
         Self {
-            code: issue.code.clone(),
-            class: issue.class.clone(),
+            code: issue.code.to_string(),
+            class: issue.class.to_string(),
             retryable: issue.retryable,
-            recovery_actions: issue.recovery_actions.clone(),
+            recovery_actions: issue.recovery_actions.to_vec(),
         }
     }
 
@@ -6405,7 +6403,7 @@ async fn fetch_app_events_from_single_relay_async(
         .map_err(|source| AppSyncTransportError::failed(source.to_string()))?;
     let last_event_created_at_unix_seconds = events
         .iter()
-        .map(|event| relay_event_created_at_unix_seconds_for_fetch(event))
+        .map(relay_event_created_at_unix_seconds_for_fetch)
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .max();
@@ -6864,17 +6862,17 @@ fn sdk_idempotency_key(source_record_id: &str) -> String {
 
 fn sdk_runtime_unavailable_error() -> DesktopRuntimeSupervisorError {
     DesktopRuntimeSupervisorError::Unavailable(DesktopRuntimeIssue {
-        code: "sdk_runtime_not_available".to_owned(),
-        class: "runtime".to_owned(),
+        code: "sdk_runtime_not_available".into(),
+        class: "runtime".into(),
         retryable: true,
-        message: "app SDK runtime is not available".to_owned(),
-        recovery_actions: vec!["retry_startup".to_owned()],
-        detail_json: json!({
+        message: "app SDK runtime is not available".into(),
+        recovery_actions: vec!["retry_startup".to_owned()].into_boxed_slice(),
+        detail_json: Box::new(json!({
             "code": "sdk_runtime_not_available",
             "class": "runtime",
             "retryable": true,
             "recovery_actions": ["retry_startup"],
-        }),
+        })),
     })
 }
 
@@ -6888,7 +6886,7 @@ fn desktop_runtime_supervisor_error_detail_json(
     error: &DesktopRuntimeSupervisorError,
 ) -> serde_json::Value {
     match error {
-        DesktopRuntimeSupervisorError::Unavailable(issue) => issue.detail_json.clone(),
+        DesktopRuntimeSupervisorError::Unavailable(issue) => (*issue.detail_json).clone(),
         DesktopRuntimeSupervisorError::EffectQueueCapacityZero => json!({
             "code": "desktop_runtime_effect_queue_capacity_zero",
             "class": "runtime",
@@ -7682,9 +7680,7 @@ fn shared_optional_line_value(
 ) -> Option<String> {
     let mut resolved = None::<String>;
     for line in lines {
-        let Some(next) = value(line).map(str::trim).filter(|next| !next.is_empty()) else {
-            return None;
-        };
+        let next = value(line).map(str::trim).filter(|next| !next.is_empty())?;
         if let Some(existing) = resolved.as_deref() {
             if existing != next {
                 return None;
@@ -8020,6 +8016,7 @@ fn sanitize_pack_day_query(
     Ok((default_query, default_projection))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn load_selected_account_reminder_context_with_options(
     sqlite_store: &AppSqliteStore,
     account_id: &str,
@@ -8304,6 +8301,7 @@ fn build_sync_reminder_projection(
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_reminder_projection(
     farm_id: FarmId,
     identity_key: String,
@@ -16387,10 +16385,10 @@ mod tests {
                     .expect("print success should apply")
             );
 
-            if let PackDayPrintKind::PrintCustomerLabels = kind {
-                if let Some(parent) = prepared.1.target_path.parent() {
-                    let _ = fs::remove_dir_all(parent);
-                }
+            if let PackDayPrintKind::PrintCustomerLabels = kind
+                && let Some(parent) = prepared.1.target_path.parent()
+            {
+                let _ = fs::remove_dir_all(parent);
             }
         }
 
@@ -19604,6 +19602,7 @@ mod tests {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn append_signed_order_cancellation_record_with_prev(
         paths: &AppDesktopRuntimePaths,
         trade_order_id: &str,

@@ -346,7 +346,7 @@ mod tests {
         }
     }
 
-    fn sample_bundle(bundle_directory: &PathBuf) -> PackDayExportBundle {
+    fn sample_bundle(bundle_directory: &std::path::Path) -> PackDayExportBundle {
         PackDayExportBundle {
             fulfillment_window_id: radroots_studio_app_view::FulfillmentWindowId::generate(),
             export_instance_id: radroots_studio_app_view::PackDayExportInstanceId::generate(),
@@ -369,7 +369,7 @@ mod tests {
         }
     }
 
-    fn write_artifact(bundle_directory: &PathBuf, file_name: &str) -> PathBuf {
+    fn write_artifact(bundle_directory: &std::path::Path, file_name: &str) -> PathBuf {
         let path = bundle_directory.join(file_name);
         fs::write(&path, file_name).expect("artifact should write");
         path

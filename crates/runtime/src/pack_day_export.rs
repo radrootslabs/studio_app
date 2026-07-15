@@ -213,7 +213,7 @@ fn render_customer_labels(source: &PackDayOutputSource) -> String {
 
     if blocks.is_empty() {
         blocks.push(
-            vec![
+            [
                 source.fulfillment_window.farm_display_name.clone(),
                 "No customer labels".to_owned(),
                 format!(

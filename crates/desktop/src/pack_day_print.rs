@@ -934,7 +934,7 @@ mod tests {
         }
     }
 
-    fn sample_bundle(bundle_directory: &PathBuf) -> PackDayExportBundle {
+    fn sample_bundle(bundle_directory: &std::path::Path) -> PackDayExportBundle {
         PackDayExportBundle {
             fulfillment_window_id: radroots_studio_app_view::FulfillmentWindowId::generate(),
             export_instance_id: PackDayExportInstanceId::generate(),
@@ -961,13 +961,13 @@ mod tests {
         PackDayBatchPrintRequest::for_bundle(bundle)
     }
 
-    fn write_artifact(bundle_directory: &PathBuf, file_name: &str) -> PathBuf {
+    fn write_artifact(bundle_directory: &std::path::Path, file_name: &str) -> PathBuf {
         let path = bundle_directory.join(file_name);
         fs::write(&path, file_name).expect("artifact should write");
         path
     }
 
-    fn write_all_artifacts(bundle_directory: &PathBuf) {
+    fn write_all_artifacts(bundle_directory: &std::path::Path) {
         write_artifact(bundle_directory, "pack_sheet.txt");
         write_artifact(bundle_directory, "pickup_roster.txt");
         write_artifact(bundle_directory, "customer_labels.txt");

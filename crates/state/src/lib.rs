@@ -144,21 +144,11 @@ pub struct PersonalWorkspaceProjection {
     pub orders: BuyerOrdersScreenProjection,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ProductsScreenQueryState {
     pub search_query: String,
     pub filter: ProductsFilter,
     pub sort: ProductsSort,
-}
-
-impl Default for ProductsScreenQueryState {
-    fn default() -> Self {
-        Self {
-            search_query: String::new(),
-            filter: ProductsFilter::default(),
-            sort: ProductsSort::default(),
-        }
-    }
 }
 
 impl ProductsScreenQueryState {
@@ -242,16 +232,11 @@ impl ProductEditorSession {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum ProductEditorState {
+    #[default]
     Closed,
-    Open(ProductEditorSession),
-}
-
-impl Default for ProductEditorState {
-    fn default() -> Self {
-        Self::Closed
-    }
+    Open(Box<ProductEditorSession>),
 }
 
 impl ProductEditorState {
@@ -260,7 +245,10 @@ impl ProductEditorState {
         farm_readiness: &FarmWorkspaceReadinessProjection,
         farm_rules: &FarmRulesProjection,
     ) {
-        *self = Self::Open(ProductEditorSession::new_draft(farm_readiness, farm_rules));
+        *self = Self::Open(Box::new(ProductEditorSession::new_draft(
+            farm_readiness,
+            farm_rules,
+        )));
     }
 
     fn open_existing(
@@ -270,12 +258,12 @@ impl ProductEditorState {
         farm_readiness: &FarmWorkspaceReadinessProjection,
         farm_rules: &FarmRulesProjection,
     ) {
-        *self = Self::Open(ProductEditorSession::existing(
+        *self = Self::Open(Box::new(ProductEditorSession::existing(
             product_id,
             draft,
             farm_readiness,
             farm_rules,
-        ));
+        )));
     }
 
     fn replace_draft(
@@ -1032,68 +1020,68 @@ pub enum AppStateCommand {
     ShowStartupSignerEntry,
     SetStartupSignerSourceInput(String),
     ResetLoggedOutStartup,
-    ReplaceIdentityProjection(AppIdentityProjection),
-    ReplaceSyncProjection(AppSyncProjection),
-    ReplacePersonalProjection(PersonalWorkspaceProjection),
-    ReplaceFarmSetupProjection(FarmSetupProjection),
-    ReplaceFarmRulesProjection(FarmRulesProjection),
+    ReplaceIdentityProjection(Box<AppIdentityProjection>),
+    ReplaceSyncProjection(Box<AppSyncProjection>),
+    ReplacePersonalProjection(Box<PersonalWorkspaceProjection>),
+    ReplaceFarmSetupProjection(Box<FarmSetupProjection>),
+    ReplaceFarmRulesProjection(Box<FarmRulesProjection>),
     SelectFarmSetupFlowStage(FarmSetupFlowStage),
     SetSettingsPreference {
         preference: SettingsPreference,
         enabled: bool,
     },
-    ReplaceTodayAgenda(TodayAgendaProjection),
+    ReplaceTodayAgenda(Box<TodayAgendaProjection>),
     SetProductsSearchQuery(String),
     SelectProductsFilter(ProductsFilter),
     SelectProductsSort(ProductsSort),
-    ReplaceProductsList(ProductsListProjection),
+    ReplaceProductsList(Box<ProductsListProjection>),
     SelectOrdersFilter(OrdersFilter),
     SelectOrdersFulfillmentWindow(Option<FulfillmentWindowId>),
-    ReplaceOrdersList(OrdersListProjection),
-    ReplaceOrdersReminders(ReminderFeedProjection),
-    ReplaceReminderLog(ReminderLogProjection),
-    ReplaceOrderDetail(Option<OrderDetailProjection>),
+    ReplaceOrdersList(Box<OrdersListProjection>),
+    ReplaceOrdersReminders(Box<ReminderFeedProjection>),
+    ReplaceReminderLog(Box<ReminderLogProjection>),
+    ReplaceOrderDetail(Box<Option<OrderDetailProjection>>),
     SetPackDayFulfillmentWindow(Option<FulfillmentWindowId>),
-    ReplacePackDayProjection(PackDayProjection),
-    BeginPackDayExport(PackDayExportRequest),
+    ReplacePackDayProjection(Box<PackDayProjection>),
+    BeginPackDayExport(Box<PackDayExportRequest>),
     SucceedPackDayExport {
-        request: PackDayExportRequest,
-        bundle: PackDayExportBundle,
+        request: Box<PackDayExportRequest>,
+        bundle: Box<PackDayExportBundle>,
     },
     FailPackDayExport {
-        request: PackDayExportRequest,
+        request: Box<PackDayExportRequest>,
         message: String,
     },
     ResetPackDayExport,
-    BeginPackDayPrint(PackDayPrintRequest),
-    SucceedPackDayPrint(PackDayPrintRequest),
-    FailPackDayPrint(PackDayPrintRequest),
+    BeginPackDayPrint(Box<PackDayPrintRequest>),
+    SucceedPackDayPrint(Box<PackDayPrintRequest>),
+    FailPackDayPrint(Box<PackDayPrintRequest>),
     FailPackDayPrintWithKind {
-        request: PackDayPrintRequest,
+        request: Box<PackDayPrintRequest>,
         failure: PackDayPrintFailureKind,
     },
     ResetPackDayPrint,
-    BeginPackDayBatchPrint(PackDayBatchPrintRequest),
-    SucceedPackDayBatchPrint(PackDayBatchPrintRequest),
+    BeginPackDayBatchPrint(Box<PackDayBatchPrintRequest>),
+    SucceedPackDayBatchPrint(Box<PackDayBatchPrintRequest>),
     FailPackDayBatchPrint {
-        request: PackDayBatchPrintRequest,
+        request: Box<PackDayBatchPrintRequest>,
         failed_artifact: Option<PackDayBatchPrintArtifact>,
         failure: PackDayBatchPrintFailureKind,
     },
     ResetPackDayBatchPrint,
-    BeginPackDayHostHandoff(PackDayHostHandoffRequest),
-    SucceedPackDayHostHandoff(PackDayHostHandoffRequest),
+    BeginPackDayHostHandoff(Box<PackDayHostHandoffRequest>),
+    SucceedPackDayHostHandoff(Box<PackDayHostHandoffRequest>),
     FailPackDayHostHandoff {
-        request: PackDayHostHandoffRequest,
+        request: Box<PackDayHostHandoffRequest>,
         message: String,
     },
     ResetPackDayHostHandoff,
     OpenNewProductEditor,
     OpenExistingProductEditor {
         product_id: ProductId,
-        draft: ProductEditorDraft,
+        draft: Box<ProductEditorDraft>,
     },
-    ReplaceProductEditorDraft(ProductEditorDraft),
+    ReplaceProductEditorDraft(Box<ProductEditorDraft>),
     CloseProductEditor,
 }
 
@@ -1127,23 +1115,23 @@ impl AppStateCommand {
     }
 
     pub fn replace_identity_projection(projection: AppIdentityProjection) -> Self {
-        Self::ReplaceIdentityProjection(projection)
+        Self::ReplaceIdentityProjection(Box::new(projection))
     }
 
     pub fn replace_sync_projection(projection: AppSyncProjection) -> Self {
-        Self::ReplaceSyncProjection(projection)
+        Self::ReplaceSyncProjection(Box::new(projection))
     }
 
     pub fn replace_personal_projection(projection: PersonalWorkspaceProjection) -> Self {
-        Self::ReplacePersonalProjection(projection)
+        Self::ReplacePersonalProjection(Box::new(projection))
     }
 
     pub fn replace_farm_setup_projection(projection: FarmSetupProjection) -> Self {
-        Self::ReplaceFarmSetupProjection(projection)
+        Self::ReplaceFarmSetupProjection(Box::new(projection))
     }
 
     pub fn replace_farm_rules_projection(projection: FarmRulesProjection) -> Self {
-        Self::ReplaceFarmRulesProjection(projection)
+        Self::ReplaceFarmRulesProjection(Box::new(projection))
     }
 
     pub const fn select_farm_setup_flow_stage(stage: FarmSetupFlowStage) -> Self {
@@ -1151,7 +1139,7 @@ impl AppStateCommand {
     }
 
     pub fn replace_today_agenda(projection: TodayAgendaProjection) -> Self {
-        Self::ReplaceTodayAgenda(projection)
+        Self::ReplaceTodayAgenda(Box::new(projection))
     }
 
     pub fn set_products_search_query(search_query: impl Into<String>) -> Self {
@@ -1167,7 +1155,7 @@ impl AppStateCommand {
     }
 
     pub fn replace_products_list(projection: ProductsListProjection) -> Self {
-        Self::ReplaceProductsList(projection)
+        Self::ReplaceProductsList(Box::new(projection))
     }
 
     pub const fn select_orders_filter(filter: OrdersFilter) -> Self {
@@ -1181,19 +1169,19 @@ impl AppStateCommand {
     }
 
     pub fn replace_orders_list(projection: OrdersListProjection) -> Self {
-        Self::ReplaceOrdersList(projection)
+        Self::ReplaceOrdersList(Box::new(projection))
     }
 
     pub fn replace_orders_reminders(projection: ReminderFeedProjection) -> Self {
-        Self::ReplaceOrdersReminders(projection)
+        Self::ReplaceOrdersReminders(Box::new(projection))
     }
 
     pub fn replace_reminder_log(projection: ReminderLogProjection) -> Self {
-        Self::ReplaceReminderLog(projection)
+        Self::ReplaceReminderLog(Box::new(projection))
     }
 
     pub fn replace_order_detail(projection: Option<OrderDetailProjection>) -> Self {
-        Self::ReplaceOrderDetail(projection)
+        Self::ReplaceOrderDetail(Box::new(projection))
     }
 
     pub fn set_pack_day_fulfillment_window(
@@ -1203,23 +1191,26 @@ impl AppStateCommand {
     }
 
     pub fn replace_pack_day_projection(projection: PackDayProjection) -> Self {
-        Self::ReplacePackDayProjection(projection)
+        Self::ReplacePackDayProjection(Box::new(projection))
     }
 
     pub fn begin_pack_day_export(request: PackDayExportRequest) -> Self {
-        Self::BeginPackDayExport(request)
+        Self::BeginPackDayExport(Box::new(request))
     }
 
     pub fn succeed_pack_day_export(
         request: PackDayExportRequest,
         bundle: PackDayExportBundle,
     ) -> Self {
-        Self::SucceedPackDayExport { request, bundle }
+        Self::SucceedPackDayExport {
+            request: Box::new(request),
+            bundle: Box::new(bundle),
+        }
     }
 
     pub fn fail_pack_day_export(request: PackDayExportRequest, message: impl Into<String>) -> Self {
         Self::FailPackDayExport {
-            request,
+            request: Box::new(request),
             message: message.into(),
         }
     }
@@ -1229,22 +1220,25 @@ impl AppStateCommand {
     }
 
     pub fn begin_pack_day_print(request: PackDayPrintRequest) -> Self {
-        Self::BeginPackDayPrint(request)
+        Self::BeginPackDayPrint(Box::new(request))
     }
 
     pub fn succeed_pack_day_print(request: PackDayPrintRequest) -> Self {
-        Self::SucceedPackDayPrint(request)
+        Self::SucceedPackDayPrint(Box::new(request))
     }
 
     pub fn fail_pack_day_print(request: PackDayPrintRequest) -> Self {
-        Self::FailPackDayPrint(request)
+        Self::FailPackDayPrint(Box::new(request))
     }
 
     pub fn fail_pack_day_print_with_kind(
         request: PackDayPrintRequest,
         failure: PackDayPrintFailureKind,
     ) -> Self {
-        Self::FailPackDayPrintWithKind { request, failure }
+        Self::FailPackDayPrintWithKind {
+            request: Box::new(request),
+            failure,
+        }
     }
 
     pub const fn reset_pack_day_print() -> Self {
@@ -1252,11 +1246,11 @@ impl AppStateCommand {
     }
 
     pub fn begin_pack_day_batch_print(request: PackDayBatchPrintRequest) -> Self {
-        Self::BeginPackDayBatchPrint(request)
+        Self::BeginPackDayBatchPrint(Box::new(request))
     }
 
     pub fn succeed_pack_day_batch_print(request: PackDayBatchPrintRequest) -> Self {
-        Self::SucceedPackDayBatchPrint(request)
+        Self::SucceedPackDayBatchPrint(Box::new(request))
     }
 
     pub fn fail_pack_day_batch_print(
@@ -1265,7 +1259,7 @@ impl AppStateCommand {
         failure: PackDayBatchPrintFailureKind,
     ) -> Self {
         Self::FailPackDayBatchPrint {
-            request,
+            request: Box::new(request),
             failed_artifact,
             failure,
         }
@@ -1276,11 +1270,11 @@ impl AppStateCommand {
     }
 
     pub fn begin_pack_day_host_handoff(request: PackDayHostHandoffRequest) -> Self {
-        Self::BeginPackDayHostHandoff(request)
+        Self::BeginPackDayHostHandoff(Box::new(request))
     }
 
     pub fn succeed_pack_day_host_handoff(request: PackDayHostHandoffRequest) -> Self {
-        Self::SucceedPackDayHostHandoff(request)
+        Self::SucceedPackDayHostHandoff(Box::new(request))
     }
 
     pub fn fail_pack_day_host_handoff(
@@ -1288,7 +1282,7 @@ impl AppStateCommand {
         message: impl Into<String>,
     ) -> Self {
         Self::FailPackDayHostHandoff {
-            request,
+            request: Box::new(request),
             message: message.into(),
         }
     }
@@ -1302,11 +1296,14 @@ impl AppStateCommand {
     }
 
     pub fn open_existing_product_editor(product_id: ProductId, draft: ProductEditorDraft) -> Self {
-        Self::OpenExistingProductEditor { product_id, draft }
+        Self::OpenExistingProductEditor {
+            product_id,
+            draft: Box::new(draft),
+        }
     }
 
     pub fn replace_product_editor_draft(draft: ProductEditorDraft) -> Self {
-        Self::ReplaceProductEditorDraft(draft)
+        Self::ReplaceProductEditorDraft(Box::new(draft))
     }
 
     pub const fn close_product_editor() -> Self {
@@ -1473,13 +1470,13 @@ impl AppStateRepository for FileBackedAppStateRepository {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AppStatePersistenceRepository {
-    InMemory(InMemoryAppStateRepository),
+    InMemory(Box<InMemoryAppStateRepository>),
     FileBacked(FileBackedAppStateRepository),
 }
 
 impl AppStatePersistenceRepository {
     pub fn in_memory() -> Self {
-        Self::InMemory(InMemoryAppStateRepository::default())
+        Self::InMemory(Box::default())
     }
 
     pub fn file_backed(path: impl Into<PathBuf>) -> Self {
@@ -1713,19 +1710,19 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
             projection.logged_out_startup = LoggedOutStartupProjection::default();
         }
         AppStateCommand::ReplaceIdentityProjection(identity_projection) => {
-            projection.identity = identity_projection;
+            projection.identity = *identity_projection;
         }
         AppStateCommand::ReplaceSyncProjection(sync_projection) => {
-            projection.sync = sync_projection;
+            projection.sync = *sync_projection;
         }
         AppStateCommand::ReplacePersonalProjection(personal_projection) => {
-            projection.personal = personal_projection;
+            projection.personal = *personal_projection;
         }
         AppStateCommand::ReplaceFarmSetupProjection(farm_setup_projection) => {
-            projection.farm_setup = farm_setup_projection;
+            projection.farm_setup = *farm_setup_projection;
         }
         AppStateCommand::ReplaceFarmRulesProjection(farm_rules_projection) => {
-            projection.farm_rules = farm_rules_projection;
+            projection.farm_rules = *farm_rules_projection;
         }
         AppStateCommand::SelectFarmSetupFlowStage(flow_stage) => {
             projection.farm_setup_flow_stage = flow_stage;
@@ -1741,7 +1738,7 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
                 .set_preference(preference, enabled);
         }
         AppStateCommand::ReplaceTodayAgenda(today_projection) => {
-            projection.today = today_projection;
+            projection.today = *today_projection;
         }
         AppStateCommand::SetProductsSearchQuery(search_query) => {
             projection.products.query.set_search_query(search_query);
@@ -1753,7 +1750,7 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
             projection.products.query.select_sort(sort);
         }
         AppStateCommand::ReplaceProductsList(products_projection) => {
-            projection.products.list = products_projection;
+            projection.products.list = *products_projection;
         }
         AppStateCommand::SelectOrdersFilter(filter) => {
             projection.orders.select_filter(filter);
@@ -1764,16 +1761,16 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
                 .select_fulfillment_window(fulfillment_window_id);
         }
         AppStateCommand::ReplaceOrdersList(orders_projection) => {
-            projection.orders.list = orders_projection;
+            projection.orders.list = *orders_projection;
         }
         AppStateCommand::ReplaceOrdersReminders(reminders_projection) => {
-            projection.orders.reminders = reminders_projection;
+            projection.orders.reminders = *reminders_projection;
         }
         AppStateCommand::ReplaceReminderLog(reminder_log_projection) => {
-            projection.reminder_log = reminder_log_projection;
+            projection.reminder_log = *reminder_log_projection;
         }
         AppStateCommand::ReplaceOrderDetail(order_detail_projection) => {
-            projection.orders.replace_detail(order_detail_projection);
+            projection.orders.replace_detail(*order_detail_projection);
         }
         AppStateCommand::SetPackDayFulfillmentWindow(fulfillment_window_id) => {
             projection
@@ -1781,22 +1778,22 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
                 .select_fulfillment_window(fulfillment_window_id);
         }
         AppStateCommand::ReplacePackDayProjection(pack_day_projection) => {
-            projection.pack_day.replace_projection(pack_day_projection);
+            projection.pack_day.replace_projection(*pack_day_projection);
         }
         AppStateCommand::BeginPackDayExport(request) => {
             projection
                 .pack_day
-                .replace_export(PackDayExportProjection::running(request));
+                .replace_export(PackDayExportProjection::running(*request));
         }
         AppStateCommand::SucceedPackDayExport { request, bundle } => {
             projection
                 .pack_day
-                .replace_export(PackDayExportProjection::succeeded(request, bundle));
+                .replace_export(PackDayExportProjection::succeeded(*request, *bundle));
         }
         AppStateCommand::FailPackDayExport { request, message } => {
             projection
                 .pack_day
-                .replace_export(PackDayExportProjection::failed(request, message));
+                .replace_export(PackDayExportProjection::failed(*request, message));
         }
         AppStateCommand::ResetPackDayExport => {
             projection
@@ -1806,22 +1803,22 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         AppStateCommand::BeginPackDayPrint(request) => {
             projection
                 .pack_day
-                .replace_print(PackDayPrintProjection::running(request));
+                .replace_print(PackDayPrintProjection::running(*request));
         }
         AppStateCommand::SucceedPackDayPrint(request) => {
             projection
                 .pack_day
-                .replace_print(PackDayPrintProjection::succeeded(request));
+                .replace_print(PackDayPrintProjection::succeeded(*request));
         }
         AppStateCommand::FailPackDayPrint(request) => {
             projection
                 .pack_day
-                .replace_print(PackDayPrintProjection::failed(request));
+                .replace_print(PackDayPrintProjection::failed(*request));
         }
         AppStateCommand::FailPackDayPrintWithKind { request, failure } => {
             projection
                 .pack_day
-                .replace_print(PackDayPrintProjection::failed_with_kind(request, failure));
+                .replace_print(PackDayPrintProjection::failed_with_kind(*request, failure));
         }
         AppStateCommand::ResetPackDayPrint => {
             projection
@@ -1831,12 +1828,12 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         AppStateCommand::BeginPackDayBatchPrint(request) => {
             projection
                 .pack_day
-                .replace_batch_print(PackDayBatchPrintProjection::running(request));
+                .replace_batch_print(PackDayBatchPrintProjection::running(*request));
         }
         AppStateCommand::SucceedPackDayBatchPrint(request) => {
             projection
                 .pack_day
-                .replace_batch_print(PackDayBatchPrintProjection::succeeded(request));
+                .replace_batch_print(PackDayBatchPrintProjection::succeeded(*request));
         }
         AppStateCommand::FailPackDayBatchPrint {
             request,
@@ -1846,7 +1843,7 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
             projection
                 .pack_day
                 .replace_batch_print(PackDayBatchPrintProjection::failed(
-                    request,
+                    *request,
                     failed_artifact,
                     failure,
                 ));
@@ -1859,17 +1856,17 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         AppStateCommand::BeginPackDayHostHandoff(request) => {
             projection
                 .pack_day
-                .replace_host_handoff(PackDayHostHandoffProjection::running(request));
+                .replace_host_handoff(PackDayHostHandoffProjection::running(*request));
         }
         AppStateCommand::SucceedPackDayHostHandoff(request) => {
             projection
                 .pack_day
-                .replace_host_handoff(PackDayHostHandoffProjection::succeeded(request));
+                .replace_host_handoff(PackDayHostHandoffProjection::succeeded(*request));
         }
         AppStateCommand::FailPackDayHostHandoff { request, message } => {
             projection
                 .pack_day
-                .replace_host_handoff(PackDayHostHandoffProjection::failed(request, message));
+                .replace_host_handoff(PackDayHostHandoffProjection::failed(*request, message));
         }
         AppStateCommand::ResetPackDayHostHandoff => {
             projection
@@ -1885,14 +1882,14 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         AppStateCommand::OpenExistingProductEditor { product_id, draft } => {
             projection.products.editor.open_existing(
                 product_id,
-                draft,
+                *draft,
                 &projection.farm_readiness,
                 &projection.farm_rules,
             );
         }
         AppStateCommand::ReplaceProductEditorDraft(draft) => {
             projection.products.editor.replace_draft(
-                draft,
+                *draft,
                 &projection.farm_readiness,
                 &projection.farm_rules,
             );
@@ -1922,9 +1919,7 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         AppStateMutation::PersonalChanged
     } else if projection.products != before.products {
         AppStateMutation::ProductsChanged
-    } else if projection.orders != before.orders {
-        AppStateMutation::OrdersChanged
-    } else if projection.reminder_log != before.reminder_log {
+    } else if projection.orders != before.orders || projection.reminder_log != before.reminder_log {
         AppStateMutation::OrdersChanged
     } else if projection.pack_day != before.pack_day {
         AppStateMutation::PackDayChanged

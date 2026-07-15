@@ -898,12 +898,12 @@ enum StartupSignerConnectState {
     Idle,
     Connecting,
     PendingApproval {
-        pending_session: RadrootsAppRemoteSignerPendingSession,
+        pending_session: Box<RadrootsAppRemoteSignerPendingSession>,
         auth_challenge_url: Option<String>,
     },
     Approved {
-        pending_session: RadrootsAppRemoteSignerPendingSession,
-        approved_session: RadrootsAppRemoteSignerApprovedSession,
+        pending_session: Box<RadrootsAppRemoteSignerPendingSession>,
+        approved_session: Box<RadrootsAppRemoteSignerApprovedSession>,
         auth_challenge_url: Option<String>,
     },
 }
@@ -967,19 +967,19 @@ enum HomeAutoFocusTarget {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BuyerWorkspaceNotice {
-    MarketplaceRefreshFailed,
-    DetailOpenFailed,
-    OrderPlaceFailed,
-    OrderCoordinationFailed,
+    MarketplaceRefresh,
+    DetailOpen,
+    OrderPlace,
+    OrderCoordination,
 }
 
 impl BuyerWorkspaceNotice {
     fn text_key(self) -> AppTextKey {
         match self {
-            Self::MarketplaceRefreshFailed => AppTextKey::PersonalMarketplaceRefreshFailedNotice,
-            Self::DetailOpenFailed => AppTextKey::PersonalDetailOpenFailedNotice,
-            Self::OrderPlaceFailed => AppTextKey::PersonalOrderPlaceFailedNotice,
-            Self::OrderCoordinationFailed => AppTextKey::PersonalOrderCoordinationFailedNotice,
+            Self::MarketplaceRefresh => AppTextKey::PersonalMarketplaceRefreshFailedNotice,
+            Self::DetailOpen => AppTextKey::PersonalDetailOpenFailedNotice,
+            Self::OrderPlace => AppTextKey::PersonalOrderPlaceFailedNotice,
+            Self::OrderCoordination => AppTextKey::PersonalOrderCoordinationFailedNotice,
         }
     }
 
@@ -1381,7 +1381,7 @@ impl HomeView {
                 }
                 self.startup_view.clear_notice();
                 self.startup_signer_connect_state = StartupSignerConnectState::PendingApproval {
-                    pending_session: pending_session.clone(),
+                    pending_session: Box::new(pending_session.clone()),
                     auth_challenge_url: None,
                 };
                 cx.notify();
@@ -1412,7 +1412,7 @@ impl HomeView {
             Ok(RadrootsAppRemoteSignerPendingPollOutcome::PendingApproval) => {
                 self.startup_view.clear_notice();
                 self.startup_signer_connect_state = StartupSignerConnectState::PendingApproval {
-                    pending_session,
+                    pending_session: Box::new(pending_session),
                     auth_challenge_url,
                 };
                 cx.notify();
@@ -1425,7 +1425,7 @@ impl HomeView {
                     self.startup_view.clear_notice();
                 }
                 self.startup_signer_connect_state = StartupSignerConnectState::PendingApproval {
-                    pending_session,
+                    pending_session: Box::new(pending_session),
                     auth_challenge_url,
                 };
                 cx.notify();
@@ -1435,12 +1435,12 @@ impl HomeView {
                 .runtime
                 .activate_startup_approved_remote_signer_session(
                     &pending_session,
-                    &approved_session,
+                    approved_session.as_ref(),
                 ) {
                 Ok(_) => {
                     self.startup_view.clear_notice();
                     self.startup_signer_connect_state = StartupSignerConnectState::Approved {
-                        pending_session,
+                        pending_session: Box::new(pending_session),
                         approved_session,
                         auth_challenge_url,
                     };
@@ -1451,7 +1451,7 @@ impl HomeView {
                     self.startup_view.set_notice(error.to_string());
                     self.startup_signer_connect_state =
                         StartupSignerConnectState::PendingApproval {
-                            pending_session,
+                            pending_session: Box::new(pending_session),
                             auth_challenge_url,
                         };
                     cx.notify();
@@ -1525,7 +1525,7 @@ impl HomeView {
         let task_token = self.next_startup_signer_task_token();
         self.startup_view.clear_notice();
         self.startup_signer_connect_state = StartupSignerConnectState::PendingApproval {
-            pending_session: pending_session.clone(),
+            pending_session: Box::new(pending_session.clone()),
             auth_challenge_url: None,
         };
         cx.notify();
@@ -1874,7 +1874,7 @@ impl HomeView {
                     error = %runtime_error,
                     "failed to select buyer section"
                 );
-                self.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefreshFailed)
+                self.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefresh)
             }
         }
     }
@@ -2050,7 +2050,7 @@ impl HomeView {
                     error = %runtime_error,
                     "failed to update buyer search query"
                 );
-                self.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefreshFailed)
+                self.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefresh)
             }
         }
     }
@@ -2152,7 +2152,7 @@ impl HomeView {
                     method = method.storage_key(),
                     "failed to update buyer fulfillment filter"
                 );
-                self.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefreshFailed)
+                self.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefresh)
             }
         }
     }
@@ -2190,7 +2190,7 @@ impl HomeView {
                     error = %runtime_error,
                     "failed to open buyer product detail"
                 );
-                self.set_buyer_workspace_notice(BuyerWorkspaceNotice::DetailOpenFailed)
+                self.set_buyer_workspace_notice(BuyerWorkspaceNotice::DetailOpen)
             }
         }
     }
@@ -2332,7 +2332,7 @@ impl HomeView {
             Ok(false) => false,
             Err(runtime_error) => {
                 let notice = buyer_order_place_failure_notice(&runtime_error);
-                if notice == BuyerWorkspaceNotice::OrderCoordinationFailed {
+                if notice == BuyerWorkspaceNotice::OrderCoordination {
                     self.buyer_order_review_form = None;
                 }
                 error!(
@@ -2367,7 +2367,7 @@ impl HomeView {
                     error = %runtime_error,
                     "failed to retry buyer order coordination"
                 );
-                let notice = BuyerWorkspaceNotice::OrderCoordinationFailed;
+                let notice = BuyerWorkspaceNotice::OrderCoordination;
                 let notice_changed = self.set_buyer_workspace_notice(notice);
                 buyer_order_coordination_notice_forces_redraw(notice) || notice_changed
             }
@@ -3299,7 +3299,7 @@ impl HomeView {
             sections.push(
                 home_setup_card(
                     projection,
-                    matches!(farm_state, FarmerHomeFarmState::IncompleteFarm).then_some(
+                    matches!(farm_state, FarmerHomeFarmState::Incomplete).then_some(
                         action_button_primary(
                             "home-farm-setup-continue",
                             app_shared_text(AppTextKey::HomeFarmSetupContinueAction),
@@ -3435,7 +3435,7 @@ impl HomeView {
                 .into_any_element(),
             );
         } else if runtime.startup_issue.is_none()
-            && farm_state == FarmerHomeFarmState::NoFarm
+            && farm_state == FarmerHomeFarmState::None
             && setup_onboarding.is_none()
         {
             sections.push(
@@ -3446,7 +3446,7 @@ impl HomeView {
                 .into_any_element(),
             );
         } else if runtime.startup_issue.is_none()
-            && farm_state == FarmerHomeFarmState::ConfiguredFarm
+            && farm_state == FarmerHomeFarmState::Configured
             && !projection.needs_setup()
             && projection.next_fulfillment_window.is_none()
             && !projection.has_attention_items()
@@ -5757,6 +5757,7 @@ impl StartupHomeView {
         self.startup_notice = None;
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render(
         &self,
         runtime: &DesktopAppRuntimeSummary,
@@ -6345,10 +6346,9 @@ impl SettingsFarmPanelState {
             .pickup_locations
             .iter()
             .any(|pickup_location| pickup_location.is_default)
+            && let Some(first_pickup_location) = self.pickup_locations.first_mut()
         {
-            if let Some(first_pickup_location) = self.pickup_locations.first_mut() {
-                first_pickup_location.is_default = true;
-            }
+            first_pickup_location.is_default = true;
         }
         self.sync_pickup_location_removability();
         self.save_failed = false;
@@ -6525,30 +6525,30 @@ impl SettingsFarmPanelState {
                 );
             }
 
-            if let Some(pickup_location_id) = fulfillment_window.selected_pickup_location_id {
-                if !missing_required_fields {
-                    if ends_at <= starts_at {
-                        push_unique_text_key(
-                            &mut row_validation_keys,
-                            AppTextKey::SettingsReadinessFieldFulfillmentWindowEndsBeforeStart,
-                        );
-                    }
-                    if order_cutoff_at >= starts_at {
-                        push_unique_text_key(
-                            &mut row_validation_keys,
-                            AppTextKey::SettingsReadinessFieldFulfillmentWindowCutoffAfterStart,
-                        );
-                    }
-                    fulfillment_windows.push(FulfillmentWindowRecord {
-                        fulfillment_window_id: fulfillment_window.fulfillment_window_id,
-                        farm_id: self.farm_id,
-                        pickup_location_id,
-                        label,
-                        starts_at,
-                        ends_at,
-                        order_cutoff_at,
-                    });
+            if let Some(pickup_location_id) = fulfillment_window.selected_pickup_location_id
+                && !missing_required_fields
+            {
+                if ends_at <= starts_at {
+                    push_unique_text_key(
+                        &mut row_validation_keys,
+                        AppTextKey::SettingsReadinessFieldFulfillmentWindowEndsBeforeStart,
+                    );
                 }
+                if order_cutoff_at >= starts_at {
+                    push_unique_text_key(
+                        &mut row_validation_keys,
+                        AppTextKey::SettingsReadinessFieldFulfillmentWindowCutoffAfterStart,
+                    );
+                }
+                fulfillment_windows.push(FulfillmentWindowRecord {
+                    fulfillment_window_id: fulfillment_window.fulfillment_window_id,
+                    farm_id: self.farm_id,
+                    pickup_location_id,
+                    label,
+                    starts_at,
+                    ends_at,
+                    order_cutoff_at,
+                });
             }
 
             fulfillment_window_validation_keys.push(row_validation_keys);
@@ -8835,7 +8835,7 @@ fn today_auto_focus_target(
             return Some(HomeAutoFocusTarget::FarmerSetupStart);
         }
     } else if projection.needs_setup()
-        && farmer_home_farm_state(runtime) == FarmerHomeFarmState::IncompleteFarm
+        && farmer_home_farm_state(runtime) == FarmerHomeFarmState::Incomplete
     {
         return Some(HomeAutoFocusTarget::FarmerSetupContinue);
     }
@@ -9223,6 +9223,7 @@ fn buyer_workspace_title_block(title_key: AppTextKey, body_key: AppTextKey) -> i
         )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn account_tab_frame(
     tabs: impl IntoIterator<Item = AppUnderlineTabSpec>,
     selected_index: usize,
@@ -11183,6 +11184,7 @@ fn buyer_listing_price_text(price: &ProductPricePresentation) -> String {
     format!("${dollars}.{cents:02} / {}", price.unit_label)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn buyer_product_detail_card(
     detail: &BuyerProductDetailProjection,
     replace_confirmation: Option<&BuyerCartReplaceConfirmationProjection>,
@@ -12080,6 +12082,7 @@ fn startup_home_surface(runtime: &DesktopAppRuntimeSummary) -> StartupHomeSurfac
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn startup_home_shell(
     runtime: &DesktopAppRuntimeSummary,
     startup_notice: Option<&str>,
@@ -12611,6 +12614,7 @@ async fn run_startup_signer_pending_poll(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn home_sidebar(
     runtime: &DesktopAppRuntimeSummary,
     on_select_today: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -12970,6 +12974,7 @@ fn products_title_row(
         .child(add_product_action)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn products_controls_card(
     runtime: &DesktopAppRuntimeSummary,
     products_search: Option<&ProductsSearchState>,
@@ -13405,6 +13410,7 @@ struct PackDayBatchPrintStatusPresentation {
     title_key: AppTextKey,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn pack_day_export_card(
     runtime: &DesktopAppRuntimeSummary,
     on_export: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -13488,7 +13494,7 @@ fn pack_day_export_card(
                             app_cluster(APP_UI_THEME.foundation.spacing.small_px)
                                 .items_center()
                                 .children(host_handoff_actions.into_iter().map(move |action| {
-                                    let button = match action.kind {
+                                    match action.kind {
                                         PackDayHostHandoffKind::RevealBundle if action.enabled => {
                                             action_button(
                                                 "pack-day-reveal-bundle",
@@ -13585,8 +13591,7 @@ fn pack_day_export_card(
                                             )
                                             .into_any_element()
                                         }
-                                    };
-                                    button
+                                    }
                                 })),
                         )
                         .when_some(host_handoff_status, |this, status| {
@@ -16093,14 +16098,14 @@ fn home_empty_state_card(title_key: AppTextKey, body_key: AppTextKey) -> impl In
 fn buyer_order_place_failure_notice(error: &AppSqliteError) -> BuyerWorkspaceNotice {
     match error {
         AppSqliteError::RuntimeStoreSql { .. } | AppSqliteError::RuntimeStore { .. } => {
-            BuyerWorkspaceNotice::OrderCoordinationFailed
+            BuyerWorkspaceNotice::OrderCoordination
         }
-        _ => BuyerWorkspaceNotice::OrderPlaceFailed,
+        _ => BuyerWorkspaceNotice::OrderPlace,
     }
 }
 
 fn buyer_order_coordination_notice_forces_redraw(notice: BuyerWorkspaceNotice) -> bool {
-    notice == BuyerWorkspaceNotice::OrderCoordinationFailed
+    notice == BuyerWorkspaceNotice::OrderCoordination
 }
 
 fn buyer_workspace_notice_card(notice: String) -> impl IntoElement {
@@ -16133,9 +16138,9 @@ fn farm_setup_save_state_key(state: FarmSetupSaveState) -> AppTextKey {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum FarmerHomeFarmState {
-    NoFarm,
-    IncompleteFarm,
-    ConfiguredFarm,
+    None,
+    Incomplete,
+    Configured,
 }
 
 fn home_saved_farm(runtime: &DesktopAppRuntimeSummary) -> Option<&FarmSummary> {
@@ -16148,15 +16153,15 @@ fn home_saved_farm(runtime: &DesktopAppRuntimeSummary) -> Option<&FarmSummary> {
 
 fn farmer_home_farm_state(runtime: &DesktopAppRuntimeSummary) -> FarmerHomeFarmState {
     match runtime.farm_readiness_projection.status {
-        FarmWorkspaceStatus::NoFarm => FarmerHomeFarmState::NoFarm,
+        FarmWorkspaceStatus::NoFarm => FarmerHomeFarmState::None,
         FarmWorkspaceStatus::SetupRequired => {
             if home_saved_farm(runtime).is_some() {
-                FarmerHomeFarmState::IncompleteFarm
+                FarmerHomeFarmState::Incomplete
             } else {
-                FarmerHomeFarmState::NoFarm
+                FarmerHomeFarmState::None
             }
         }
-        FarmWorkspaceStatus::Ready => FarmerHomeFarmState::ConfiguredFarm,
+        FarmWorkspaceStatus::Ready => FarmerHomeFarmState::Configured,
     }
 }
 
@@ -16192,19 +16197,19 @@ fn home_status_presentation(runtime: &DesktopAppRuntimeSummary) -> HomeStatusPre
     }
 
     match farmer_home_farm_state(runtime) {
-        FarmerHomeFarmState::NoFarm => {
+        FarmerHomeFarmState::None => {
             return HomeStatusPresentation {
                 indicator_color: APP_UI_THEME.components.app_status_indicator.offline,
                 label_key: AppTextKey::HomeTodayStatusNoFarm,
             };
         }
-        FarmerHomeFarmState::IncompleteFarm => {
+        FarmerHomeFarmState::Incomplete => {
             return HomeStatusPresentation {
                 indicator_color: APP_UI_THEME.components.app_status_indicator.offline,
                 label_key: AppTextKey::HomeTodayStatusSetup,
             };
         }
-        FarmerHomeFarmState::ConfiguredFarm => {}
+        FarmerHomeFarmState::Configured => {}
     }
 
     if runtime.today_projection.has_attention_items() {
@@ -16348,7 +16353,7 @@ mod tests {
         }
     }
 
-    fn write_artifact(bundle_directory: &PathBuf, file_name: &str) -> PathBuf {
+    fn write_artifact(bundle_directory: &std::path::Path, file_name: &str) -> PathBuf {
         let path = bundle_directory.join(file_name);
         fs::write(&path, file_name).unwrap();
         path
@@ -16393,18 +16398,18 @@ mod tests {
     fn buyer_workspace_notice_tracks_visible_buyer_runtime_errors() {
         let (mut view, _, home_dir) = test_home_view("buyer_notice");
 
-        assert!(view.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefreshFailed));
+        assert!(view.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefresh));
         assert_eq!(
             view.buyer_workspace_notice.as_deref(),
             Some(app_text(AppTextKey::PersonalMarketplaceRefreshFailedNotice).as_str())
         );
-        assert!(!view.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefreshFailed));
-        assert!(view.set_buyer_workspace_notice(BuyerWorkspaceNotice::OrderPlaceFailed));
+        assert!(!view.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefresh));
+        assert!(view.set_buyer_workspace_notice(BuyerWorkspaceNotice::OrderPlace));
         assert_eq!(
             view.buyer_workspace_notice.as_deref(),
             Some(app_text(AppTextKey::PersonalOrderPlaceFailedNotice).as_str())
         );
-        assert!(view.set_buyer_workspace_notice(BuyerWorkspaceNotice::OrderCoordinationFailed));
+        assert!(view.set_buyer_workspace_notice(BuyerWorkspaceNotice::OrderCoordination));
         assert_eq!(
             view.buyer_workspace_notice.as_deref(),
             Some(app_text(AppTextKey::PersonalOrderCoordinationFailedNotice).as_str())
@@ -16431,10 +16436,10 @@ mod tests {
     #[test]
     fn buyer_order_coordination_failure_forces_redraw_when_notice_is_unchanged() {
         assert!(buyer_order_coordination_notice_forces_redraw(
-            BuyerWorkspaceNotice::OrderCoordinationFailed
+            BuyerWorkspaceNotice::OrderCoordination
         ));
         assert!(!buyer_order_coordination_notice_forces_redraw(
-            BuyerWorkspaceNotice::OrderPlaceFailed
+            BuyerWorkspaceNotice::OrderPlace
         ));
     }
 
@@ -16578,7 +16583,7 @@ mod tests {
         let _ = fs::remove_dir_all(home_dir);
     }
 
-    fn sample_pack_day_bundle(bundle_directory: &PathBuf) -> PackDayExportBundle {
+    fn sample_pack_day_bundle(bundle_directory: &std::path::Path) -> PackDayExportBundle {
         PackDayExportBundle {
             fulfillment_window_id: FulfillmentWindowId::generate(),
             export_instance_id: radroots_studio_app_view::PackDayExportInstanceId::generate(),
@@ -17288,7 +17293,7 @@ mod tests {
                 TodayAgendaProjection::default(),
                 FarmSetupProjection::default(),
             )),
-            FarmerHomeFarmState::NoFarm
+            FarmerHomeFarmState::None
         );
         assert_eq!(
             farmer_home_farm_state(&summary(
@@ -17306,7 +17311,7 @@ mod tests {
                     Some(incomplete_farm),
                 ),
             )),
-            FarmerHomeFarmState::IncompleteFarm
+            FarmerHomeFarmState::Incomplete
         );
         assert_eq!(
             farmer_home_farm_state(&summary(
@@ -17324,7 +17329,7 @@ mod tests {
                     Some(configured_farm),
                 ),
             )),
-            FarmerHomeFarmState::ConfiguredFarm
+            FarmerHomeFarmState::Configured
         );
     }
 
@@ -18183,14 +18188,14 @@ mod tests {
         );
         assert_eq!(
             startup_signer_status_spec(&StartupSignerConnectState::PendingApproval {
-                pending_session: pending_session.clone(),
+                pending_session: Box::new(pending_session.clone()),
                 auth_challenge_url: None,
             }),
             Some((AppTextKey::HomeSetupSignerPendingTitle, None))
         );
         assert_eq!(
             startup_signer_status_spec(&StartupSignerConnectState::PendingApproval {
-                pending_session: pending_session.clone(),
+                pending_session: Box::new(pending_session.clone()),
                 auth_challenge_url: Some("https://auth.example/challenge".to_owned()),
             }),
             Some((
@@ -18200,15 +18205,15 @@ mod tests {
         );
         assert_eq!(
             startup_signer_status_spec(&StartupSignerConnectState::Approved {
-                pending_session,
-                approved_session: RadrootsAppRemoteSignerApprovedSession {
+                pending_session: Box::new(pending_session),
+                approved_session: Box::new(RadrootsAppRemoteSignerApprovedSession {
                     user_identity: fixture_identity(
                         "2222222222222222222222222222222222222222222222222222222222222222",
                     )
                     .to_public(),
                     relays: vec!["wss://relay.radroots.example".to_owned()],
                     approved_permissions: Default::default(),
-                },
+                }),
                 auth_challenge_url: None,
             }),
             Some((AppTextKey::HomeSetupSignerApprovedTitle, None))
@@ -18227,21 +18232,21 @@ mod tests {
         ));
         assert!(!startup_signer_source_input_is_editable(
             &StartupSignerConnectState::PendingApproval {
-                pending_session: pending_session.clone(),
+                pending_session: Box::new(pending_session.clone()),
                 auth_challenge_url: None,
             }
         ));
         assert!(!startup_signer_source_input_is_editable(
             &StartupSignerConnectState::Approved {
-                pending_session,
-                approved_session: RadrootsAppRemoteSignerApprovedSession {
+                pending_session: Box::new(pending_session),
+                approved_session: Box::new(RadrootsAppRemoteSignerApprovedSession {
                     user_identity: fixture_identity(
                         "2222222222222222222222222222222222222222222222222222222222222222",
                     )
                     .to_public(),
                     relays: vec!["wss://relay.radroots.example".to_owned()],
                     approved_permissions: Default::default(),
-                },
+                }),
                 auth_challenge_url: None,
             }
         ));
@@ -18253,7 +18258,7 @@ mod tests {
         let preview = startup_signer_preview_summary_for_connect_state(
             "bunker://466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27?relay=wss%3A%2F%2Frelay.radroots.example",
             &StartupSignerConnectState::PendingApproval {
-                pending_session: pending_session.clone(),
+                pending_session: Box::new(pending_session.clone()),
                 auth_challenge_url: None,
             },
         )

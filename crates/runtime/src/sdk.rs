@@ -101,12 +101,12 @@ pub struct DesktopRuntimeStoragePaths {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DesktopRuntimeIssue {
-    pub code: String,
-    pub class: String,
+    pub code: Box<str>,
+    pub class: Box<str>,
     pub retryable: bool,
-    pub message: String,
-    pub recovery_actions: Vec<String>,
-    pub detail_json: Value,
+    pub message: Box<str>,
+    pub recovery_actions: Box<[String]>,
+    pub detail_json: Box<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -438,27 +438,27 @@ enum DesktopRuntimeEffect {
     RefreshDiagnostics(DesktopRuntimeEffectReceipt),
     RestorePreflight(
         DesktopRuntimeEffectReceipt,
-        DesktopRuntimeRestorePreflightRequest,
+        Box<DesktopRuntimeRestorePreflightRequest>,
     ),
     EnqueueFarmPublish(
         DesktopRuntimeEffectReceipt,
-        DesktopRuntimeFarmPublishRequest,
+        Box<DesktopRuntimeFarmPublishRequest>,
     ),
     EnqueueListingPublish(
         DesktopRuntimeEffectReceipt,
-        DesktopRuntimeListingPublishRequest,
+        Box<DesktopRuntimeListingPublishRequest>,
     ),
     TradePropose(
         DesktopRuntimeEffectReceipt,
-        DesktopRuntimeTradeProposeRequest,
+        Box<DesktopRuntimeTradeProposeRequest>,
     ),
     TradeDecision(
         DesktopRuntimeEffectReceipt,
-        DesktopRuntimeTradeDecisionRequest,
+        Box<DesktopRuntimeTradeDecisionRequest>,
     ),
     TradeCancellation(
         DesktopRuntimeEffectReceipt,
-        DesktopRuntimeTradeCancellationRequest,
+        Box<DesktopRuntimeTradeCancellationRequest>,
     ),
     BeginProjectionRebuild(DesktopRuntimeEffectReceipt),
     CompleteProjectionRebuild(DesktopRuntimeEffectReceipt),
@@ -595,7 +595,7 @@ impl DesktopRuntimeSupervisor {
             DesktopRuntimeEffectKind::RestorePreflight,
             None,
             None,
-            |receipt| DesktopRuntimeEffect::RestorePreflight(receipt, request),
+            |receipt| DesktopRuntimeEffect::RestorePreflight(receipt, Box::new(request)),
         )
     }
 
@@ -608,7 +608,7 @@ impl DesktopRuntimeSupervisor {
             DesktopRuntimeEffectKind::FarmPublish,
             Some(FARM_PUBLISH_OPERATION_KIND.to_owned()),
             actor_pubkey,
-            |receipt| DesktopRuntimeEffect::EnqueueFarmPublish(receipt, request),
+            |receipt| DesktopRuntimeEffect::EnqueueFarmPublish(receipt, Box::new(request)),
         )
     }
 
@@ -621,7 +621,7 @@ impl DesktopRuntimeSupervisor {
             DesktopRuntimeEffectKind::ListingPublish,
             Some(LISTING_PUBLISH_OPERATION_KIND.to_owned()),
             actor_pubkey,
-            |receipt| DesktopRuntimeEffect::EnqueueListingPublish(receipt, request),
+            |receipt| DesktopRuntimeEffect::EnqueueListingPublish(receipt, Box::new(request)),
         )
     }
 
@@ -634,7 +634,7 @@ impl DesktopRuntimeSupervisor {
             DesktopRuntimeEffectKind::TradePropose,
             Some(TRADE_SUBMIT_OPERATION_KIND.to_owned()),
             actor_pubkey,
-            |receipt| DesktopRuntimeEffect::TradePropose(receipt, request),
+            |receipt| DesktopRuntimeEffect::TradePropose(receipt, Box::new(request)),
         )
     }
 
@@ -647,7 +647,7 @@ impl DesktopRuntimeSupervisor {
             DesktopRuntimeEffectKind::TradeDecision,
             Some(TRADE_DECISION_OPERATION_KIND.to_owned()),
             actor_pubkey,
-            |receipt| DesktopRuntimeEffect::TradeDecision(receipt, request),
+            |receipt| DesktopRuntimeEffect::TradeDecision(receipt, Box::new(request)),
         )
     }
 
@@ -660,7 +660,7 @@ impl DesktopRuntimeSupervisor {
             DesktopRuntimeEffectKind::TradeCancellation,
             Some(TRADE_CANCELLATION_OPERATION_KIND.to_owned()),
             actor_pubkey,
-            |receipt| DesktopRuntimeEffect::TradeCancellation(receipt, request),
+            |receipt| DesktopRuntimeEffect::TradeCancellation(receipt, Box::new(request)),
         )
     }
 
@@ -774,52 +774,53 @@ impl From<&RadrootsSdkStoragePaths> for DesktopRuntimeStoragePaths {
 impl DesktopRuntimeIssue {
     fn from_sdk_error(error: &RadrootsSdkError) -> Self {
         Self {
-            code: error.code().to_owned(),
-            class: sdk_error_class_label(error),
+            code: error.code().into(),
+            class: sdk_error_class_label(error).into_boxed_str(),
             retryable: error.retryable(),
-            message: error.to_string(),
+            message: error.to_string().into_boxed_str(),
             recovery_actions: error
                 .recovery_actions()
                 .into_iter()
                 .filter_map(|action| serde_json::to_value(action).ok())
                 .filter_map(|value| value.as_str().map(str::to_owned))
-                .collect(),
-            detail_json: error.detail_json(),
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            detail_json: Box::new(error.detail_json()),
         }
     }
 
     fn runtime_error(code: &'static str, message: String) -> Self {
         Self {
-            code: code.to_owned(),
-            class: "runtime".to_owned(),
+            code: code.into(),
+            class: "runtime".into(),
             retryable: true,
-            message: message.clone(),
-            recovery_actions: vec!["retry_startup".to_owned()],
-            detail_json: json!({
+            message: message.clone().into_boxed_str(),
+            recovery_actions: vec!["retry_startup".to_owned()].into_boxed_slice(),
+            detail_json: Box::new(json!({
                 "code": code,
                 "class": "runtime",
                 "retryable": true,
                 "message": message,
                 "recovery_actions": ["retry_startup"],
                 "detail": {}
-            }),
+            })),
         }
     }
 
     fn lifecycle_blocked(state: DesktopRuntimeLifecycleState) -> Self {
         Self {
-            code: "sdk_lifecycle_busy".to_owned(),
-            class: "runtime".to_owned(),
+            code: "sdk_lifecycle_busy".into(),
+            class: "runtime".into(),
             retryable: true,
-            message: format!("app sdk runtime is {:?}", state),
-            recovery_actions: vec!["wait_for_sdk_lifecycle".to_owned()],
-            detail_json: json!({
+            message: format!("app sdk runtime is {:?}", state).into_boxed_str(),
+            recovery_actions: vec!["wait_for_sdk_lifecycle".to_owned()].into_boxed_slice(),
+            detail_json: Box::new(json!({
                 "code": "sdk_lifecycle_busy",
                 "class": "runtime",
                 "retryable": true,
                 "state": format!("{state:?}"),
                 "recovery_actions": ["wait_for_sdk_lifecycle"]
-            }),
+            })),
         }
     }
 }
@@ -1161,7 +1162,7 @@ fn run_desktop_runtime_worker(
             }
             DesktopRuntimeEffect::RestorePreflight(receipt, request) => {
                 let result = match sdk.as_ref() {
-                    Some(_) => run_restore_preflight(&runtime, &shared, &config, request),
+                    Some(_) => run_restore_preflight(&runtime, &shared, &config, *request),
                     None => Err(runtime_unavailable_issue(&shared)),
                 };
                 finish_restore_preflight_result(&shared, receipt, result);
@@ -1171,7 +1172,7 @@ fn run_desktop_runtime_worker(
                     Err(issue)
                 } else {
                     match sdk.as_ref() {
-                        Some(sdk) => enqueue_farm_publish_with_sdk(&runtime, sdk, request),
+                        Some(sdk) => enqueue_farm_publish_with_sdk(&runtime, sdk, *request),
                         None => Err(runtime_unavailable_issue(&shared)),
                     }
                 };
@@ -1182,7 +1183,7 @@ fn run_desktop_runtime_worker(
                     Err(issue)
                 } else {
                     match sdk.as_ref() {
-                        Some(sdk) => enqueue_listing_publish_with_sdk(&runtime, sdk, request),
+                        Some(sdk) => enqueue_listing_publish_with_sdk(&runtime, sdk, *request),
                         None => Err(runtime_unavailable_issue(&shared)),
                     }
                 };
@@ -1193,7 +1194,7 @@ fn run_desktop_runtime_worker(
                     Err(issue)
                 } else {
                     match sdk.as_ref() {
-                        Some(_) => trade_propose_with_sdk(&runtime, &config, request),
+                        Some(_) => trade_propose_with_sdk(&runtime, &config, *request),
                         None => Err(runtime_unavailable_issue(&shared)),
                     }
                 };
@@ -1204,7 +1205,7 @@ fn run_desktop_runtime_worker(
                     Err(issue)
                 } else {
                     match sdk.as_ref() {
-                        Some(_) => trade_decision_with_sdk(&runtime, &config, request),
+                        Some(_) => trade_decision_with_sdk(&runtime, &config, *request),
                         None => Err(runtime_unavailable_issue(&shared)),
                     }
                 };
@@ -1215,7 +1216,7 @@ fn run_desktop_runtime_worker(
                     Err(issue)
                 } else {
                     match sdk.as_ref() {
-                        Some(_) => trade_cancel_with_sdk(&runtime, &config, request),
+                        Some(_) => trade_cancel_with_sdk(&runtime, &config, *request),
                         None => Err(runtime_unavailable_issue(&shared)),
                     }
                 };
@@ -2062,8 +2063,7 @@ fn mark_projections_stale(
         DesktopRuntimeStartupMilestone::ProjectionsReady,
         false,
     );
-    let projection_lifecycle = status.projection_lifecycle.clone();
-    projection_lifecycle
+    status.projection_lifecycle.clone()
 }
 
 fn begin_projection_rebuild(
@@ -2084,8 +2084,7 @@ fn begin_projection_rebuild(
         DesktopRuntimeStartupMilestone::ProjectionsReady,
         false,
     );
-    let projection_lifecycle = status.projection_lifecycle.clone();
-    projection_lifecycle
+    status.projection_lifecycle.clone()
 }
 
 fn complete_projection_rebuild(

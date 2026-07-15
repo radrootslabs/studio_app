@@ -55,7 +55,7 @@ pub enum RadrootsAppRemoteSignerProgressUpdate {
 #[derive(Debug, Clone)]
 pub enum RadrootsAppRemoteSignerPendingPollOutcome {
     PendingApproval,
-    Approved(RadrootsAppRemoteSignerApprovedSession),
+    Approved(Box<RadrootsAppRemoteSignerApprovedSession>),
     TransportFailure { message: String },
     Rejected { message: String },
     FatalError { message: String },
@@ -554,16 +554,16 @@ fn classify_pending_poll_response(
 ) -> RadrootsAppRemoteSignerPendingPollOutcome {
     match response.into_pending_connection_poll_outcome() {
         RadrootsNostrConnectPendingConnectionPollOutcome::Approved(public_key) => {
-            RadrootsAppRemoteSignerPendingPollOutcome::Approved(
+            RadrootsAppRemoteSignerPendingPollOutcome::Approved(Box::new(
                 RadrootsAppRemoteSignerApprovedSession {
                     user_identity: RadrootsIdentityPublic::new(public_key),
                     relays: Vec::new(),
                     approved_permissions: RadrootsNostrConnectPermissions::default(),
                 },
-            )
+            ))
         }
         RadrootsNostrConnectPendingConnectionPollOutcome::ApprovedCapability(capability) => {
-            RadrootsAppRemoteSignerPendingPollOutcome::Approved(
+            RadrootsAppRemoteSignerPendingPollOutcome::Approved(Box::new(
                 RadrootsAppRemoteSignerApprovedSession {
                     user_identity: RadrootsIdentityPublic::new(capability.user_public_key),
                     relays: capability
@@ -573,7 +573,7 @@ fn classify_pending_poll_response(
                         .collect(),
                     approved_permissions: capability.permissions,
                 },
-            )
+            ))
         }
         RadrootsNostrConnectPendingConnectionPollOutcome::PendingApproval => {
             RadrootsAppRemoteSignerPendingPollOutcome::PendingApproval
@@ -733,13 +733,17 @@ mod tests {
                 },
             ));
 
-        assert!(matches!(
-            outcome,
-            RadrootsAppRemoteSignerPendingPollOutcome::Approved(
-                RadrootsAppRemoteSignerApprovedSession { user_identity, approved_permissions, .. }
-            ) if user_identity.public_key_hex == fixture_public_key().to_hex()
-                && approved_permissions.to_string() == "sign_event:kind:1,switch_relays"
-        ));
+        let RadrootsAppRemoteSignerPendingPollOutcome::Approved(approved_session) = outcome else {
+            panic!("expected approved outcome");
+        };
+        assert_eq!(
+            approved_session.user_identity.public_key_hex,
+            fixture_public_key().to_hex()
+        );
+        assert_eq!(
+            approved_session.approved_permissions.to_string(),
+            "sign_event:kind:1,switch_relays"
+        );
     }
 
     #[test]
