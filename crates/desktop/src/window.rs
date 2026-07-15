@@ -2910,41 +2910,6 @@ impl HomeView {
         }
     }
 
-    fn accept_buyer_order_revision(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
-        match self.runtime.publish_buyer_order_revision_accept(order_id) {
-            Ok(true) => cx.notify(),
-            Ok(false) => {}
-            Err(runtime_error) => {
-                error!(
-                    target: "personal_orders",
-                    event = "buyer.order_revision_accept_failed",
-                    error = %runtime_error,
-                    order_id = %order_id,
-                    "failed to accept buyer order change"
-                );
-            }
-        }
-    }
-
-    fn decline_buyer_order_revision(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
-        match self
-            .runtime
-            .publish_buyer_order_revision_decline(order_id, false)
-        {
-            Ok(true) => cx.notify(),
-            Ok(false) => {}
-            Err(runtime_error) => {
-                error!(
-                    target: "personal_orders",
-                    event = "buyer.order_revision_decline_failed",
-                    error = %runtime_error,
-                    order_id = %order_id,
-                    "failed to keep buyer order"
-                );
-            }
-        }
-    }
-
     fn open_products_stock_editor(
         &mut self,
         product_id: ProductId,
@@ -8571,12 +8536,16 @@ fn about_runtime_rows(runtime: &DesktopAppRuntimeSummary) -> Vec<LabelValueRow> 
             sdk_status.storage_root.display().to_string(),
         ));
         rows.push(LabelValueRow::new(
-            app_shared_text(AppTextKey::MetadataSdkEventStorePath),
-            path_or_none(sdk_status.event_store_path.as_ref()),
+            app_shared_text(AppTextKey::MetadataSdkRuntimePath),
+            path_or_none(sdk_status.runtime_path.as_ref()),
         ));
         rows.push(LabelValueRow::new(
-            app_shared_text(AppTextKey::MetadataSdkOutboxPath),
-            path_or_none(sdk_status.outbox_path.as_ref()),
+            app_shared_text(AppTextKey::MetadataSdkPrivatePath),
+            path_or_none(sdk_status.private_path.as_ref()),
+        ));
+        rows.push(LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSdkStudioPath),
+            path_or_none(sdk_status.studio_path.as_ref()),
         ));
         rows.push(LabelValueRow::new(
             app_shared_text(AppTextKey::MetadataSdkRelayUrlPolicy),
@@ -11879,38 +11848,6 @@ fn buyer_order_detail_card(
                         this.child(home_body_text(app_shared_text(AppTextKey::ValueNone)))
                     }),
             ))
-            .when(
-                detail.status == BuyerOrderStatus::Scheduled
-                    && detail.workflow.revision == TradeRevisionStatus::ChangeProposed,
-                |this| {
-                    this.child(
-                        app_stack_h(APP_UI_THEME.foundation.spacing.small_px)
-                            .w_full()
-                            .child(action_button_primary(
-                                "buyer-order-accept-change",
-                                app_shared_text(AppTextKey::PersonalOrdersActionAcceptChange),
-                                cx.listener({
-                                    let order_id = detail.order_id;
-                                    move |this, _, _, cx| {
-                                        this.accept_buyer_order_revision(order_id, cx)
-                                    }
-                                }),
-                                cx,
-                            ))
-                            .child(action_button_compact(
-                                "buyer-order-keep-order",
-                                app_shared_text(AppTextKey::PersonalOrdersActionKeepOrder),
-                                cx.listener({
-                                    let order_id = detail.order_id;
-                                    move |this, _, _, cx| {
-                                        this.decline_buyer_order_revision(order_id, cx)
-                                    }
-                                }),
-                                cx,
-                            )),
-                    )
-                },
-            )
             .when(detail.status == BuyerOrderStatus::Placed, |this| {
                 this.child(action_button_compact(
                     "buyer-order-cancel",
@@ -18850,8 +18787,9 @@ mod tests {
             projection_lifecycle_state: AppSdkProjectionLifecycleState::Current,
             projection_lifecycle_reason: None,
             storage_root: storage_root.clone(),
-            event_store_path: Some(storage_root.join("event_store.sqlite")),
-            outbox_path: Some(storage_root.join("outbox.sqlite")),
+            runtime_path: Some(storage_root.join("runtime.sqlite")),
+            private_path: Some(storage_root.join("private.sqlite")),
+            studio_path: Some(storage_root.join("studio.sqlite")),
             relay_target_count: 2,
             relay_url_policy: AppSdkRelayUrlPolicy::Localhost,
             last_issue: None,

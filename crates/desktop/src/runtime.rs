@@ -15,11 +15,10 @@ use radroots_event::{
     farm::{RadrootsFarm, RadrootsFarmPublicLocation, RadrootsFarmRef},
     ids::{
         RadrootsDTag, RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress,
-        RadrootsOrderId, RadrootsOrderRevisionId, RadrootsPublicKey,
+        RadrootsOrderId, RadrootsPublicKey,
     },
     kinds::{
-        KIND_FARM, KIND_LISTING, KIND_LISTING_DRAFT, KIND_ORDER_CANCELLATION, KIND_ORDER_DECISION,
-        KIND_ORDER_REQUEST, KIND_ORDER_REVISION_DECISION, KIND_ORDER_REVISION_PROPOSAL,
+        KIND_FARM, KIND_LISTING, KIND_ORDER_CANCELLATION, KIND_ORDER_DECISION, KIND_ORDER_REQUEST,
         KIND_PROFILE,
     },
     listing::{
@@ -30,13 +29,11 @@ use radroots_event::{
     order::{
         RadrootsOrderDecision, RadrootsOrderEconomics, RadrootsOrderEventType,
         RadrootsOrderInventoryCommitment, RadrootsOrderItem, RadrootsOrderRequest,
-        RadrootsOrderRevisionDecision, RadrootsOrderRevisionOutcome, RadrootsOrderRevisionProposal,
     },
 };
 use radroots_event_codec::order::{
     order_cancellation_from_event, order_decision_from_event, order_event_context_from_tags,
-    order_request_from_event, order_revision_decision_from_event,
-    order_revision_proposal_from_event,
+    order_request_from_event,
 };
 use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
 use radroots_nostr::prelude::{
@@ -54,9 +51,8 @@ use radroots_runtime_store::{
 };
 use radroots_sdk::{
     FARM_PUBLISH_OPERATION_KIND, LISTING_PUBLISH_OPERATION_KIND, NostrRelayUrlPolicy,
-    TRADE_CANCELLATION_OPERATION_KIND, TRADE_DECISION_OPERATION_KIND,
-    TRADE_REVISION_DECISION_OPERATION_KIND, TRADE_REVISION_PROPOSAL_OPERATION_KIND,
-    TRADE_SUBMIT_OPERATION_KIND, TargetSet,
+    TRADE_CANCELLATION_OPERATION_KIND, TRADE_DECISION_OPERATION_KIND, TRADE_SUBMIT_OPERATION_KIND,
+    TargetSet,
 };
 use radroots_sql_core::SqlxSqliteExecutor;
 use radroots_studio_app_core::{
@@ -66,9 +62,8 @@ use radroots_studio_app_core::{
     AppSdkListingPublishRequest, AppSdkProjectionLifecycleState, AppSdkPublicFarmLocation,
     AppSdkRelayUrlPolicy, AppSdkRuntime, AppSdkRuntimeError, AppSdkRuntimeIssue,
     AppSdkRuntimeStatus, AppSdkStoragePaths, AppSdkTradeCancellationRequest, AppSdkTradeDecision,
-    AppSdkTradeDecisionRequest, AppSdkTradeProposeRequest, AppSdkTradeRevisionDecisionRequest,
-    AppSdkTradeRevisionProposalRequest, AppSdkWorkflowReceipt, AppSharedAccountsPaths,
-    PackDayExportWriteError, prepare_pack_day_export_bundle_at_data_root,
+    AppSdkTradeDecisionRequest, AppSdkTradeProposeRequest, AppSdkWorkflowReceipt,
+    AppSharedAccountsPaths, PackDayExportWriteError, prepare_pack_day_export_bundle_at_data_root,
     shared_runtime_store_database_path_from_shared_accounts, write_prepared_pack_day_export_bundle,
 };
 use radroots_studio_app_remote_signer::{
@@ -96,12 +91,10 @@ use radroots_studio_app_state::{
 use radroots_studio_app_sync::{
     AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
     AppOrderDecisionInventoryCommitment, AppOrderDecisionPayload, AppOrderDecisionPublishPayload,
-    AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
-    AppOrderRevisionDecisionPublishPayload, AppOrderRevisionProposalPublishPayload,
-    AppPublishContext, AppPublishPayload, AppPublishedOperationReceipt,
-    AppRelayIngestScopeFreshness, AppSyncProjection, AppSyncRequest, AppSyncResult,
-    AppSyncRunStatus, AppSyncTransport, AppSyncTransportError, SyncCheckpointStatus,
-    SyncConflictSeverity, SyncTrigger,
+    AppOrderRequestItemPayload, AppOrderRequestPublishPayload, AppPublishContext,
+    AppPublishPayload, AppPublishedOperationReceipt, AppRelayIngestScopeFreshness,
+    AppSyncProjection, AppSyncRequest, AppSyncResult, AppSyncRunStatus, AppSyncTransport,
+    AppSyncTransportError, SyncCheckpointStatus, SyncConflictSeverity, SyncTrigger,
 };
 #[cfg(test)]
 use radroots_studio_app_sync::{PendingSyncOperation, SyncAggregateRef, SyncOperationKind};
@@ -126,8 +119,7 @@ use radroots_trade::identity::RadrootsTradeLocator;
 use radroots_trade::listing::parse_public_listing_address;
 use radroots_trade::order::{
     RadrootsOrderCancellationRecord, RadrootsOrderDecisionRecord, RadrootsOrderReductionInputs,
-    RadrootsOrderRequestRecord, RadrootsOrderRevisionDecisionRecord,
-    RadrootsOrderRevisionProposalRecord, reduce_order_events,
+    RadrootsOrderRequestRecord, reduce_order_events,
 };
 use radroots_trade::workflow::RadrootsTradeWorkflowState;
 use serde_json::json;
@@ -171,11 +163,8 @@ const APP_DIRECT_RELAY_INGEST_KINDS: &[u16] = &[
     KIND_PROFILE as u16,
     KIND_FARM as u16,
     KIND_LISTING as u16,
-    KIND_LISTING_DRAFT as u16,
     KIND_ORDER_REQUEST as u16,
     KIND_ORDER_DECISION as u16,
-    KIND_ORDER_REVISION_PROPOSAL as u16,
-    KIND_ORDER_REVISION_DECISION as u16,
     KIND_ORDER_CANCELLATION as u16,
 ];
 
@@ -239,27 +228,12 @@ struct ResolvedAppOrderDecisionEvidence {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct ResolvedAppOrderRevisionProposalEvidence {
-    event: RadrootsEventEnvelope,
-    event_id: String,
-    payload: RadrootsOrderRevisionProposal,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ResolvedAppOrderRevisionDecisionEvidence {
-    event_id: String,
-    payload: RadrootsOrderRevisionDecision,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 struct ResolvedAppOrderLifecycleEvidence {
     request_event_id: String,
     status: RadrootsTradeWorkflowState,
     agreement_event_id: Option<String>,
     last_event_id: Option<String>,
     decision: Option<ResolvedAppOrderDecisionEvidence>,
-    revision_proposals: Vec<ResolvedAppOrderRevisionProposalEvidence>,
-    revision_decisions: Vec<ResolvedAppOrderRevisionDecisionEvidence>,
     cancellation_event_id: Option<String>,
 }
 
@@ -267,8 +241,6 @@ struct ResolvedAppOrderLifecycleEvidence {
 struct AppActiveOrderEvidenceBuckets {
     requests: Vec<RadrootsOrderRequestRecord>,
     decisions: Vec<RadrootsOrderDecisionRecord>,
-    revision_proposals: Vec<RadrootsOrderRevisionProposalRecord>,
-    revision_decisions: Vec<RadrootsOrderRevisionDecisionRecord>,
     cancellations: Vec<RadrootsOrderCancellationRecord>,
 }
 
@@ -376,8 +348,6 @@ fn publish_payload_context(publish_payload: &AppPublishPayload) -> &AppPublishCo
         AppPublishPayload::Listing(payload) => &payload.context,
         AppPublishPayload::OrderRequest(payload) => &payload.context,
         AppPublishPayload::OrderDecision(payload) => &payload.context,
-        AppPublishPayload::OrderRevisionProposal(payload) => &payload.context,
-        AppPublishPayload::OrderRevisionDecision(payload) => &payload.context,
         AppPublishPayload::OrderCancellation(payload) => &payload.context,
     }
 }
@@ -851,24 +821,6 @@ impl DesktopAppRuntime {
         )
     }
 
-    pub fn publish_order_revision_proposal(
-        &self,
-        order_id: OrderId,
-        items: Vec<RadrootsOrderItem>,
-        economics: RadrootsOrderEconomics,
-        reason: &str,
-        confirm_public_note: bool,
-    ) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut()
-            .publish_seller_order_revision_proposal(
-                order_id,
-                items,
-                economics,
-                reason,
-                confirm_public_note,
-            )
-    }
-
     pub fn publish_buyer_order_cancel(
         &self,
         order_id: OrderId,
@@ -876,23 +828,6 @@ impl DesktopAppRuntime {
     ) -> Result<bool, AppSqliteError> {
         self.lock_state_mut()
             .publish_buyer_order_cancellation(order_id, confirm_public_note)
-    }
-
-    pub fn publish_buyer_order_revision_accept(
-        &self,
-        order_id: OrderId,
-    ) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut()
-            .publish_buyer_order_revision_accept(order_id)
-    }
-
-    pub fn publish_buyer_order_revision_decline(
-        &self,
-        order_id: OrderId,
-        confirm_public_note: bool,
-    ) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut()
-            .publish_buyer_order_revision_decline(order_id, confirm_public_note)
     }
 
     pub fn open_pack_day(
@@ -1213,17 +1148,6 @@ fn start_desktop_sdk_runtime(
     AppSdkRuntime::start(AppSdkConfig::from_desktop_paths(paths, nostr_relay_urls))
 }
 
-fn sdk_storage_path_pair(paths: Option<&AppSdkStoragePaths>) -> (Option<PathBuf>, Option<PathBuf>) {
-    paths
-        .map(|paths| {
-            (
-                Some(paths.event_store_path.clone()),
-                Some(paths.outbox_path.clone()),
-            )
-        })
-        .unwrap_or((None, None))
-}
-
 fn desktop_app_sdk_issue_from_runtime_error(
     error: &AppSdkRuntimeError,
 ) -> DesktopAppSdkIssueSummary {
@@ -1285,8 +1209,9 @@ pub struct DesktopAppSdkStatusSummary {
     pub projection_lifecycle_state: AppSdkProjectionLifecycleState,
     pub projection_lifecycle_reason: Option<String>,
     pub storage_root: PathBuf,
-    pub event_store_path: Option<PathBuf>,
-    pub outbox_path: Option<PathBuf>,
+    pub runtime_path: Option<PathBuf>,
+    pub private_path: Option<PathBuf>,
+    pub studio_path: Option<PathBuf>,
     pub relay_target_count: usize,
     pub relay_url_policy: AppSdkRelayUrlPolicy,
     pub last_issue: Option<DesktopAppSdkIssueSummary>,
@@ -1294,14 +1219,26 @@ pub struct DesktopAppSdkStatusSummary {
 
 impl DesktopAppSdkStatusSummary {
     fn from_status(status: &AppSdkRuntimeStatus) -> Self {
-        let (event_store_path, outbox_path) = sdk_storage_path_pair(status.storage_paths.as_ref());
+        let runtime_path = status
+            .storage_paths
+            .as_ref()
+            .map(|paths| paths.runtime_path.clone());
+        let private_path = status
+            .storage_paths
+            .as_ref()
+            .map(|paths| paths.private_path.clone());
+        let studio_path = status
+            .storage_paths
+            .as_ref()
+            .map(|paths| paths.studio_path.clone());
         Self {
             lifecycle_state: status.state,
             projection_lifecycle_state: status.projection_lifecycle.state,
             projection_lifecycle_reason: status.projection_lifecycle.reason.clone(),
             storage_root: status.storage_root.clone(),
-            event_store_path,
-            outbox_path,
+            runtime_path,
+            private_path,
+            studio_path,
             relay_target_count: status.relay_urls.len(),
             relay_url_policy: status.relay_url_policy,
             last_issue: status
@@ -2614,7 +2551,6 @@ impl DesktopAppRuntimeState {
         if lifecycle.decision.is_some()
             || lifecycle.status != RadrootsTradeWorkflowState::Requested
             || lifecycle.cancellation_event_id.is_some()
-            || active_order_pending_revision_proposal(&lifecycle).is_some()
         {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "seller order decision requires an undecided order",
@@ -2716,291 +2652,6 @@ impl DesktopAppRuntimeState {
         Ok(true)
     }
 
-    fn prepare_seller_order_revision_proposal(
-        &mut self,
-        order_id: OrderId,
-        items: Vec<RadrootsOrderItem>,
-        economics: RadrootsOrderEconomics,
-        reason: &str,
-        confirm_public_note: bool,
-    ) -> Result<AppOrderRevisionProposalPublishPayload, AppSqliteError> {
-        let _ = self.import_shared_runtime_store()?;
-        let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
-            AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires valid configured relays",
-            }
-        })?;
-        if relay_urls.is_empty() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires configured relays",
-            });
-        }
-        self.refresh_configured_relay_state_before_order_lifecycle()?;
-        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires local state",
-            });
-        };
-        let Some(farm_id) = self.selected_farm_id() else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires a selected farm",
-            });
-        };
-        let Some(selected_account) = self
-            .state_store
-            .identity_projection()
-            .selected_account
-            .as_ref()
-        else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires a selected seller account",
-            });
-        };
-        let account_id = selected_account.account.account_id.clone();
-        let seller_pubkey = self.runtime_store_owner_pubkey(selected_account).ok_or(
-            AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires a selected seller public key",
-            },
-        )?;
-        let request = self.resolve_seller_order_request_evidence(order_id)?;
-        if request.payload.seller_pubkey.trim() != seller_pubkey.as_str() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision seller account does not match order seller",
-            });
-        }
-        let listing_address = parse_public_listing_address(request.payload.listing_addr.as_str())
-            .map_err(|_| AppSqliteError::InvalidProjection {
-            reason: "seller order revision listing address is invalid",
-        })?;
-        if listing_address.seller_pubkey.as_str() != seller_pubkey.as_str() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision listing address is outside seller authority",
-            });
-        }
-        let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
-        if lifecycle.decision.is_some() || lifecycle.status != RadrootsTradeWorkflowState::Requested
-        {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires an undecided order",
-            });
-        }
-        if lifecycle.cancellation_event_id.is_some() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires an undecided order",
-            });
-        }
-        let Some(order_detail) = sqlite_store.load_order_detail(farm_id, order_id)? else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires a visible seller order",
-            });
-        };
-        if order_detail.status != OrderStatus::NeedsAction {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires an undecided order",
-            });
-        }
-        if active_order_pending_revision_proposal(&lifecycle).is_some() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires no pending revision proposal",
-            });
-        }
-        let reason = reason.trim();
-        if reason.is_empty() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires a non-empty reason",
-            });
-        }
-        let payload = AppOrderRevisionProposalPublishPayload {
-            context: AppPublishContext::new(account_id, "seller_order_revision_proposal"),
-            app_order_id: order_id,
-            farm_id,
-            trade_order_id: request.payload.order_id.to_string(),
-            request_event_id: request.request_event_id,
-            revision_id: format!("app-revision-{}", d_tag_from_uuid(Uuid::now_v7())),
-            listing_addr: request.payload.listing_addr.to_string(),
-            buyer_pubkey: request.payload.buyer_pubkey.to_string(),
-            seller_pubkey: request.payload.seller_pubkey.to_string(),
-            items,
-            economics,
-            reason: reason.to_owned(),
-            confirm_public_note,
-        };
-        AppPublishPayload::OrderRevisionProposal(payload.clone())
-            .validate()
-            .map_err(|_| AppSqliteError::InvalidProjection {
-                reason: "seller order revision publish payload is invalid",
-            })?;
-        Ok(payload)
-    }
-
-    fn publish_seller_order_revision_proposal(
-        &mut self,
-        order_id: OrderId,
-        items: Vec<RadrootsOrderItem>,
-        economics: RadrootsOrderEconomics,
-        reason: &str,
-        confirm_public_note: bool,
-    ) -> Result<bool, AppSqliteError> {
-        let payload = self.prepare_seller_order_revision_proposal(
-            order_id,
-            items,
-            economics,
-            reason,
-            confirm_public_note,
-        )?;
-        let source_record_id = order_revision_proposal_sdk_source_record_id(&payload);
-        self.enqueue_order_revision_proposal_payload_via_sdk(
-            &payload,
-            AppSdkWorkflowReceiptSourceKind::LocalOutbox,
-            source_record_id.as_str(),
-        )?;
-        let _ = self.refresh_selected_account_sync()?;
-        Ok(true)
-    }
-
-    fn prepare_buyer_order_revision_decision(
-        &mut self,
-        order_id: OrderId,
-        decision: RadrootsOrderRevisionOutcome,
-        confirm_public_note: bool,
-    ) -> Result<AppOrderRevisionDecisionPublishPayload, AppSqliteError> {
-        let _ = self.import_shared_runtime_store()?;
-        let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
-            AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires valid configured relays",
-            }
-        })?;
-        if relay_urls.is_empty() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires configured relays",
-            });
-        }
-        self.refresh_configured_relay_state_before_order_lifecycle()?;
-        let buyer_context = self.state_store.identity_projection().buyer_context();
-        let BuyerContext::Account(account_id) = &buyer_context else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires a selected buyer account",
-            });
-        };
-        let Some(selected_account) = self.selected_buyer_account(&buyer_context) else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires a selected buyer account",
-            });
-        };
-        let buyer_pubkey = self.runtime_store_owner_pubkey(selected_account).ok_or(
-            AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires a selected buyer public key",
-            },
-        )?;
-        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires local state",
-            });
-        };
-        let buyer_order_scope = selected_buyer_order_scope(self.state_store.identity_projection());
-        let Some(detail) =
-            sqlite_store.load_buyer_order_detail_for_scope(&buyer_order_scope, order_id)?
-        else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires a visible buyer order",
-            });
-        };
-        if matches!(
-            detail.status,
-            BuyerOrderStatus::Ready | BuyerOrderStatus::Completed | BuyerOrderStatus::Declined
-        ) {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires an active negotiated order",
-            });
-        }
-        let request = self.resolve_seller_order_request_evidence(order_id)?;
-        if request.payload.buyer_pubkey.trim() != buyer_pubkey.as_str() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision buyer account does not match order buyer",
-            });
-        }
-        let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
-        if lifecycle.decision.is_some()
-            || !matches!(lifecycle.status, RadrootsTradeWorkflowState::Requested)
-        {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires active pre-agreement negotiation",
-            });
-        }
-        if lifecycle.cancellation_event_id.is_some() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires active pre-agreement negotiation",
-            });
-        }
-        let Some(proposal) = active_order_pending_revision_proposal(&lifecycle) else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires a pending seller proposal",
-            });
-        };
-        let payload = AppOrderRevisionDecisionPublishPayload {
-            context: AppPublishContext::new(account_id.clone(), "buyer_order_revision_decision"),
-            app_order_id: order_id,
-            farm_id: detail.farm_id,
-            trade_order_id: request.payload.order_id.to_string(),
-            request_event_id: request.request_event_id,
-            revision_id: proposal.payload.revision_id.to_string(),
-            listing_addr: request.payload.listing_addr.to_string(),
-            buyer_pubkey: request.payload.buyer_pubkey.to_string(),
-            seller_pubkey: request.payload.seller_pubkey.to_string(),
-            decision,
-            confirm_public_note,
-        };
-        AppPublishPayload::OrderRevisionDecision(payload.clone())
-            .validate()
-            .map_err(|_| AppSqliteError::InvalidProjection {
-                reason: "buyer order revision publish payload is invalid",
-            })?;
-        Ok(payload)
-    }
-
-    fn publish_buyer_order_revision_accept(
-        &mut self,
-        order_id: OrderId,
-    ) -> Result<bool, AppSqliteError> {
-        self.publish_buyer_order_revision_decision(
-            order_id,
-            RadrootsOrderRevisionOutcome::Accepted,
-            false,
-        )
-    }
-
-    fn publish_buyer_order_revision_decline(
-        &mut self,
-        order_id: OrderId,
-        confirm_public_note: bool,
-    ) -> Result<bool, AppSqliteError> {
-        self.publish_buyer_order_revision_decision(
-            order_id,
-            RadrootsOrderRevisionOutcome::Declined {
-                reason: "buyer kept order as placed".to_owned(),
-            },
-            confirm_public_note,
-        )
-    }
-
-    fn publish_buyer_order_revision_decision(
-        &mut self,
-        order_id: OrderId,
-        decision: RadrootsOrderRevisionOutcome,
-        confirm_public_note: bool,
-    ) -> Result<bool, AppSqliteError> {
-        let payload =
-            self.prepare_buyer_order_revision_decision(order_id, decision, confirm_public_note)?;
-        let source_record_id = order_revision_decision_sdk_source_record_id(&payload);
-        self.enqueue_order_revision_decision_payload_via_sdk(
-            &payload,
-            AppSdkWorkflowReceiptSourceKind::LocalOutbox,
-            source_record_id.as_str(),
-        )?;
-        let _ = self.refresh_selected_account_sync()?;
-        Ok(true)
-    }
-
     fn prepare_buyer_order_cancellation(
         &mut self,
         order_id: OrderId,
@@ -3062,11 +2713,6 @@ impl DesktopAppRuntimeState {
         if lifecycle.cancellation_event_id.is_some() {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "buyer order cancellation requires an open pre-agreement order",
-            });
-        }
-        if active_order_pending_revision_proposal(&lifecycle).is_some() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order cancellation requires no pending seller proposal",
             });
         }
         match lifecycle.status {
@@ -4922,101 +4568,6 @@ impl DesktopAppRuntimeState {
         }
     }
 
-    fn enqueue_order_revision_proposal_payload_via_sdk(
-        &self,
-        payload: &AppOrderRevisionProposalPublishPayload,
-        source_kind: AppSdkWorkflowReceiptSourceKind,
-        source_record_id: &str,
-    ) -> Result<(), AppSqliteError> {
-        let operation_kind = TRADE_REVISION_PROPOSAL_OPERATION_KIND;
-        let actor_pubkey = self
-            .local_signing_identity_for_publish_payload(&AppPublishPayload::OrderRevisionProposal(
-                payload.clone(),
-            ))
-            .and_then(|identity| {
-                let actor_pubkey = identity.public_key_hex();
-                let request = AppSdkTradeRevisionProposalRequest {
-                    actor_account_id: payload.context.account_id.clone(),
-                    actor_pubkey: actor_pubkey.clone(),
-                    signer_keys: identity.into_keys(),
-                    locator: trade_locator_from_revision_proposal_payload(payload)?,
-                    revision_id: publish_revision_id(payload.revision_id.as_str())?,
-                    items: payload.items.clone(),
-                    economics: payload.economics.clone(),
-                    reason: payload.reason.clone(),
-                    confirm_public_note: payload.confirm_public_note,
-                    idempotency_key: Some(sdk_idempotency_key(source_record_id)),
-                };
-                self.enqueue_app_sdk_trade_revision_proposal(request)
-                    .map(|receipt| (actor_pubkey, receipt))
-                    .map_err(sync_transport_error_from_sdk_runtime_error)
-            });
-        match actor_pubkey {
-            Ok((actor_pubkey, receipt)) => self.record_app_sdk_workflow_success(
-                source_kind,
-                source_record_id,
-                operation_kind,
-                actor_pubkey.as_str(),
-                &receipt,
-            ),
-            Err(error) => self.record_app_sdk_workflow_failure(
-                source_kind,
-                source_record_id,
-                operation_kind,
-                None,
-                sync_transport_error_detail_json(&error),
-            ),
-        }
-    }
-
-    fn enqueue_order_revision_decision_payload_via_sdk(
-        &self,
-        payload: &AppOrderRevisionDecisionPublishPayload,
-        source_kind: AppSdkWorkflowReceiptSourceKind,
-        source_record_id: &str,
-    ) -> Result<(), AppSqliteError> {
-        let operation_kind = TRADE_REVISION_DECISION_OPERATION_KIND;
-        let actor_pubkey = self
-            .local_signing_identity_for_publish_payload(&AppPublishPayload::OrderRevisionDecision(
-                payload.clone(),
-            ))
-            .and_then(|identity| {
-                let actor_pubkey = identity.public_key_hex();
-                let request = AppSdkTradeRevisionDecisionRequest {
-                    actor_account_id: payload.context.account_id.clone(),
-                    actor_pubkey: actor_pubkey.clone(),
-                    signer_keys: identity.into_keys(),
-                    locator: trade_locator_from_revision_decision_payload(payload)?,
-                    revision_id: publish_revision_id(payload.revision_id.as_str())?,
-                    decision: payload.decision.clone(),
-                    evidence: self
-                        .order_revision_decision_sdk_evidence(payload)
-                        .map_err(|error| AppSyncTransportError::failed(error.to_string()))?,
-                    confirm_public_note: payload.confirm_public_note,
-                    idempotency_key: Some(sdk_idempotency_key(source_record_id)),
-                };
-                self.enqueue_app_sdk_trade_revision_decision(request)
-                    .map(|receipt| (actor_pubkey, receipt))
-                    .map_err(sync_transport_error_from_sdk_runtime_error)
-            });
-        match actor_pubkey {
-            Ok((actor_pubkey, receipt)) => self.record_app_sdk_workflow_success(
-                source_kind,
-                source_record_id,
-                operation_kind,
-                actor_pubkey.as_str(),
-                &receipt,
-            ),
-            Err(error) => self.record_app_sdk_workflow_failure(
-                source_kind,
-                source_record_id,
-                operation_kind,
-                None,
-                sync_transport_error_detail_json(&error),
-            ),
-        }
-    }
-
     fn enqueue_order_cancellation_payload_via_sdk(
         &self,
         payload: &AppOrderCancellationPublishPayload,
@@ -5059,25 +4610,6 @@ impl DesktopAppRuntimeState {
                 sync_transport_error_detail_json(&error),
             ),
         }
-    }
-
-    fn order_revision_decision_sdk_evidence(
-        &self,
-        payload: &AppOrderRevisionDecisionPublishPayload,
-    ) -> Result<Vec<RadrootsEventEnvelope>, AppSqliteError> {
-        let request = self.resolve_seller_order_request_evidence(payload.app_order_id)?;
-        let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
-        let Some(proposal) = active_order_pending_revision_proposal(&lifecycle) else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires a pending seller proposal",
-            });
-        };
-        if proposal.payload.revision_id.to_string() != payload.revision_id {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision evidence does not match requested revision",
-            });
-        }
-        Ok(vec![request.request_event, proposal.event.clone()])
     }
 
     fn local_signing_identity_for_publish_payload(
@@ -5129,20 +4661,6 @@ impl DesktopAppRuntimeState {
         request: AppSdkTradeDecisionRequest,
     ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
         self.with_app_sdk_runtime(|runtime| runtime.trade_decide(request))
-    }
-
-    fn enqueue_app_sdk_trade_revision_proposal(
-        &self,
-        request: AppSdkTradeRevisionProposalRequest,
-    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
-        self.with_app_sdk_runtime(|runtime| runtime.trade_revision_propose(request))
-    }
-
-    fn enqueue_app_sdk_trade_revision_decision(
-        &self,
-        request: AppSdkTradeRevisionDecisionRequest,
-    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
-        self.with_app_sdk_runtime(|runtime| runtime.trade_revision_decide(request))
     }
 
     fn enqueue_app_sdk_trade_cancellation(
@@ -5651,7 +5169,6 @@ impl DesktopAppRuntimeState {
         });
 
         let mut buckets = AppActiveOrderEvidenceBuckets::default();
-        let mut signed_events_by_id = BTreeMap::new();
         let request_event_id =
             active_order_event_id(request.request_event_id.as_str(), "request_event_id")?;
         let request_author_pubkey = active_order_pubkey(
@@ -5671,7 +5188,6 @@ impl DesktopAppRuntimeState {
             }
             let event_id = active_order_event_id(event.id_str(), "event_id")?;
             let author_pubkey = active_order_pubkey(event.author_str(), "author_pubkey")?;
-            signed_events_by_id.insert(event_id.to_string(), event.clone());
             match event.kind_u32() {
                 KIND_ORDER_DECISION => {
                     let envelope = order_decision_from_event(&event).map_err(|_| {
@@ -5688,42 +5204,6 @@ impl DesktopAppRuntimeState {
                         prev_event_id: context.2,
                         payload: envelope.payload,
                     });
-                }
-                KIND_ORDER_REVISION_PROPOSAL => {
-                    let Ok(envelope) = order_revision_proposal_from_event(&event) else {
-                        return Err(AppSqliteError::InvalidProjection {
-                            reason: "order lifecycle evidence is invalid",
-                        });
-                    };
-                    let context = active_order_event_record_context(&event, envelope.message_type)?;
-                    buckets
-                        .revision_proposals
-                        .push(RadrootsOrderRevisionProposalRecord {
-                            event_id,
-                            author_pubkey,
-                            counterparty_pubkey: context.0,
-                            root_event_id: context.1,
-                            prev_event_id: context.2,
-                            payload: envelope.payload,
-                        });
-                }
-                KIND_ORDER_REVISION_DECISION => {
-                    let Ok(envelope) = order_revision_decision_from_event(&event) else {
-                        return Err(AppSqliteError::InvalidProjection {
-                            reason: "order lifecycle evidence is invalid",
-                        });
-                    };
-                    let context = active_order_event_record_context(&event, envelope.message_type)?;
-                    buckets
-                        .revision_decisions
-                        .push(RadrootsOrderRevisionDecisionRecord {
-                            event_id,
-                            author_pubkey,
-                            counterparty_pubkey: context.0,
-                            root_event_id: context.1,
-                            prev_event_id: context.2,
-                            payload: envelope.payload,
-                        });
                 }
                 KIND_ORDER_CANCELLATION => {
                     let Ok(envelope) = order_cancellation_from_event(&event) else {
@@ -5750,8 +5230,6 @@ impl DesktopAppRuntimeState {
             RadrootsOrderReductionInputs {
                 requests: buckets.requests.clone(),
                 decisions: buckets.decisions.clone(),
-                revision_proposals: buckets.revision_proposals.clone(),
-                revision_decisions: buckets.revision_decisions.clone(),
                 cancellations: buckets.cancellations.clone(),
             },
         );
@@ -5794,31 +5272,6 @@ impl DesktopAppRuntimeState {
                 .last_event_id
                 .map(|event_id| event_id.to_string()),
             decision,
-            revision_proposals: buckets
-                .revision_proposals
-                .into_iter()
-                .map(|proposal| {
-                    let event = signed_events_by_id
-                        .get(proposal.event_id.as_str())
-                        .cloned()
-                        .ok_or(AppSqliteError::InvalidProjection {
-                            reason: "order lifecycle evidence is invalid",
-                        })?;
-                    Ok(ResolvedAppOrderRevisionProposalEvidence {
-                        event,
-                        event_id: proposal.event_id.to_string(),
-                        payload: proposal.payload,
-                    })
-                })
-                .collect::<Result<Vec<_>, AppSqliteError>>()?,
-            revision_decisions: buckets
-                .revision_decisions
-                .into_iter()
-                .map(|decision| ResolvedAppOrderRevisionDecisionEvidence {
-                    event_id: decision.event_id.to_string(),
-                    payload: decision.payload,
-                })
-                .collect(),
             cancellation_event_id: projection
                 .cancellation_event_id
                 .map(|event_id| event_id.to_string()),
@@ -5830,12 +5283,7 @@ impl DesktopAppRuntimeState {
     ) -> Result<Vec<RadrootsEventEnvelope>, AppSqliteError> {
         let mut events = Vec::new();
         let mut seen_event_ids = BTreeSet::new();
-        let kinds = [
-            KIND_ORDER_DECISION,
-            KIND_ORDER_REVISION_PROPOSAL,
-            KIND_ORDER_REVISION_DECISION,
-            KIND_ORDER_CANCELLATION,
-        ];
+        let kinds = [KIND_ORDER_DECISION, KIND_ORDER_CANCELLATION];
 
         if let Some(sqlite_store) = self.sqlite_store.as_ref() {
             for kind in kinds {
@@ -7213,7 +6661,7 @@ fn direct_relay_event_records(
 fn direct_relay_event_farm_id(kind: u16, tags: &[Vec<String>]) -> Option<String> {
     match kind {
         kind if kind == KIND_FARM as u16 => relay_event_tag_value(tags, "d", 1),
-        kind if kind == KIND_LISTING as u16 || kind == KIND_LISTING_DRAFT as u16 => {
+        kind if kind == KIND_LISTING as u16 => {
             relay_event_tag_value(tags, "a", 1).and_then(|address| relay_address_d_tag(&address))
         }
         _ => None,
@@ -7226,7 +6674,7 @@ fn direct_relay_event_listing_addr(
     listing_d_tag: Option<&str>,
 ) -> Option<String> {
     match kind {
-        kind if kind == KIND_LISTING as u16 || kind == KIND_LISTING_DRAFT as u16 => {
+        kind if kind == KIND_LISTING as u16 => {
             listing_d_tag.map(|d_tag| format!("{kind}:{event_pubkey}:{d_tag}"))
         }
         _ => None,
@@ -7441,24 +6889,6 @@ fn listing_publish_source_record(
 
 fn order_decision_sdk_source_record_id(payload: &AppOrderDecisionPublishPayload) -> String {
     format!("app:order_decision:{}", payload.app_order_id)
-}
-
-fn order_revision_proposal_sdk_source_record_id(
-    payload: &AppOrderRevisionProposalPublishPayload,
-) -> String {
-    format!(
-        "app:order_revision_proposal:{}:{}",
-        payload.app_order_id, payload.revision_id
-    )
-}
-
-fn order_revision_decision_sdk_source_record_id(
-    payload: &AppOrderRevisionDecisionPublishPayload,
-) -> String {
-    format!(
-        "app:order_revision_decision:{}:{}",
-        payload.app_order_id, payload.revision_id
-    )
 }
 
 fn order_cancellation_sdk_source_record_id(payload: &AppOrderCancellationPublishPayload) -> String {
@@ -9545,38 +8975,6 @@ fn active_order_event_record_context(
     Ok((context.counterparty_pubkey, root_event_id, prev_event_id))
 }
 
-fn active_order_pending_revision_proposal(
-    lifecycle: &ResolvedAppOrderLifecycleEvidence,
-) -> Option<&ResolvedAppOrderRevisionProposalEvidence> {
-    let mut parent_event_id = lifecycle.request_event_id.as_str();
-    loop {
-        let proposals = lifecycle
-            .revision_proposals
-            .iter()
-            .filter(|proposal| proposal.payload.prev_event_id == parent_event_id)
-            .collect::<Vec<_>>();
-        let proposal = match proposals.as_slice() {
-            [] => return None,
-            [proposal] => *proposal,
-            _ => return None,
-        };
-        let decisions = lifecycle
-            .revision_decisions
-            .iter()
-            .filter(|decision| {
-                decision.payload.prev_event_id == proposal.event_id
-                    && decision.payload.revision_id == proposal.payload.revision_id
-            })
-            .collect::<Vec<_>>();
-        let decision = match decisions.as_slice() {
-            [] => return Some(proposal),
-            [decision] => *decision,
-            _ => return None,
-        };
-        parent_event_id = decision.event_id.as_str();
-    }
-}
-
 fn insert_seller_order_request_evidence(
     order_id: &OrderId,
     event: &RadrootsEventEnvelope,
@@ -9661,11 +9059,6 @@ fn publish_order_id(value: &str) -> Result<RadrootsOrderId, AppSyncTransportErro
     RadrootsOrderId::parse(value).map_err(|error| AppSyncTransportError::failed(error.to_string()))
 }
 
-fn publish_revision_id(value: &str) -> Result<RadrootsOrderRevisionId, AppSyncTransportError> {
-    RadrootsOrderRevisionId::parse(value)
-        .map_err(|error| AppSyncTransportError::failed(error.to_string()))
-}
-
 fn publish_event_id(value: &str) -> Result<RadrootsEventId, AppSyncTransportError> {
     RadrootsEventId::parse(value).map_err(|error| AppSyncTransportError::failed(error.to_string()))
 }
@@ -9703,30 +9096,6 @@ fn trade_locator_from_parts(
 
 fn trade_locator_from_decision_payload(
     payload: &AppOrderDecisionPublishPayload,
-) -> Result<RadrootsTradeLocator, AppSyncTransportError> {
-    trade_locator_from_parts(
-        payload.trade_order_id.as_str(),
-        payload.request_event_id.as_str(),
-        payload.listing_addr.as_str(),
-        payload.buyer_pubkey.as_str(),
-        payload.seller_pubkey.as_str(),
-    )
-}
-
-fn trade_locator_from_revision_proposal_payload(
-    payload: &AppOrderRevisionProposalPublishPayload,
-) -> Result<RadrootsTradeLocator, AppSyncTransportError> {
-    trade_locator_from_parts(
-        payload.trade_order_id.as_str(),
-        payload.request_event_id.as_str(),
-        payload.listing_addr.as_str(),
-        payload.buyer_pubkey.as_str(),
-        payload.seller_pubkey.as_str(),
-    )
-}
-
-fn trade_locator_from_revision_decision_payload(
-    payload: &AppOrderRevisionDecisionPublishPayload,
 ) -> Result<RadrootsTradeLocator, AppSyncTransportError> {
     trade_locator_from_parts(
         payload.trade_order_id.as_str(),
@@ -9841,13 +9210,12 @@ mod tests {
     };
     use radroots_event::ids::{
         RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress, RadrootsOrderId,
-        RadrootsOrderQuoteId, RadrootsOrderRevisionId, RadrootsPublicKey,
+        RadrootsOrderQuoteId, RadrootsPublicKey,
     };
     use radroots_event::order::{
         RadrootsOrderCancellation, RadrootsOrderDecision, RadrootsOrderDecisionOutcome,
         RadrootsOrderEconomicItem, RadrootsOrderEconomics, RadrootsOrderInventoryCommitment,
         RadrootsOrderItem, RadrootsOrderPricingBasis, RadrootsOrderRequest,
-        RadrootsOrderRevisionOutcome, RadrootsOrderRevisionProposal,
     };
     use radroots_event::{
         RadrootsEventEnvelope, RadrootsEventEnvelopeParts, RadrootsEventPtr,
@@ -9855,7 +9223,6 @@ mod tests {
     };
     use radroots_event_codec::order::{
         order_cancellation_event_build, order_decision_event_build, order_request_event_build,
-        order_revision_proposal_event_build,
     };
     use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
     use radroots_nostr::prelude::{
@@ -9874,8 +9241,7 @@ mod tests {
     };
     use radroots_sdk::{
         LISTING_PUBLISH_OPERATION_KIND, TRADE_CANCELLATION_OPERATION_KIND,
-        TRADE_DECISION_OPERATION_KIND, TRADE_REVISION_DECISION_OPERATION_KIND,
-        TRADE_SUBMIT_OPERATION_KIND,
+        TRADE_DECISION_OPERATION_KIND, TRADE_SUBMIT_OPERATION_KIND,
     };
     use radroots_sql_core::{SqlExecutor, SqlxSqliteExecutor};
     use radroots_studio_app_core::{
@@ -9901,7 +9267,6 @@ mod tests {
         AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
         AppOrderDecisionInventoryCommitment, AppOrderDecisionPayload,
         AppOrderDecisionPublishPayload, AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
-        AppOrderRevisionDecisionPublishPayload, AppOrderRevisionProposalPublishPayload,
         AppPublishContext, AppPublishPayload, AppPublishedOperationReceipt,
         AppRelayIngestScopeFreshness, AppRelayIngestScopeStatus, AppSyncRequest, AppSyncResult,
         AppSyncRunStatus, AppSyncTransport, AppSyncTransportError, PendingSyncOperation,
@@ -10374,10 +9739,6 @@ mod tests {
         RadrootsOrderId::parse(value).expect("order id")
     }
 
-    fn test_revision_id(value: &str) -> RadrootsOrderRevisionId {
-        RadrootsOrderRevisionId::parse(value).expect("revision id")
-    }
-
     fn test_quote_id(value: &str) -> RadrootsOrderQuoteId {
         RadrootsOrderQuoteId::parse(value).expect("quote id")
     }
@@ -10697,69 +10058,6 @@ mod tests {
             buyer_identity.public_key_hex(),
             seller_identity.public_key_hex(),
         );
-        let revision_economics = RadrootsOrderEconomics {
-            quote_id: test_quote_id("quote-revision-1"),
-            quote_version: 2,
-            pricing_basis: RadrootsOrderPricingBasis::ListingEvent,
-            currency: RadrootsCoreCurrency::USD,
-            items: vec![RadrootsOrderEconomicItem {
-                bin_id: test_bin_id("bin-1"),
-                bin_count: 3,
-                quantity_amount: RadrootsCoreDecimal::from(1u32),
-                quantity_unit: RadrootsCoreUnit::Each,
-                unit_price_amount: RadrootsCoreDecimal::from(8u32),
-                unit_price_currency: RadrootsCoreCurrency::USD,
-                line_subtotal: RadrootsCoreMoney::from_minor_units_u32(
-                    2400,
-                    RadrootsCoreCurrency::USD,
-                ),
-            }],
-            discounts: Vec::new(),
-            adjustments: Vec::new(),
-            subtotal: RadrootsCoreMoney::from_minor_units_u32(2400, RadrootsCoreCurrency::USD),
-            discount_total: RadrootsCoreMoney::zero(RadrootsCoreCurrency::USD),
-            adjustment_total: RadrootsCoreMoney::zero(RadrootsCoreCurrency::USD),
-            total: RadrootsCoreMoney::from_minor_units_u32(2400, RadrootsCoreCurrency::USD),
-        };
-        let revision_proposal =
-            AppPublishPayload::OrderRevisionProposal(AppOrderRevisionProposalPublishPayload {
-                context: AppPublishContext::new(
-                    seller_account_id.to_string(),
-                    "seller_order_revision_proposal",
-                ),
-                app_order_id: common.0,
-                farm_id: common.1,
-                trade_order_id: common.2.clone(),
-                request_event_id: common.3.clone(),
-                revision_id: "revision-1".to_owned(),
-                listing_addr: common.4.clone(),
-                buyer_pubkey: common.5.clone(),
-                seller_pubkey: common.6.clone(),
-                items: vec![RadrootsOrderItem {
-                    bin_id: test_bin_id("bin-1"),
-                    bin_count: 3,
-                }],
-                economics: revision_economics,
-                reason: "harvest count updated".to_owned(),
-                confirm_public_note: false,
-            });
-        let revision_decision =
-            AppPublishPayload::OrderRevisionDecision(AppOrderRevisionDecisionPublishPayload {
-                context: AppPublishContext::new(
-                    buyer_account_id.to_string(),
-                    "buyer_order_revision_decision",
-                ),
-                app_order_id: common.0,
-                farm_id: common.1,
-                trade_order_id: common.2.clone(),
-                request_event_id: common.3.clone(),
-                revision_id: "revision-1".to_owned(),
-                listing_addr: common.4.clone(),
-                buyer_pubkey: common.5.clone(),
-                seller_pubkey: common.6.clone(),
-                decision: RadrootsOrderRevisionOutcome::Accepted,
-                confirm_public_note: false,
-            });
         let cancellation =
             AppPublishPayload::OrderCancellation(AppOrderCancellationPublishPayload {
                 context: AppPublishContext::new(
@@ -10776,7 +10074,7 @@ mod tests {
                 reason: "buyer cancelled order".to_owned(),
                 confirm_public_note: false,
             });
-        let operations = [revision_proposal, revision_decision, cancellation]
+        let operations = [cancellation]
             .into_iter()
             .map(|payload| {
                 PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
@@ -13714,8 +13012,8 @@ mod tests {
                 .storage_paths
                 .as_ref()
                 .expect("sdk storage paths")
-                .event_store_path,
-            paths.app.data.join("sdk").join("event_store.sqlite")
+                .runtime_path,
+            paths.app.data.join("sdk").join("runtime.sqlite")
         );
         let diagnostics = runtime
             .sdk_diagnostics()
@@ -13755,8 +13053,16 @@ mod tests {
         );
         assert_eq!(sdk_status.storage_root, paths.app.data.join("sdk"));
         assert_eq!(
-            sdk_status.event_store_path.as_ref(),
-            Some(&paths.app.data.join("sdk").join("event_store.sqlite"))
+            sdk_status.runtime_path.as_ref(),
+            Some(&paths.app.data.join("sdk").join("runtime.sqlite"))
+        );
+        assert_eq!(
+            sdk_status.private_path.as_ref(),
+            Some(&paths.app.data.join("sdk").join("private.sqlite"))
+        );
+        assert_eq!(
+            sdk_status.studio_path.as_ref(),
+            Some(&paths.app.data.join("sdk").join("studio.sqlite"))
         );
         assert_eq!(sdk_status.relay_target_count, 1);
         assert!(
@@ -15681,51 +14987,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_rejects_seller_order_revision_with_reducer_invalid_parent_evidence() {
-        let relay = ThreadedAckRelay::spawn();
-        let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
-            seller_order_decision_runtime("seller_order_revision_invalid_parent", 6, 2);
-        install_direct_relay_sync_transport(&runtime, &relay);
-        let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
-        let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-        let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
-        let request_event_id = request_event_id.as_str();
-        append_signed_order_decision_record(
-            &paths,
-            "seller-order-decision-1",
-            request_event_id,
-            listing_addr.as_str(),
-            buyer_pubkey.as_str(),
-            seller_pubkey.as_str(),
-            2,
-        );
-        append_signed_order_revision_proposal_record_with_prev(
-            &paths,
-            "seller-order-decision-1",
-            "seller-order-decision-1-stale-revision",
-            request_event_id,
-            request_event_id,
-            listing_addr.as_str(),
-            buyer_pubkey.as_str(),
-            seller_pubkey.as_str(),
-        );
-
-        let error = runtime
-            .publish_order_revision_proposal(
-                order_id,
-                revision_test_order_items(),
-                revision_test_order_economics(),
-                "harvest count updated",
-                false,
-            )
-            .expect_err("seller revision proposal should reject reducer-invalid parent evidence");
-
-        assert_order_lifecycle_evidence_invalid(error);
-        assert_eq!(relay.event_count(), 0);
-        cleanup_bootstrapped_runtime_paths(&paths);
-    }
-
-    #[test]
     fn runtime_places_supported_buyer_order_into_shared_runtime_store() {
         let (runtime, paths) = bootstrapped_runtime("buyer_order_local_event");
         assert!(
@@ -16347,50 +15608,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_rejects_linked_buyer_cancellation_from_pending_revision_proposal() {
-        let relay = ThreadedAckRelay::spawn();
-        let fixture = linked_buyer_request_runtime("linked_buyer_order_cancel_revision");
-        let proposal_key = "linked-buyer-order-cancel-revision-proposal";
-        append_signed_order_revision_proposal_record_with_prev(
-            &fixture.paths,
-            fixture.trade_order_id.as_str(),
-            proposal_key,
-            fixture.request_event_id.as_str(),
-            fixture.request_event_id.as_str(),
-            fixture.listing_addr.as_str(),
-            fixture.buyer_pubkey.as_str(),
-            fixture.seller_pubkey.as_str(),
-        );
-        install_direct_relay_sync_transport(&fixture.runtime, &relay);
-        fixture
-            .runtime
-            .refresh_shared_runtime_store()
-            .expect("linked buyer revision proposal should import");
-        assert!(
-            fixture
-                .runtime
-                .open_personal_order_detail(fixture.order_id)
-                .expect("linked buyer order detail should open")
-        );
-
-        let error = fixture
-            .runtime
-            .publish_buyer_order_cancel(fixture.order_id, false)
-            .expect_err("linked buyer cancellation should reject from pending proposal");
-
-        assert_invalid_projection_reason(
-            error,
-            "buyer order cancellation requires no pending seller proposal",
-        );
-        assert_eq!(relay.event_count(), 0);
-        let cancellation_events =
-            shared_order_events_by_kind(&fixture.paths, 3432, fixture.buyer_pubkey.as_str());
-        assert!(cancellation_events.is_empty());
-
-        cleanup_bootstrapped_runtime_paths(&fixture.paths);
-    }
-
-    #[test]
     fn runtime_rejects_linked_buyer_cancellation_after_agreement() {
         let relay = ThreadedAckRelay::spawn();
         let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_cancel_after_agreement");
@@ -16466,62 +15683,6 @@ mod tests {
 
         assert_order_lifecycle_evidence_invalid(error);
         assert_eq!(relay.event_count(), 0);
-        cleanup_bootstrapped_runtime_paths(&fixture.paths);
-    }
-
-    #[test]
-    fn runtime_publishes_linked_buyer_revision_decision_from_reducer_valid_parent() {
-        let relay = ThreadedAckRelay::spawn();
-        let fixture = linked_buyer_request_runtime("linked_buyer_order_revision");
-        let proposal_key = "linked-buyer-order-revision-proposal";
-        let proposal_event_id = append_signed_order_revision_proposal_record_with_prev(
-            &fixture.paths,
-            fixture.trade_order_id.as_str(),
-            proposal_key,
-            fixture.request_event_id.as_str(),
-            fixture.request_event_id.as_str(),
-            fixture.listing_addr.as_str(),
-            fixture.buyer_pubkey.as_str(),
-            fixture.seller_pubkey.as_str(),
-        );
-        let revision_id = format!("revision-{proposal_key}");
-        install_direct_relay_sync_transport(&fixture.runtime, &relay);
-        restore_sdk_runtime_with_relays(
-            &fixture.runtime,
-            &fixture.paths,
-            vec![relay.url().to_owned()],
-        );
-        fixture
-            .runtime
-            .refresh_shared_runtime_store()
-            .expect("linked buyer runtime store should import");
-        assert!(
-            fixture
-                .runtime
-                .open_personal_order_detail(fixture.order_id)
-                .expect("linked buyer order detail should open")
-        );
-        seed_relay_with_shared_event_id(&relay, &fixture.paths, fixture.request_event_id.as_str());
-        seed_relay_with_shared_event_id(&relay, &fixture.paths, proposal_event_id.as_str());
-
-        assert!(
-            fixture
-                .runtime
-                .publish_buyer_order_revision_accept(fixture.order_id)
-                .expect("linked buyer revision decision should publish")
-        );
-
-        assert_eq!(relay.event_count(), 2);
-        let revision_decision_events =
-            shared_order_events_by_kind(&fixture.paths, 3425, fixture.buyer_pubkey.as_str());
-        assert!(revision_decision_events.is_empty());
-        assert_order_revision_decision_sdk_workflow_receipt(
-            &fixture.runtime,
-            fixture.order_id,
-            revision_id.as_str(),
-            AppSdkWorkflowReceiptState::Enqueued,
-        );
-
         cleanup_bootstrapped_runtime_paths(&fixture.paths);
     }
 
@@ -20522,77 +19683,6 @@ mod tests {
         )
     }
 
-    fn append_signed_order_revision_proposal_record_with_prev(
-        paths: &AppDesktopRuntimePaths,
-        trade_order_id: &str,
-        event_key: &str,
-        request_event_id: &str,
-        prev_event_id: &str,
-        listing_addr: &str,
-        buyer_pubkey: &str,
-        seller_pubkey: &str,
-    ) -> String {
-        let request_event_id = test_event_id(request_event_id);
-        let prev_event_id = test_event_id(prev_event_id);
-        let payload = RadrootsOrderRevisionProposal {
-            revision_id: test_revision_id(format!("revision-{event_key}").as_str()),
-            order_id: test_order_id(trade_order_id),
-            listing_addr: test_listing_addr(listing_addr),
-            buyer_pubkey: test_pubkey(buyer_pubkey),
-            seller_pubkey: test_pubkey(seller_pubkey),
-            root_event_id: request_event_id.clone(),
-            prev_event_id: prev_event_id.clone(),
-            items: revision_test_order_items(),
-            economics: revision_test_order_economics(),
-            reason: "harvest count updated".to_owned(),
-        };
-        let parts =
-            order_revision_proposal_event_build(&request_event_id, &prev_event_id, &payload)
-                .expect("order revision proposal draft should build");
-        let record_id = format!("app:signed_event:revision-proposal:{event_key}");
-        append_trade_signed_event_record(
-            paths,
-            record_id.as_str(),
-            seller_pubkey,
-            listing_addr,
-            parts,
-        )
-    }
-
-    fn revision_test_order_items() -> Vec<RadrootsOrderItem> {
-        vec![RadrootsOrderItem {
-            bin_id: test_bin_id("seller-order-primary-bin"),
-            bin_count: 3,
-        }]
-    }
-
-    fn revision_test_order_economics() -> RadrootsOrderEconomics {
-        RadrootsOrderEconomics {
-            quote_id: test_quote_id("quote-revision-test"),
-            quote_version: 2,
-            pricing_basis: RadrootsOrderPricingBasis::ListingEvent,
-            currency: RadrootsCoreCurrency::USD,
-            items: vec![RadrootsOrderEconomicItem {
-                bin_id: test_bin_id("seller-order-primary-bin"),
-                bin_count: 3,
-                quantity_amount: RadrootsCoreDecimal::from(1u32),
-                quantity_unit: RadrootsCoreUnit::Each,
-                unit_price_amount: RadrootsCoreDecimal::from(8u32),
-                unit_price_currency: RadrootsCoreCurrency::USD,
-                line_subtotal: RadrootsCoreMoney::from_minor_units_u32(
-                    2400,
-                    RadrootsCoreCurrency::USD,
-                ),
-            }],
-            discounts: Vec::new(),
-            adjustments: Vec::new(),
-            subtotal: RadrootsCoreMoney::from_minor_units_u32(2400, RadrootsCoreCurrency::USD),
-            discount_total: RadrootsCoreMoney::zero(RadrootsCoreCurrency::USD),
-            adjustment_total: RadrootsCoreMoney::zero(RadrootsCoreCurrency::USD),
-            total: RadrootsCoreMoney::from_minor_units_u32(2400, RadrootsCoreCurrency::USD),
-        }
-    }
-
     fn assert_order_lifecycle_evidence_invalid(error: AppSqliteError) {
         assert!(
             matches!(
@@ -21053,20 +20143,6 @@ mod tests {
             assert!(receipt.actor_pubkey.as_deref().is_some_and(is_hex_64));
             assert!(!receipt.sdk_outbox_event_ids.is_empty());
         }
-    }
-
-    fn assert_order_revision_decision_sdk_workflow_receipt(
-        runtime: &DesktopAppRuntime,
-        order_id: OrderId,
-        revision_id: &str,
-        expected_state: AppSdkWorkflowReceiptState,
-    ) {
-        assert_order_sdk_workflow_receipt(
-            runtime,
-            format!("app:order_revision_decision:{order_id}:{revision_id}").as_str(),
-            TRADE_REVISION_DECISION_OPERATION_KIND,
-            expected_state,
-        );
     }
 
     fn assert_order_cancellation_sdk_workflow_receipt(

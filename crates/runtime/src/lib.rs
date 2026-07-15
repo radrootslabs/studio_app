@@ -47,7 +47,7 @@ pub use sdk::{
     AppSdkStorageDiagnostics, AppSdkStoragePaths, AppSdkSyncDiagnostics,
     AppSdkSyncEventStoreDiagnostics, AppSdkSyncOutboxDiagnostics,
     AppSdkSyncTransportTargetDiagnostics, AppSdkTradeCancellationRequest, AppSdkTradeDecision,
-    AppSdkTradeDecisionRequest, AppSdkTradeProposeRequest, AppSdkTradeRevisionDecisionRequest,
-    AppSdkTradeRevisionProposalRequest, AppSdkWorkflowReceipt, app_sdk_storage_root_from_data_root,
+    AppSdkTradeDecisionRequest, AppSdkTradeProposeRequest, AppSdkWorkflowReceipt,
+    app_sdk_storage_root_from_data_root,
 };
 pub use startup::{AppStartupEvent, AppStartupEventMetadata, launch_startup_event};

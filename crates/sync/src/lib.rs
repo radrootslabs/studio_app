@@ -5,9 +5,8 @@ mod publish;
 pub use publish::{
     AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
     AppOrderDecisionInventoryCommitment, AppOrderDecisionPayload, AppOrderDecisionPublishPayload,
-    AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
-    AppOrderRevisionDecisionPublishPayload, AppOrderRevisionProposalPublishPayload,
-    AppPublishContext, AppPublishPayload, AppPublishPayloadJsonError, AppPublishValidationFailure,
+    AppOrderRequestItemPayload, AppOrderRequestPublishPayload, AppPublishContext,
+    AppPublishPayload, AppPublishPayloadJsonError, AppPublishValidationFailure,
     AppPublishValidationFailureSet, AppPublishWorkKind,
 };
 

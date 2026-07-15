@@ -81,12 +81,10 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "buyer-order-review-confirm-public-note",
     "buyer-order-review-place-order",
     "buyer-listing-open",
-    "buyer-order-accept-change",
     "buyer-order-confirm-replace",
     "buyer-order-cancel",
     "buyer-order-detail-back",
     "buyer-order-keep-current",
-    "buyer-order-keep-order",
     "buyer-order-repeat-demand",
     "buyer-orders-retry-coordination",
     "personal_orders",
@@ -99,8 +97,6 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "buyer.order_open_failed",
     "buyer.order_cancel_failed",
     "buyer.order_coordination_retry_failed",
-    "buyer.order_revision_accept_failed",
-    "buyer.order_revision_decline_failed",
     "buyer.repeat_demand_failed",
     "buyer.section_select_failed",
     "buyer_notice",
@@ -1090,11 +1086,8 @@ const FORBIDDEN_PAYMENT_ACTION_COPY_TERMS: &[&str] = &[
 const FORBIDDEN_PRODUCTION_EVENT_KIND_LITERALS: &[(&str, &str)] = &[
     ("30340", "KIND_FARM"),
     ("30402", "KIND_LISTING"),
-    ("30403", "KIND_LISTING_DRAFT"),
     ("3422", "KIND_ORDER_REQUEST"),
     ("3423", "KIND_ORDER_DECISION"),
-    ("3424", "KIND_ORDER_REVISION_PROPOSAL"),
-    ("3425", "KIND_ORDER_REVISION_DECISION"),
     ("3426", "KIND_TRADE_QUESTION"),
     ("3427", "KIND_TRADE_ANSWER"),
     ("3428", "KIND_TRADE_DISCOUNT_REQUEST"),
@@ -1243,14 +1236,6 @@ const STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS: &[SdkBoundaryForbiddenPattern] = &
     },
     SdkBoundaryForbiddenPattern {
         pattern: "publish_order_decision_with_identity",
-        reason: "app production sources must not call direct SDK order publish APIs",
-    },
-    SdkBoundaryForbiddenPattern {
-        pattern: "publish_order_revision_proposal_with_identity",
-        reason: "app production sources must not call direct SDK order publish APIs",
-    },
-    SdkBoundaryForbiddenPattern {
-        pattern: "publish_order_revision_decision_with_identity",
         reason: "app production sources must not call direct SDK order publish APIs",
     },
     SdkBoundaryForbiddenPattern {
@@ -1622,8 +1607,6 @@ fn app_sdk_trade_mutation_requests_stay_locator_and_resync_owned() {
     for request_struct in [
         "AppSdkTradeProposeRequest",
         "AppSdkTradeDecisionRequest",
-        "AppSdkTradeRevisionProposalRequest",
-        "AppSdkTradeRevisionDecisionRequest",
         "AppSdkTradeCancellationRequest",
     ] {
         let request = struct_block(source.as_str(), request_struct);
@@ -1635,8 +1618,6 @@ fn app_sdk_trade_mutation_requests_stay_locator_and_resync_owned() {
 
     for request_struct in [
         "AppSdkTradeDecisionRequest",
-        "AppSdkTradeRevisionProposalRequest",
-        "AppSdkTradeRevisionDecisionRequest",
         "AppSdkTradeCancellationRequest",
     ] {
         let request = struct_block(source.as_str(), request_struct);
@@ -1735,7 +1716,7 @@ fn app_store_active_order_projection_is_root_aware_and_non_authoritative() {
     let projected_order_id = source_segment(
         source.as_str(),
         "pub fn projected_order_id_from_trade_request(",
-        "fn active_order_revision_status(",
+        "fn active_order_change_status(",
     );
     assert!(projected_order_id.contains("root_event_id: &str"));
     assert!(projected_order_id.contains("radroots-cli-order-root"));
@@ -1743,8 +1724,6 @@ fn app_store_active_order_projection_is_root_aware_and_non_authoritative() {
     for forbidden in [
         "TradeAcceptRequest::new",
         "TradeDeclineRequest::new",
-        "TradeRevisionProposalRequest::new",
-        "TradeRevisionDecisionRequest::new",
         "TradeCancelRequest::new",
         "TradeEvidenceMode::",
     ] {
