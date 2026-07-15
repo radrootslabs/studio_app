@@ -113,7 +113,6 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "directory",
     "disk unavailable",
     "eggs",
-    "event_store.sqlite",
     "failed to add buyer product to cart",
     "failed to open buyer order detail",
     "failed to place buyer order",
@@ -128,9 +127,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "failed to update buyer search query",
     "failed to add relay `{relay_url}`: {error}",
     "failed to load farm settings projection",
-    "failed to accept buyer order change",
     "failed to cancel buyer order",
-    "failed to keep buyer order",
     "failed to open existing product editor",
     "failed to open new product editor",
     "failed to acknowledge reminder",
@@ -240,7 +237,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "orders.detail_open_failed",
     "orders.filter_update_failed",
     "orders.route_failed",
-    "outbox.sqlite",
+    "private.sqlite",
     "preview",
     "pack_sheet.txt",
     "pack_sheet.txt, pickup_roster.txt, customer_labels.txt",
@@ -300,6 +297,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "retry_status_refresh",
     "review_runtime_configuration",
     "runtime unavailable",
+    "runtime.sqlite",
     "radroots_home_view_{label}_{suffix}",
     "sign_event:kind:1",
     "shell",
@@ -343,6 +341,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "switch_relays",
     "startup-title-radroots",
     "startup-title-starting",
+    "studio.sqlite",
     "wait_for_sdk_lifecycle",
     "ws://localhost:8080",
     "ws://localhost:8081",
@@ -637,8 +636,6 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::PersonalOrdersDetailNoteLabel",
     "AppTextKey::PersonalOrdersDetailItemsTitle",
     "AppTextKey::PersonalOrdersActionCancel",
-    "AppTextKey::PersonalOrdersActionAcceptChange",
-    "AppTextKey::PersonalOrdersActionKeepOrder",
     "AppTextKey::PersonalOrdersRepeatDemandTitle",
     "AppTextKey::PersonalOrdersRepeatDemandActionEligible",
     "AppTextKey::PersonalOrdersRepeatDemandActionPartial",
@@ -1124,7 +1121,7 @@ struct SdkBoundaryFinding {
 const STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS: &[SdkBoundaryForbiddenPattern] = &[
     SdkBoundaryForbiddenPattern {
         pattern: "SdkDirectRelayAppSyncTransport",
-        reason: "app production sources must use AppSdkRuntime instead of direct relay sync transport",
+        reason: "app production sources must use DesktopRuntimeSupervisor instead of direct relay sync transport",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "RadrootsSdkClient",
@@ -1132,7 +1129,7 @@ const STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS: &[SdkBoundaryForbiddenPattern] = &
     },
     SdkBoundaryForbiddenPattern {
         pattern: "RadrootsSdkConfig",
-        reason: "app production sources must use AppSdkConfig-derived runtime construction",
+        reason: "app production sources must use DesktopRuntimeSupervisorConfig-derived runtime construction",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "status_client(",
@@ -1144,7 +1141,7 @@ const STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS: &[SdkBoundaryForbiddenPattern] = &
     },
     SdkBoundaryForbiddenPattern {
         pattern: "TradeValidationClient",
-        reason: "app production sources must use AppSdkRuntime DVM methods instead of removed SDK validation handles",
+        reason: "app production sources must use DesktopRuntimeSupervisor DVM methods instead of removed SDK validation handles",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "TradeEvidenceIngestRequest",
@@ -1255,11 +1252,11 @@ const STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS: &[SdkBoundaryForbiddenPattern] = &
         reason: "app production sources must not import SDK protocol order bypasses",
     },
     SdkBoundaryForbiddenPattern {
-        pattern: "AppSdkOrder",
-        reason: "app production sources must use AppSdkTrade workflow request types",
+        pattern: concat!("App", "SdkOrder"),
+        reason: "app production sources must use DesktopRuntimeTrade workflow request types",
     },
     SdkBoundaryForbiddenPattern {
-        pattern: "AppSdkMigration",
+        pattern: concat!("App", "SdkMigration"),
         reason: "app production sources must not keep retired SDK workflow scaffolding",
     },
     SdkBoundaryForbiddenPattern {
@@ -1343,13 +1340,6 @@ const SDK_BOUNDARY_EXCEPTIONS: &[SdkBoundaryExceptionEntry] = &[
         owner: "rpv1-app-sdk-refactor.07",
         reason: "store facade accepts app local_outbox publish operations for deferred workflows",
         removal_condition: "remove when app local_outbox enqueue is replaced by SDK canonical outbox enqueue APIs",
-    },
-    SdkBoundaryExceptionEntry {
-        path: "crates/runtime/src/sdk.rs",
-        pattern: "TradeEvidenceIngestRequest",
-        owner: "rpv1-csv1.03",
-        reason: "revision-decision mutations pass reducer-visible runtime-store signed evidence into the SDK explicit evidence mode",
-        removal_condition: "remove when revision-decision SDK mutations can consume shared runtime-store evidence without app-core evidence bridging",
     },
 ];
 
@@ -1568,11 +1558,11 @@ fn app_production_sdk_boundary_usage_is_exception_scoped() {
 #[test]
 fn app_sdk_trade_propose_request_stays_product_shaped() {
     let source = read_source_path(app_root().join("crates/runtime/src/sdk.rs").as_path());
-    let request = struct_block(source.as_str(), "AppSdkTradeProposeRequest");
+    let request = struct_block(source.as_str(), "DesktopRuntimeTradeProposeRequest");
 
     assert!(
         !request.contains("RadrootsOrderRequest"),
-        "AppSdkTradeProposeRequest must not expose protocol-shaped order requests"
+        "DesktopRuntimeTradeProposeRequest must not expose protocol-shaped order requests"
     );
     for required_field in [
         "pub order_id: RadrootsOrderId",
@@ -1585,7 +1575,7 @@ fn app_sdk_trade_propose_request_stays_product_shaped() {
     ] {
         assert!(
             request.contains(required_field),
-            "AppSdkTradeProposeRequest is missing product field `{required_field}`"
+            "DesktopRuntimeTradeProposeRequest is missing product field `{required_field}`"
         );
     }
     assert!(source.contains("fn app_trade_privacy_confirmation(confirm_public_note: bool)"));
@@ -1601,13 +1591,13 @@ fn app_sdk_trade_propose_request_stays_product_shaped() {
 }
 
 #[test]
-fn app_sdk_trade_mutation_requests_stay_locator_and_resync_owned() {
+fn desktop_runtime_trade_mutation_requests_stay_locator_and_resync_owned() {
     let source = read_source_path(app_root().join("crates/runtime/src/sdk.rs").as_path());
 
     for request_struct in [
-        "AppSdkTradeProposeRequest",
-        "AppSdkTradeDecisionRequest",
-        "AppSdkTradeCancellationRequest",
+        "DesktopRuntimeTradeProposeRequest",
+        "DesktopRuntimeTradeDecisionRequest",
+        "DesktopRuntimeTradeCancellationRequest",
     ] {
         let request = struct_block(source.as_str(), request_struct);
         assert!(
@@ -1617,8 +1607,8 @@ fn app_sdk_trade_mutation_requests_stay_locator_and_resync_owned() {
     }
 
     for request_struct in [
-        "AppSdkTradeDecisionRequest",
-        "AppSdkTradeCancellationRequest",
+        "DesktopRuntimeTradeDecisionRequest",
+        "DesktopRuntimeTradeCancellationRequest",
     ] {
         let request = struct_block(source.as_str(), request_struct);
         assert!(
@@ -1630,22 +1620,16 @@ fn app_sdk_trade_mutation_requests_stay_locator_and_resync_owned() {
     assert!(source.contains("sdk.trades().buyer().propose_trade(sdk_request)"));
     for (label, start, end, required_count) in [
         (
+            "trade proposal",
+            "fn trade_propose_with_sdk(",
+            "fn trade_decision_with_sdk(",
+            0usize,
+        ),
+        (
             "trade decision",
             "fn trade_decision_with_sdk(",
-            "fn trade_revision_propose_with_sdk(",
-            2usize,
-        ),
-        (
-            "trade revision proposal",
-            "fn trade_revision_propose_with_sdk(",
-            "fn trade_revision_decide_with_sdk(",
-            1usize,
-        ),
-        (
-            "trade revision decision",
-            "fn trade_revision_decide_with_sdk(",
             "fn trade_cancel_with_sdk(",
-            0usize,
+            2usize,
         ),
         (
             "trade cancellation",
@@ -1667,19 +1651,6 @@ fn app_sdk_trade_mutation_requests_stay_locator_and_resync_owned() {
             "{label} must not use local-only evidence for app mutation authority"
         );
     }
-    let revision_decision = source_segment(
-        source.as_str(),
-        "fn trade_revision_decide_with_sdk(",
-        "fn trade_cancel_with_sdk(",
-    );
-    assert!(
-        revision_decision.contains("TradeEvidenceMode::require_explicit_evidence("),
-        "trade revision decision must pass reducer-visible runtime-store evidence into SDK explicit evidence mode"
-    );
-    assert!(
-        revision_decision.contains("TradeEvidenceIngestRequest::new"),
-        "trade revision decision explicit evidence must be converted through SDK evidence ingest requests"
-    );
 }
 
 #[test]
@@ -1800,7 +1771,7 @@ const APP_STORE_RETIRED_SCHEMA_TERMS: &[&str] = &[
     "dual_write",
     "dual-read",
     "dual-write",
-    "AppSdkMigration",
+    concat!("App", "SdkMigration"),
     "sdk_migration",
     "migration_receipt",
     "migration_audit",
@@ -1841,11 +1812,16 @@ fn strict_sdk_boundary_scanner_rejects_unexcepted_new_production_paths() {
         "crates/runtime/src/sdk.rs",
         "fn mutate() { sdk.trades().ingest_evidence(TradeEvidenceIngestRequest::new(event)); }",
     );
-    assert_eq!(evidence_findings.len(), 1);
+    assert_eq!(evidence_findings.len(), 2);
     assert!(
         evidence_findings
             .iter()
             .any(|finding| finding.pattern == ".ingest_evidence(")
+    );
+    assert!(
+        evidence_findings
+            .iter()
+            .any(|finding| finding.pattern == "TradeEvidenceIngestRequest")
     );
     let unexcepted_evidence_type_findings = unexcepted_sdk_boundary_patterns(
         "crates/desktop/src/runtime.rs",

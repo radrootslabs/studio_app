@@ -1,25 +1,27 @@
 use std::{
-    fmt, io,
+    fmt,
+    future::Future,
+    io,
     path::{Path, PathBuf},
     sync::{
-        Arc, Condvar, Mutex, MutexGuard,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, SyncSender, TrySendError},
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
     },
-    thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    thread,
+    time::Duration,
 };
 
 use radroots_authority::{RadrootsActorContext, RadrootsLocalEventSigner};
 use radroots_event::{
     RadrootsEventPtr,
     contract::RadrootsActorRole,
-    farm::RadrootsFarm,
+    farm::{RadrootsFarm, RadrootsFarmPublicLocation},
     ids::{
         RadrootsAddressableCoordinate, RadrootsListingAddress, RadrootsOrderId, RadrootsPublicKey,
     },
     kinds::KIND_FARM,
-    listing::RadrootsListing,
+    listing::{RadrootsListing, RadrootsListingPublicLocation},
     order::{
         RadrootsOrderEconomics, RadrootsOrderInventoryCommitment, RadrootsOrderItem,
         RadrootsOrderRequest,
@@ -49,17 +51,18 @@ use tokio::runtime::Builder as TokioRuntimeBuilder;
 
 use crate::AppDesktopRuntimePaths;
 
-pub const APP_SDK_STORAGE_DIR_NAME: &str = "sdk";
-pub const APP_SDK_DEFAULT_COMMAND_QUEUE_CAPACITY: usize = 32;
+pub const DESKTOP_RUNTIME_STORAGE_DIR_NAME: &str = "sdk";
+pub const DESKTOP_RUNTIME_DEFAULT_EFFECT_QUEUE_CAPACITY: usize = 32;
+const DESKTOP_RUNTIME_SDK_EFFECT_TIMEOUT_MS: u64 = 2_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AppSdkRelayUrlPolicy {
+pub enum DesktopRuntimeRelayUrlPolicy {
     Public,
     Localhost,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AppSdkLifecycleState {
+pub enum DesktopRuntimeLifecycleState {
     Starting,
     Ready,
     Degraded,
@@ -71,23 +74,33 @@ pub enum AppSdkLifecycleState {
     Stopped,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AppSdkConfig {
-    pub storage_root: PathBuf,
-    pub relay_urls: Vec<String>,
-    pub relay_url_policy: AppSdkRelayUrlPolicy,
-    pub command_queue_capacity: usize,
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum DesktopRuntimeStartupMilestone {
+    ShellReady,
+    RuntimeStoreReady,
+    PrivateStoreReady,
+    SignerReady,
+    ProjectionsReady,
+    NetworkObserved,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AppSdkStoragePaths {
+pub struct DesktopRuntimeSupervisorConfig {
+    pub storage_root: PathBuf,
+    pub relay_urls: Vec<String>,
+    pub relay_url_policy: DesktopRuntimeRelayUrlPolicy,
+    pub effect_queue_capacity: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DesktopRuntimeStoragePaths {
     pub runtime_path: PathBuf,
     pub private_path: PathBuf,
     pub studio_path: PathBuf,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppSdkRuntimeIssue {
+pub struct DesktopRuntimeIssue {
     pub code: String,
     pub class: String,
     pub retryable: bool,
@@ -97,34 +110,39 @@ pub struct AppSdkRuntimeIssue {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppSdkRuntimeStatus {
-    pub state: AppSdkLifecycleState,
+pub struct DesktopRuntimeSnapshot {
+    pub state: DesktopRuntimeLifecycleState,
+    pub startup_milestones: Vec<DesktopRuntimeStartupMilestone>,
     pub storage_root: PathBuf,
     pub relay_urls: Vec<String>,
-    pub relay_url_policy: AppSdkRelayUrlPolicy,
-    pub storage_paths: Option<AppSdkStoragePaths>,
-    pub last_issue: Option<AppSdkRuntimeIssue>,
-    pub projection_lifecycle: AppSdkProjectionLifecycleStatus,
+    pub relay_url_policy: DesktopRuntimeRelayUrlPolicy,
+    pub storage_paths: Option<DesktopRuntimeStoragePaths>,
+    pub last_issue: Option<DesktopRuntimeIssue>,
+    pub last_effect: Option<DesktopRuntimeEffectStatus>,
+    pub storage_diagnostics: Option<DesktopRuntimeStorageDiagnostics>,
+    pub integrity_diagnostics: Option<DesktopRuntimeIntegrityDiagnostics>,
+    pub sync_diagnostics: Option<DesktopRuntimeSyncDiagnostics>,
+    pub projection_lifecycle: DesktopRuntimeProjectionLifecycleStatus,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppSdkDiagnostics {
-    pub runtime: AppSdkRuntimeStatus,
-    pub storage: AppSdkStorageDiagnostics,
-    pub integrity: AppSdkIntegrityDiagnostics,
-    pub sync: AppSdkSyncDiagnostics,
+pub struct DesktopRuntimeDiagnostics {
+    pub runtime: DesktopRuntimeSnapshot,
+    pub storage: DesktopRuntimeStorageDiagnostics,
+    pub integrity: DesktopRuntimeIntegrityDiagnostics,
+    pub sync: DesktopRuntimeSyncDiagnostics,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppSdkStorageDiagnostics {
+pub struct DesktopRuntimeStorageDiagnostics {
     pub storage_kind: String,
-    pub paths: Option<AppSdkStoragePaths>,
-    pub event_store: AppSdkEventStoreDiagnostics,
-    pub outbox: AppSdkOutboxDiagnostics,
+    pub paths: Option<DesktopRuntimeStoragePaths>,
+    pub event_store: DesktopRuntimeEventStoreDiagnostics,
+    pub outbox: DesktopRuntimeOutboxDiagnostics,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppSdkSqliteStoreDiagnostics {
+pub struct DesktopRuntimeSqliteStoreDiagnostics {
     pub schema_version: i64,
     pub journal_mode: String,
     pub foreign_keys_enabled: bool,
@@ -134,8 +152,8 @@ pub struct AppSdkSqliteStoreDiagnostics {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppSdkEventStoreDiagnostics {
-    pub store: AppSdkSqliteStoreDiagnostics,
+pub struct DesktopRuntimeEventStoreDiagnostics {
+    pub store: DesktopRuntimeSqliteStoreDiagnostics,
     pub total_events: i64,
     pub projection_eligible_events: i64,
     pub transport_observations: i64,
@@ -144,8 +162,8 @@ pub struct AppSdkEventStoreDiagnostics {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppSdkOutboxDiagnostics {
-    pub store: AppSdkSqliteStoreDiagnostics,
+pub struct DesktopRuntimeOutboxDiagnostics {
+    pub store: DesktopRuntimeSqliteStoreDiagnostics,
     pub total_events: i64,
     pub pending_events: i64,
     pub retryable_events: i64,
@@ -158,7 +176,7 @@ pub struct AppSdkOutboxDiagnostics {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppSdkIntegrityDiagnostics {
+pub struct DesktopRuntimeIntegrityDiagnostics {
     pub checked_paths: Vec<PathBuf>,
     pub event_store_ok: bool,
     pub outbox_ok: bool,
@@ -167,16 +185,16 @@ pub struct AppSdkIntegrityDiagnostics {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppSdkSyncDiagnostics {
+pub struct DesktopRuntimeSyncDiagnostics {
     pub source: String,
     pub observed_at_ms: i64,
-    pub event_store: AppSdkSyncEventStoreDiagnostics,
-    pub outbox: AppSdkSyncOutboxDiagnostics,
-    pub transport_targets: AppSdkSyncTransportTargetDiagnostics,
+    pub event_store: DesktopRuntimeSyncEventStoreDiagnostics,
+    pub outbox: DesktopRuntimeSyncOutboxDiagnostics,
+    pub transport_targets: DesktopRuntimeSyncTransportTargetDiagnostics,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppSdkSyncEventStoreDiagnostics {
+pub struct DesktopRuntimeSyncEventStoreDiagnostics {
     pub total_events: i64,
     pub projection_eligible_events: i64,
     pub transport_observations: i64,
@@ -185,7 +203,7 @@ pub struct AppSdkSyncEventStoreDiagnostics {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppSdkSyncOutboxDiagnostics {
+pub struct DesktopRuntimeSyncOutboxDiagnostics {
     pub total_events: i64,
     pub pending_events: i64,
     pub retryable_events: i64,
@@ -198,25 +216,25 @@ pub struct AppSdkSyncOutboxDiagnostics {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppSdkSyncTransportTargetDiagnostics {
+pub struct DesktopRuntimeSyncTransportTargetDiagnostics {
     pub configured_count: usize,
     pub configured_targets: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppSdkRestorePreflightRequest {
+pub struct DesktopRuntimeRestorePreflightRequest {
     pub source: PathBuf,
     pub overwrite_existing_sdk_storage: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AppSdkFarmPublicLocationRequest {
+pub struct DesktopRuntimeFarmPublicLocationRequest {
     pub actor_pubkey: String,
     pub farm_d_tag: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AppSdkPublicFarmLocation {
+pub struct DesktopRuntimePublicFarmLocation {
     pub primary: String,
     pub city: Option<String>,
     pub region: Option<String>,
@@ -224,30 +242,44 @@ pub struct AppSdkPublicFarmLocation {
     pub geohash5: String,
 }
 
-pub struct AppSdkFarmPublishRequest {
+pub struct DesktopRuntimeLocalSigner {
+    keys: RadrootsNostrKeys,
+}
+
+impl DesktopRuntimeLocalSigner {
+    pub fn from_local_identity_keys(keys: RadrootsNostrKeys) -> Self {
+        Self { keys }
+    }
+
+    fn into_keys(self) -> RadrootsNostrKeys {
+        self.keys
+    }
+}
+
+pub struct DesktopRuntimeFarmPublishRequest {
     pub actor_account_id: String,
     pub actor_pubkey: String,
-    pub signer_keys: RadrootsNostrKeys,
+    pub signer: DesktopRuntimeLocalSigner,
     pub farm: RadrootsFarm,
     pub target_relays: Vec<String>,
-    pub relay_url_policy: AppSdkRelayUrlPolicy,
+    pub relay_url_policy: DesktopRuntimeRelayUrlPolicy,
     pub idempotency_key: Option<String>,
 }
 
-pub struct AppSdkListingPublishRequest {
+pub struct DesktopRuntimeListingPublishRequest {
     pub actor_account_id: String,
     pub actor_pubkey: String,
-    pub signer_keys: RadrootsNostrKeys,
+    pub signer: DesktopRuntimeLocalSigner,
     pub listing: RadrootsListing,
     pub target_relays: Vec<String>,
-    pub relay_url_policy: AppSdkRelayUrlPolicy,
+    pub relay_url_policy: DesktopRuntimeRelayUrlPolicy,
     pub idempotency_key: Option<String>,
 }
 
-pub struct AppSdkTradeProposeRequest {
+pub struct DesktopRuntimeTradeProposeRequest {
     pub actor_account_id: String,
     pub actor_pubkey: String,
-    pub signer_keys: RadrootsNostrKeys,
+    pub signer: DesktopRuntimeLocalSigner,
     pub listing_event: RadrootsEventPtr,
     pub order_id: RadrootsOrderId,
     pub listing_addr: RadrootsListingAddress,
@@ -259,7 +291,7 @@ pub struct AppSdkTradeProposeRequest {
     pub idempotency_key: Option<String>,
 }
 
-pub enum AppSdkTradeDecision {
+pub enum DesktopRuntimeTradeDecision {
     Accept {
         inventory_commitments: Vec<RadrootsOrderInventoryCommitment>,
     },
@@ -268,20 +300,20 @@ pub enum AppSdkTradeDecision {
     },
 }
 
-pub struct AppSdkTradeDecisionRequest {
+pub struct DesktopRuntimeTradeDecisionRequest {
     pub actor_account_id: String,
     pub actor_pubkey: String,
-    pub signer_keys: RadrootsNostrKeys,
+    pub signer: DesktopRuntimeLocalSigner,
     pub locator: RadrootsTradeLocator,
-    pub decision: AppSdkTradeDecision,
+    pub decision: DesktopRuntimeTradeDecision,
     pub confirm_public_note: bool,
     pub idempotency_key: Option<String>,
 }
 
-pub struct AppSdkTradeCancellationRequest {
+pub struct DesktopRuntimeTradeCancellationRequest {
     pub actor_account_id: String,
     pub actor_pubkey: String,
-    pub signer_keys: RadrootsNostrKeys,
+    pub signer: DesktopRuntimeLocalSigner,
     pub locator: RadrootsTradeLocator,
     pub reason: String,
     pub confirm_public_note: bool,
@@ -289,7 +321,7 @@ pub struct AppSdkTradeCancellationRequest {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AppSdkWorkflowReceipt {
+pub struct DesktopRuntimeWorkflowReceipt {
     pub operation_kind: String,
     pub expected_event_id: String,
     pub signed_event_id: String,
@@ -301,23 +333,23 @@ pub struct AppSdkWorkflowReceipt {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppSdkRestorePreflightReceipt {
+pub struct DesktopRuntimeRestorePreflightReceipt {
     pub source: PathBuf,
     pub destination: PathBuf,
     pub state: String,
-    pub destination_paths: Option<AppSdkStoragePaths>,
-    pub restored_paths: Option<AppSdkStoragePaths>,
+    pub destination_paths: Option<DesktopRuntimeStoragePaths>,
+    pub restored_paths: Option<DesktopRuntimeStoragePaths>,
     pub runtime_path: PathBuf,
     pub private_path: PathBuf,
     pub studio_path: PathBuf,
     pub manifest_path: PathBuf,
-    pub verification: AppSdkBackupVerificationDiagnostics,
-    pub source_storage: AppSdkStorageDiagnostics,
-    pub projection_lifecycle: AppSdkProjectionLifecycleStatus,
+    pub verification: DesktopRuntimeBackupVerificationDiagnostics,
+    pub source_storage: DesktopRuntimeStorageDiagnostics,
+    pub projection_lifecycle: DesktopRuntimeProjectionLifecycleStatus,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AppSdkBackupVerificationDiagnostics {
+pub struct DesktopRuntimeBackupVerificationDiagnostics {
     pub event_store_ok: bool,
     pub outbox_ok: bool,
     pub event_store_events: i64,
@@ -325,103 +357,118 @@ pub struct AppSdkBackupVerificationDiagnostics {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AppSdkProjectionLifecycleStatus {
-    pub state: AppSdkProjectionLifecycleState,
+pub struct DesktopRuntimeProjectionLifecycleStatus {
+    pub state: DesktopRuntimeProjectionLifecycleState,
     pub reason: Option<String>,
     pub restore_source: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AppSdkProjectionLifecycleState {
+pub enum DesktopRuntimeProjectionLifecycleState {
     Current,
     Stale,
     Rebuilding,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DesktopRuntimeEffectKind {
+    RefreshDiagnostics,
+    RestorePreflight,
+    FarmPublish,
+    ListingPublish,
+    TradePropose,
+    TradeDecision,
+    TradeCancellation,
+    BeginProjectionRebuild,
+    CompleteProjectionRebuild,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DesktopRuntimeEffectState {
+    Accepted,
+    Completed,
+    Failed,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DesktopRuntimeEffectReceipt {
+    pub effect_id: u64,
+    pub effect_kind: DesktopRuntimeEffectKind,
+    pub operation_kind: Option<String>,
+    pub actor_pubkey: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DesktopRuntimeEffectStatus {
+    pub receipt: DesktopRuntimeEffectReceipt,
+    pub state: DesktopRuntimeEffectState,
+    pub issue: Option<DesktopRuntimeIssue>,
+    pub workflow_receipt: Option<DesktopRuntimeWorkflowReceipt>,
+    pub restore_preflight: Option<DesktopRuntimeRestorePreflightReceipt>,
+}
+
 #[derive(Debug, Error)]
-pub enum AppSdkRuntimeError {
-    #[error("app sdk command queue capacity must be greater than zero")]
-    CommandQueueCapacityZero,
-    #[error("failed to start app sdk worker: {0}")]
+pub enum DesktopRuntimeSupervisorError {
+    #[error("desktop runtime supervisor effect queue capacity must be greater than zero")]
+    EffectQueueCapacityZero,
+    #[error("failed to start desktop runtime supervisor worker: {0}")]
     WorkerSpawn(#[from] io::Error),
-    #[error("app sdk command queue is full")]
-    CommandQueueFull,
-    #[error("app sdk command queue is closed")]
-    CommandQueueClosed,
-    #[error("app sdk command response channel is closed")]
-    CommandResponseClosed,
-    #[error("app sdk command failed: {0}")]
-    CommandFailed(AppSdkRuntimeIssue),
-    #[error("app sdk shutdown acknowledgement failed")]
-    ShutdownAck,
-    #[error("app sdk worker failed to join")]
-    WorkerJoin,
+    #[error("desktop runtime supervisor effect queue is full")]
+    EffectQueueFull,
+    #[error("desktop runtime supervisor effect queue is closed")]
+    EffectQueueClosed,
+    #[error("desktop runtime supervisor is unavailable: {0}")]
+    Unavailable(DesktopRuntimeIssue),
 }
 
 #[derive(Debug)]
-pub struct AppSdkRuntime {
-    command_sender: Mutex<Option<SyncSender<AppSdkWorkerCommand>>>,
-    shared: Arc<AppSdkRuntimeShared>,
-    worker: Mutex<Option<JoinHandle<()>>>,
+pub struct DesktopRuntimeSupervisor {
+    command_sender: Mutex<Option<SyncSender<DesktopRuntimeEffect>>>,
+    shared: Arc<DesktopRuntimeSupervisorShared>,
+    next_effect_id: AtomicU64,
 }
 
 #[derive(Debug)]
-struct AppSdkRuntimeShared {
-    status: Mutex<AppSdkRuntimeStatus>,
-    status_changed: Condvar,
+struct DesktopRuntimeSupervisorShared {
+    status: Mutex<DesktopRuntimeSnapshot>,
     shutdown_requested: AtomicBool,
 }
 
-enum AppSdkWorkerCommand {
-    StorageStatus(mpsc::Sender<Result<AppSdkStorageDiagnostics, AppSdkRuntimeIssue>>),
-    IntegrityStatus(mpsc::Sender<Result<AppSdkIntegrityDiagnostics, AppSdkRuntimeIssue>>),
-    SyncStatus(mpsc::Sender<Result<AppSdkSyncDiagnostics, AppSdkRuntimeIssue>>),
-    Diagnostics(mpsc::Sender<Result<AppSdkDiagnostics, AppSdkRuntimeIssue>>),
+enum DesktopRuntimeEffect {
+    RefreshDiagnostics(DesktopRuntimeEffectReceipt),
     RestorePreflight(
-        AppSdkRestorePreflightRequest,
-        mpsc::Sender<Result<AppSdkRestorePreflightReceipt, AppSdkRuntimeIssue>>,
-    ),
-    FarmPublicLocation(
-        AppSdkFarmPublicLocationRequest,
-        mpsc::Sender<Result<Option<AppSdkPublicFarmLocation>, AppSdkRuntimeIssue>>,
+        DesktopRuntimeEffectReceipt,
+        DesktopRuntimeRestorePreflightRequest,
     ),
     EnqueueFarmPublish(
-        AppSdkFarmPublishRequest,
-        mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
+        DesktopRuntimeEffectReceipt,
+        DesktopRuntimeFarmPublishRequest,
     ),
     EnqueueListingPublish(
-        AppSdkListingPublishRequest,
-        mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
+        DesktopRuntimeEffectReceipt,
+        DesktopRuntimeListingPublishRequest,
     ),
     TradePropose(
-        AppSdkTradeProposeRequest,
-        mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
+        DesktopRuntimeEffectReceipt,
+        DesktopRuntimeTradeProposeRequest,
     ),
     TradeDecision(
-        AppSdkTradeDecisionRequest,
-        mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
+        DesktopRuntimeEffectReceipt,
+        DesktopRuntimeTradeDecisionRequest,
     ),
     TradeCancellation(
-        AppSdkTradeCancellationRequest,
-        mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
+        DesktopRuntimeEffectReceipt,
+        DesktopRuntimeTradeCancellationRequest,
     ),
-    BeginProjectionRebuild(
-        mpsc::Sender<Result<AppSdkProjectionLifecycleStatus, AppSdkRuntimeIssue>>,
-    ),
-    CompleteProjectionRebuild(
-        mpsc::Sender<Result<AppSdkProjectionLifecycleStatus, AppSdkRuntimeIssue>>,
-    ),
+    BeginProjectionRebuild(DesktopRuntimeEffectReceipt),
+    CompleteProjectionRebuild(DesktopRuntimeEffectReceipt),
 }
 
-impl fmt::Debug for AppSdkWorkerCommand {
+impl fmt::Debug for DesktopRuntimeEffect {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::StorageStatus(_) => formatter.write_str("StorageStatus"),
-            Self::IntegrityStatus(_) => formatter.write_str("IntegrityStatus"),
-            Self::SyncStatus(_) => formatter.write_str("SyncStatus"),
-            Self::Diagnostics(_) => formatter.write_str("Diagnostics"),
+            Self::RefreshDiagnostics(_) => formatter.write_str("RefreshDiagnostics"),
             Self::RestorePreflight(_, _) => formatter.write_str("RestorePreflight"),
-            Self::FarmPublicLocation(_, _) => formatter.write_str("FarmPublicLocation"),
             Self::EnqueueFarmPublish(_, _) => formatter.write_str("EnqueueFarmPublish"),
             Self::EnqueueListingPublish(_, _) => formatter.write_str("EnqueueListingPublish"),
             Self::TradePropose(_, _) => formatter.write_str("TradePropose"),
@@ -433,27 +480,27 @@ impl fmt::Debug for AppSdkWorkerCommand {
     }
 }
 
-impl AppSdkConfig {
+impl DesktopRuntimeSupervisorConfig {
     pub fn from_desktop_paths(paths: &AppDesktopRuntimePaths, relay_urls: Vec<String>) -> Self {
         Self::from_app_data_root(paths.app.data.as_path(), relay_urls)
     }
 
     pub fn from_app_data_root(data_root: &Path, relay_urls: Vec<String>) -> Self {
         Self {
-            storage_root: app_sdk_storage_root_from_data_root(data_root),
-            relay_url_policy: app_sdk_relay_url_policy(relay_urls.as_slice()),
+            storage_root: desktop_runtime_storage_root_from_data_root(data_root),
+            relay_url_policy: desktop_runtime_relay_url_policy(relay_urls.as_slice()),
             relay_urls,
-            command_queue_capacity: APP_SDK_DEFAULT_COMMAND_QUEUE_CAPACITY,
+            effect_queue_capacity: DESKTOP_RUNTIME_DEFAULT_EFFECT_QUEUE_CAPACITY,
         }
     }
 
-    pub fn with_command_queue_capacity(mut self, capacity: usize) -> Self {
-        self.command_queue_capacity = capacity;
+    pub fn with_effect_queue_capacity(mut self, capacity: usize) -> Self {
+        self.effect_queue_capacity = capacity;
         self
     }
 }
 
-impl AppSdkRestorePreflightRequest {
+impl DesktopRuntimeRestorePreflightRequest {
     pub fn new(source: impl Into<PathBuf>) -> Self {
         Self {
             source: source.into(),
@@ -467,10 +514,10 @@ impl AppSdkRestorePreflightRequest {
     }
 }
 
-impl AppSdkProjectionLifecycleStatus {
+impl DesktopRuntimeProjectionLifecycleStatus {
     pub fn current() -> Self {
         Self {
-            state: AppSdkProjectionLifecycleState::Current,
+            state: DesktopRuntimeProjectionLifecycleState::Current,
             reason: None,
             restore_source: None,
         }
@@ -478,7 +525,7 @@ impl AppSdkProjectionLifecycleStatus {
 
     fn stale(reason: impl Into<String>, restore_source: Option<PathBuf>) -> Self {
         Self {
-            state: AppSdkProjectionLifecycleState::Stale,
+            state: DesktopRuntimeProjectionLifecycleState::Stale,
             reason: Some(reason.into()),
             restore_source,
         }
@@ -486,235 +533,235 @@ impl AppSdkProjectionLifecycleStatus {
 
     fn rebuilding(reason: impl Into<String>, restore_source: Option<PathBuf>) -> Self {
         Self {
-            state: AppSdkProjectionLifecycleState::Rebuilding,
+            state: DesktopRuntimeProjectionLifecycleState::Rebuilding,
             reason: Some(reason.into()),
             restore_source,
         }
     }
 }
 
-impl AppSdkRuntime {
-    pub fn start(config: AppSdkConfig) -> Result<Self, AppSdkRuntimeError> {
-        if config.command_queue_capacity == 0 {
-            return Err(AppSdkRuntimeError::CommandQueueCapacityZero);
+impl DesktopRuntimeSupervisor {
+    pub fn start(
+        config: DesktopRuntimeSupervisorConfig,
+    ) -> Result<Self, DesktopRuntimeSupervisorError> {
+        if config.effect_queue_capacity == 0 {
+            return Err(DesktopRuntimeSupervisorError::EffectQueueCapacityZero);
         }
 
-        let initial_status =
-            AppSdkRuntimeStatus::from_config(&config, AppSdkLifecycleState::Starting, None, None);
-        let shared = Arc::new(AppSdkRuntimeShared {
+        let initial_status = DesktopRuntimeSnapshot::from_config(
+            &config,
+            DesktopRuntimeLifecycleState::Starting,
+            Some(vec![DesktopRuntimeStartupMilestone::ShellReady]),
+            None,
+            None,
+        );
+        let shared = Arc::new(DesktopRuntimeSupervisorShared {
             status: Mutex::new(initial_status),
-            status_changed: Condvar::new(),
             shutdown_requested: AtomicBool::new(false),
         });
-        let (command_sender, command_receiver) = mpsc::sync_channel(config.command_queue_capacity);
+        let (command_sender, command_receiver) = mpsc::sync_channel(config.effect_queue_capacity);
         let worker_shared = Arc::clone(&shared);
-        let worker = thread::Builder::new()
-            .name("radroots-app-sdk-runtime".to_owned())
-            .spawn(move || run_app_sdk_worker(config, worker_shared, command_receiver))?;
+        let _worker = thread::Builder::new()
+            .name("radroots-desktop-runtime-supervisor".to_owned())
+            .spawn(move || run_desktop_runtime_worker(config, worker_shared, command_receiver))?;
 
         Ok(Self {
             command_sender: Mutex::new(Some(command_sender)),
             shared,
-            worker: Mutex::new(Some(worker)),
+            next_effect_id: AtomicU64::new(1),
         })
     }
 
-    pub fn status(&self) -> AppSdkRuntimeStatus {
+    pub fn snapshot(&self) -> DesktopRuntimeSnapshot {
         lock_status(&self.shared).clone()
     }
 
-    pub fn storage_status(&self) -> Result<AppSdkStorageDiagnostics, AppSdkRuntimeError> {
-        self.run_command(AppSdkWorkerCommand::StorageStatus)
-    }
-
-    pub fn integrity_status(&self) -> Result<AppSdkIntegrityDiagnostics, AppSdkRuntimeError> {
-        self.run_command(AppSdkWorkerCommand::IntegrityStatus)
-    }
-
-    pub fn sync_status(&self) -> Result<AppSdkSyncDiagnostics, AppSdkRuntimeError> {
-        self.run_command(AppSdkWorkerCommand::SyncStatus)
-    }
-
-    pub fn diagnostics(&self) -> Result<AppSdkDiagnostics, AppSdkRuntimeError> {
-        self.run_command(AppSdkWorkerCommand::Diagnostics)
-    }
-
-    pub fn restore_preflight(
+    pub fn request_diagnostics_refresh(
         &self,
-        request: AppSdkRestorePreflightRequest,
-    ) -> Result<AppSdkRestorePreflightReceipt, AppSdkRuntimeError> {
-        self.run_command(|response_sender| {
-            AppSdkWorkerCommand::RestorePreflight(request, response_sender)
-        })
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
+        self.submit_effect(
+            DesktopRuntimeEffectKind::RefreshDiagnostics,
+            None,
+            None,
+            DesktopRuntimeEffect::RefreshDiagnostics,
+        )
     }
 
-    pub fn farm_public_location(
+    pub fn request_restore_preflight(
         &self,
-        request: AppSdkFarmPublicLocationRequest,
-    ) -> Result<Option<AppSdkPublicFarmLocation>, AppSdkRuntimeError> {
-        self.run_command(|response_sender| {
-            AppSdkWorkerCommand::FarmPublicLocation(request, response_sender)
-        })
+        request: DesktopRuntimeRestorePreflightRequest,
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
+        self.submit_effect(
+            DesktopRuntimeEffectKind::RestorePreflight,
+            None,
+            None,
+            |receipt| DesktopRuntimeEffect::RestorePreflight(receipt, request),
+        )
     }
 
     pub fn enqueue_farm_publish(
         &self,
-        request: AppSdkFarmPublishRequest,
-    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
-        self.run_command(|response_sender| {
-            AppSdkWorkerCommand::EnqueueFarmPublish(request, response_sender)
-        })
+        request: DesktopRuntimeFarmPublishRequest,
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
+        let actor_pubkey = Some(request.actor_pubkey.clone());
+        self.submit_effect(
+            DesktopRuntimeEffectKind::FarmPublish,
+            Some(FARM_PUBLISH_OPERATION_KIND.to_owned()),
+            actor_pubkey,
+            |receipt| DesktopRuntimeEffect::EnqueueFarmPublish(receipt, request),
+        )
     }
 
     pub fn enqueue_listing_publish(
         &self,
-        request: AppSdkListingPublishRequest,
-    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
-        self.run_command(|response_sender| {
-            AppSdkWorkerCommand::EnqueueListingPublish(request, response_sender)
-        })
+        request: DesktopRuntimeListingPublishRequest,
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
+        let actor_pubkey = Some(request.actor_pubkey.clone());
+        self.submit_effect(
+            DesktopRuntimeEffectKind::ListingPublish,
+            Some(LISTING_PUBLISH_OPERATION_KIND.to_owned()),
+            actor_pubkey,
+            |receipt| DesktopRuntimeEffect::EnqueueListingPublish(receipt, request),
+        )
     }
 
     pub fn trade_propose(
         &self,
-        request: AppSdkTradeProposeRequest,
-    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
-        self.run_command(|response_sender| {
-            AppSdkWorkerCommand::TradePropose(request, response_sender)
-        })
+        request: DesktopRuntimeTradeProposeRequest,
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
+        let actor_pubkey = Some(request.actor_pubkey.clone());
+        self.submit_effect(
+            DesktopRuntimeEffectKind::TradePropose,
+            Some(TRADE_SUBMIT_OPERATION_KIND.to_owned()),
+            actor_pubkey,
+            |receipt| DesktopRuntimeEffect::TradePropose(receipt, request),
+        )
     }
 
     pub fn trade_decide(
         &self,
-        request: AppSdkTradeDecisionRequest,
-    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
-        self.run_command(|response_sender| {
-            AppSdkWorkerCommand::TradeDecision(request, response_sender)
-        })
+        request: DesktopRuntimeTradeDecisionRequest,
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
+        let actor_pubkey = Some(request.actor_pubkey.clone());
+        self.submit_effect(
+            DesktopRuntimeEffectKind::TradeDecision,
+            Some(TRADE_DECISION_OPERATION_KIND.to_owned()),
+            actor_pubkey,
+            |receipt| DesktopRuntimeEffect::TradeDecision(receipt, request),
+        )
     }
 
     pub fn trade_cancel(
         &self,
-        request: AppSdkTradeCancellationRequest,
-    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
-        self.run_command(|response_sender| {
-            AppSdkWorkerCommand::TradeCancellation(request, response_sender)
-        })
+        request: DesktopRuntimeTradeCancellationRequest,
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
+        let actor_pubkey = Some(request.actor_pubkey.clone());
+        self.submit_effect(
+            DesktopRuntimeEffectKind::TradeCancellation,
+            Some(TRADE_CANCELLATION_OPERATION_KIND.to_owned()),
+            actor_pubkey,
+            |receipt| DesktopRuntimeEffect::TradeCancellation(receipt, request),
+        )
     }
 
     pub fn begin_projection_rebuild(
         &self,
-    ) -> Result<AppSdkProjectionLifecycleStatus, AppSdkRuntimeError> {
-        self.run_command(AppSdkWorkerCommand::BeginProjectionRebuild)
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
+        self.submit_effect(
+            DesktopRuntimeEffectKind::BeginProjectionRebuild,
+            None,
+            None,
+            DesktopRuntimeEffect::BeginProjectionRebuild,
+        )
     }
 
     pub fn complete_projection_rebuild(
         &self,
-    ) -> Result<AppSdkProjectionLifecycleStatus, AppSdkRuntimeError> {
-        self.run_command(AppSdkWorkerCommand::CompleteProjectionRebuild)
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
+        self.submit_effect(
+            DesktopRuntimeEffectKind::CompleteProjectionRebuild,
+            None,
+            None,
+            DesktopRuntimeEffect::CompleteProjectionRebuild,
+        )
     }
 
-    pub fn wait_for_startup(&self, timeout: Duration) -> AppSdkRuntimeStatus {
-        let deadline = Instant::now()
-            .checked_add(timeout)
-            .unwrap_or_else(Instant::now);
-        let mut status = lock_status(&self.shared);
-        loop {
-            if !matches!(status.state, AppSdkLifecycleState::Starting) {
-                return status.clone();
-            }
-            let now = Instant::now();
-            if now >= deadline {
-                return status.clone();
-            }
-            let remaining = deadline.saturating_duration_since(now);
-            let wait_result = self.shared.status_changed.wait_timeout(status, remaining);
-            let (next_status, timeout_result) = wait_result.unwrap_or_else(|poisoned| {
-                let (guard, timeout_result) = poisoned.into_inner();
-                (guard, timeout_result)
-            });
-            status = next_status;
-            if timeout_result.timed_out() {
-                return status.clone();
-            }
-        }
-    }
-
-    pub fn shutdown(&self) -> Result<(), AppSdkRuntimeError> {
-        if matches!(self.status().state, AppSdkLifecycleState::Stopped) {
-            return self.join_worker();
+    pub fn request_shutdown(&self) -> bool {
+        if matches!(self.snapshot().state, DesktopRuntimeLifecycleState::Stopped) {
+            return false;
         }
 
         self.shared.shutdown_requested.store(true, Ordering::SeqCst);
-        transition_status_state(&self.shared, AppSdkLifecycleState::ShuttingDown);
+        transition_status_state(&self.shared, DesktopRuntimeLifecycleState::ShuttingDown);
         let command_sender = self
             .command_sender
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .take();
         drop(command_sender);
-        self.join_worker()
+        true
     }
 
-    fn join_worker(&self) -> Result<(), AppSdkRuntimeError> {
-        let mut worker = self
-            .worker
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(worker) = worker.take() else {
-            return Ok(());
-        };
-        worker.join().map_err(|_| AppSdkRuntimeError::WorkerJoin)
-    }
-
-    fn run_command<T>(
+    fn submit_effect(
         &self,
-        command: impl FnOnce(mpsc::Sender<Result<T, AppSdkRuntimeIssue>>) -> AppSdkWorkerCommand,
-    ) -> Result<T, AppSdkRuntimeError> {
-        let (response_sender, response_receiver) = mpsc::channel();
+        effect_kind: DesktopRuntimeEffectKind,
+        operation_kind: Option<String>,
+        actor_pubkey: Option<String>,
+        effect: impl FnOnce(DesktopRuntimeEffectReceipt) -> DesktopRuntimeEffect,
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
+        let receipt = DesktopRuntimeEffectReceipt {
+            effect_id: self.next_effect_id.fetch_add(1, Ordering::SeqCst),
+            effect_kind,
+            operation_kind,
+            actor_pubkey,
+        };
         let command_sender = {
             let command_sender = self
                 .command_sender
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             if self.shared.shutdown_requested.load(Ordering::SeqCst) {
-                return Err(AppSdkRuntimeError::CommandQueueClosed);
+                return Err(DesktopRuntimeSupervisorError::EffectQueueClosed);
             }
             command_sender
                 .as_ref()
                 .cloned()
-                .ok_or(AppSdkRuntimeError::CommandQueueClosed)?
+                .ok_or(DesktopRuntimeSupervisorError::EffectQueueClosed)?
         };
-        match command_sender.try_send(command(response_sender)) {
-            Ok(()) => {}
-            Err(TrySendError::Full(_)) => return Err(AppSdkRuntimeError::CommandQueueFull),
+        set_last_effect(
+            &self.shared,
+            DesktopRuntimeEffectStatus::accepted(receipt.clone()),
+        );
+        match command_sender.try_send(effect(receipt.clone())) {
+            Ok(()) => Ok(receipt),
+            Err(TrySendError::Full(_)) => {
+                clear_last_effect(&self.shared, receipt.effect_id);
+                Err(DesktopRuntimeSupervisorError::EffectQueueFull)
+            }
             Err(TrySendError::Disconnected(_)) => {
-                return Err(AppSdkRuntimeError::CommandQueueClosed);
+                clear_last_effect(&self.shared, receipt.effect_id);
+                Err(DesktopRuntimeSupervisorError::EffectQueueClosed)
             }
         }
-        response_receiver
-            .recv()
-            .map_err(|_| AppSdkRuntimeError::CommandResponseClosed)?
-            .map_err(AppSdkRuntimeError::CommandFailed)
     }
 }
 
-impl Drop for AppSdkRuntime {
+impl Drop for DesktopRuntimeSupervisor {
     fn drop(&mut self) {
-        let _ = self.shutdown();
+        let _ = self.request_shutdown();
     }
 }
 
-impl From<AppSdkRelayUrlPolicy> for NostrRelayUrlPolicy {
-    fn from(policy: AppSdkRelayUrlPolicy) -> Self {
+impl From<DesktopRuntimeRelayUrlPolicy> for NostrRelayUrlPolicy {
+    fn from(policy: DesktopRuntimeRelayUrlPolicy) -> Self {
         match policy {
-            AppSdkRelayUrlPolicy::Public => Self::Public,
-            AppSdkRelayUrlPolicy::Localhost => Self::Localhost,
+            DesktopRuntimeRelayUrlPolicy::Public => Self::Public,
+            DesktopRuntimeRelayUrlPolicy::Localhost => Self::Localhost,
         }
     }
 }
 
-impl From<&RadrootsSdkStoragePaths> for AppSdkStoragePaths {
+impl From<&RadrootsSdkStoragePaths> for DesktopRuntimeStoragePaths {
     fn from(paths: &RadrootsSdkStoragePaths) -> Self {
         Self {
             runtime_path: paths.runtime_path.clone(),
@@ -724,7 +771,7 @@ impl From<&RadrootsSdkStoragePaths> for AppSdkStoragePaths {
     }
 }
 
-impl AppSdkRuntimeIssue {
+impl DesktopRuntimeIssue {
     fn from_sdk_error(error: &RadrootsSdkError) -> Self {
         Self {
             code: error.code().to_owned(),
@@ -759,7 +806,7 @@ impl AppSdkRuntimeIssue {
         }
     }
 
-    fn lifecycle_blocked(state: AppSdkLifecycleState) -> Self {
+    fn lifecycle_blocked(state: DesktopRuntimeLifecycleState) -> Self {
         Self {
             code: "sdk_lifecycle_busy".to_owned(),
             class: "runtime".to_owned(),
@@ -777,7 +824,7 @@ impl AppSdkRuntimeIssue {
     }
 }
 
-impl From<SdkPublicLocality> for AppSdkPublicFarmLocation {
+impl From<SdkPublicLocality> for DesktopRuntimePublicFarmLocation {
     fn from(value: SdkPublicLocality) -> Self {
         Self {
             primary: value.primary,
@@ -789,37 +836,90 @@ impl From<SdkPublicLocality> for AppSdkPublicFarmLocation {
     }
 }
 
-impl fmt::Display for AppSdkRuntimeIssue {
+impl fmt::Display for DesktopRuntimeIssue {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}: {}", self.code, self.message)
     }
 }
 
-impl AppSdkRuntimeStatus {
+impl DesktopRuntimeSnapshot {
     fn from_config(
-        config: &AppSdkConfig,
-        state: AppSdkLifecycleState,
-        storage_paths: Option<AppSdkStoragePaths>,
-        last_issue: Option<AppSdkRuntimeIssue>,
+        config: &DesktopRuntimeSupervisorConfig,
+        state: DesktopRuntimeLifecycleState,
+        startup_milestones: Option<Vec<DesktopRuntimeStartupMilestone>>,
+        storage_paths: Option<DesktopRuntimeStoragePaths>,
+        last_issue: Option<DesktopRuntimeIssue>,
     ) -> Self {
         Self {
             state,
+            startup_milestones: startup_milestones.unwrap_or_default(),
             storage_root: config.storage_root.clone(),
             relay_urls: config.relay_urls.clone(),
             relay_url_policy: config.relay_url_policy,
             storage_paths,
             last_issue,
-            projection_lifecycle: AppSdkProjectionLifecycleStatus::current(),
+            last_effect: None,
+            storage_diagnostics: None,
+            integrity_diagnostics: None,
+            sync_diagnostics: None,
+            projection_lifecycle: DesktopRuntimeProjectionLifecycleStatus::current(),
         }
     }
 }
 
-impl From<StorageStatusReceipt> for AppSdkStorageDiagnostics {
+impl DesktopRuntimeDiagnostics {
+    pub fn from_snapshot(snapshot: DesktopRuntimeSnapshot) -> Option<Self> {
+        Some(Self {
+            storage: snapshot.storage_diagnostics.clone()?,
+            integrity: snapshot.integrity_diagnostics.clone()?,
+            sync: snapshot.sync_diagnostics.clone()?,
+            runtime: snapshot,
+        })
+    }
+}
+
+impl DesktopRuntimeEffectStatus {
+    fn accepted(receipt: DesktopRuntimeEffectReceipt) -> Self {
+        Self {
+            receipt,
+            state: DesktopRuntimeEffectState::Accepted,
+            issue: None,
+            workflow_receipt: None,
+            restore_preflight: None,
+        }
+    }
+
+    fn completed(
+        receipt: DesktopRuntimeEffectReceipt,
+        workflow_receipt: Option<DesktopRuntimeWorkflowReceipt>,
+        restore_preflight: Option<DesktopRuntimeRestorePreflightReceipt>,
+    ) -> Self {
+        Self {
+            receipt,
+            state: DesktopRuntimeEffectState::Completed,
+            issue: None,
+            workflow_receipt,
+            restore_preflight,
+        }
+    }
+
+    fn failed(receipt: DesktopRuntimeEffectReceipt, issue: DesktopRuntimeIssue) -> Self {
+        Self {
+            receipt,
+            state: DesktopRuntimeEffectState::Failed,
+            issue: Some(issue),
+            workflow_receipt: None,
+            restore_preflight: None,
+        }
+    }
+}
+
+impl From<StorageStatusReceipt> for DesktopRuntimeStorageDiagnostics {
     fn from(receipt: StorageStatusReceipt) -> Self {
         Self {
             storage_kind: serialized_label(&receipt.storage),
-            paths: receipt.paths.as_ref().map(AppSdkStoragePaths::from),
-            event_store: AppSdkEventStoreDiagnostics {
+            paths: receipt.paths.as_ref().map(DesktopRuntimeStoragePaths::from),
+            event_store: DesktopRuntimeEventStoreDiagnostics {
                 store: receipt.event_store.store.into(),
                 total_events: receipt.event_store.total_events,
                 projection_eligible_events: receipt.event_store.projection_eligible_events,
@@ -827,7 +927,7 @@ impl From<StorageStatusReceipt> for AppSdkStorageDiagnostics {
                 last_event_seq: receipt.event_store.last_event_seq,
                 last_event_updated_at_ms: receipt.event_store.last_event_updated_at_ms,
             },
-            outbox: AppSdkOutboxDiagnostics {
+            outbox: DesktopRuntimeOutboxDiagnostics {
                 store: receipt.outbox.store.into(),
                 total_events: receipt.outbox.total_events,
                 pending_events: receipt.outbox.pending_events,
@@ -843,7 +943,7 @@ impl From<StorageStatusReceipt> for AppSdkStorageDiagnostics {
     }
 }
 
-impl From<radroots_sdk::SdkSqliteStoreStatus> for AppSdkSqliteStoreDiagnostics {
+impl From<radroots_sdk::SdkSqliteStoreStatus> for DesktopRuntimeSqliteStoreDiagnostics {
     fn from(status: radroots_sdk::SdkSqliteStoreStatus) -> Self {
         Self {
             schema_version: status.schema_version,
@@ -856,7 +956,7 @@ impl From<radroots_sdk::SdkSqliteStoreStatus> for AppSdkSqliteStoreDiagnostics {
     }
 }
 
-impl From<IntegrityReceipt> for AppSdkIntegrityDiagnostics {
+impl From<IntegrityReceipt> for DesktopRuntimeIntegrityDiagnostics {
     fn from(receipt: IntegrityReceipt) -> Self {
         Self {
             checked_paths: receipt.checked_paths,
@@ -868,19 +968,19 @@ impl From<IntegrityReceipt> for AppSdkIntegrityDiagnostics {
     }
 }
 
-impl From<SyncStatusReceipt> for AppSdkSyncDiagnostics {
+impl From<SyncStatusReceipt> for DesktopRuntimeSyncDiagnostics {
     fn from(receipt: SyncStatusReceipt) -> Self {
         Self {
             source: serialized_label(&receipt.source),
             observed_at_ms: receipt.observed_at_ms,
-            event_store: AppSdkSyncEventStoreDiagnostics {
+            event_store: DesktopRuntimeSyncEventStoreDiagnostics {
                 total_events: receipt.event_store.total_events,
                 projection_eligible_events: receipt.event_store.projection_eligible_events,
                 transport_observations: receipt.event_store.transport_observations,
                 last_event_seq: receipt.event_store.last_event_seq,
                 last_event_updated_at_ms: receipt.event_store.last_event_updated_at_ms,
             },
-            outbox: AppSdkSyncOutboxDiagnostics {
+            outbox: DesktopRuntimeSyncOutboxDiagnostics {
                 total_events: receipt.outbox.total_events,
                 pending_events: receipt.outbox.pending_events,
                 retryable_events: receipt.outbox.retryable_events,
@@ -891,7 +991,7 @@ impl From<SyncStatusReceipt> for AppSdkSyncDiagnostics {
                 last_attempt_at_ms: receipt.outbox.last_attempt_at_ms,
                 last_error: receipt.outbox.last_error,
             },
-            transport_targets: AppSdkSyncTransportTargetDiagnostics {
+            transport_targets: DesktopRuntimeSyncTransportTargetDiagnostics {
                 configured_count: receipt.transport_profile.configured_transport_target_count,
                 configured_targets: receipt
                     .transport_profile
@@ -904,7 +1004,7 @@ impl From<SyncStatusReceipt> for AppSdkSyncDiagnostics {
     }
 }
 
-impl From<SdkBackupVerification> for AppSdkBackupVerificationDiagnostics {
+impl From<SdkBackupVerification> for DesktopRuntimeBackupVerificationDiagnostics {
     fn from(verification: SdkBackupVerification) -> Self {
         Self {
             event_store_ok: verification.event_store_ok,
@@ -915,11 +1015,11 @@ impl From<SdkBackupVerification> for AppSdkBackupVerificationDiagnostics {
     }
 }
 
-impl AppSdkRestorePreflightReceipt {
+impl DesktopRuntimeRestorePreflightReceipt {
     fn from_restore_receipt(
         receipt: RestoreReceipt,
         destination: PathBuf,
-        projection_lifecycle: AppSdkProjectionLifecycleStatus,
+        projection_lifecycle: DesktopRuntimeProjectionLifecycleStatus,
     ) -> Self {
         Self {
             source: receipt.source,
@@ -928,11 +1028,11 @@ impl AppSdkRestorePreflightReceipt {
             destination_paths: receipt
                 .destination_paths
                 .as_ref()
-                .map(AppSdkStoragePaths::from),
+                .map(DesktopRuntimeStoragePaths::from),
             restored_paths: receipt
                 .restored_paths
                 .as_ref()
-                .map(AppSdkStoragePaths::from),
+                .map(DesktopRuntimeStoragePaths::from),
             runtime_path: receipt.runtime_path,
             private_path: receipt.private_path,
             studio_path: receipt.studio_path,
@@ -944,27 +1044,29 @@ impl AppSdkRestorePreflightReceipt {
     }
 }
 
-pub fn app_sdk_storage_root_from_data_root(data_root: &Path) -> PathBuf {
-    data_root.join(APP_SDK_STORAGE_DIR_NAME)
+pub fn desktop_runtime_storage_root_from_data_root(data_root: &Path) -> PathBuf {
+    data_root.join(DESKTOP_RUNTIME_STORAGE_DIR_NAME)
 }
 
-fn app_sdk_relay_url_policy(relay_urls: &[String]) -> AppSdkRelayUrlPolicy {
+fn desktop_runtime_relay_url_policy(relay_urls: &[String]) -> DesktopRuntimeRelayUrlPolicy {
     if relay_urls
         .iter()
         .any(|relay_url| relay_url.trim().to_ascii_lowercase().starts_with("ws://"))
     {
-        AppSdkRelayUrlPolicy::Localhost
+        DesktopRuntimeRelayUrlPolicy::Localhost
     } else {
-        AppSdkRelayUrlPolicy::Public
+        DesktopRuntimeRelayUrlPolicy::Public
     }
 }
 
-fn run_app_sdk_worker(
-    config: AppSdkConfig,
-    shared: Arc<AppSdkRuntimeShared>,
-    command_receiver: Receiver<AppSdkWorkerCommand>,
+fn run_desktop_runtime_worker(
+    config: DesktopRuntimeSupervisorConfig,
+    shared: Arc<DesktopRuntimeSupervisorShared>,
+    command_receiver: Receiver<DesktopRuntimeEffect>,
 ) {
-    let runtime = match TokioRuntimeBuilder::new_current_thread()
+    let runtime = match TokioRuntimeBuilder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("radroots-desktop-runtime-supervisor-async")
         .enable_all()
         .build()
     {
@@ -972,11 +1074,12 @@ fn run_app_sdk_worker(
         Err(error) => {
             replace_status(
                 &shared,
-                AppSdkRuntimeStatus::from_config(
+                DesktopRuntimeSnapshot::from_config(
                     &config,
-                    AppSdkLifecycleState::Degraded,
+                    DesktopRuntimeLifecycleState::Degraded,
+                    Some(vec![DesktopRuntimeStartupMilestone::ShellReady]),
                     None,
-                    Some(AppSdkRuntimeIssue::runtime_error(
+                    Some(DesktopRuntimeIssue::runtime_error(
                         "tokio_runtime_init",
                         error.to_string(),
                     )),
@@ -989,115 +1092,81 @@ fn run_app_sdk_worker(
 
     let mut sdk = match runtime.block_on(build_sdk_runtime(&config)) {
         Ok(sdk) => {
-            replace_status(
-                &shared,
-                AppSdkRuntimeStatus::from_config(
-                    &config,
-                    AppSdkLifecycleState::Ready,
-                    sdk.storage_paths().map(AppSdkStoragePaths::from),
-                    None,
-                ),
+            let storage_paths = sdk.storage_paths().map(DesktopRuntimeStoragePaths::from);
+            let mut ready_status = DesktopRuntimeSnapshot::from_config(
+                &config,
+                DesktopRuntimeLifecycleState::Ready,
+                Some(ready_startup_milestones(&config, storage_paths.as_ref())),
+                storage_paths,
+                None,
             );
+            match block_on_sdk_result(
+                &runtime,
+                "desktop_runtime_initial_diagnostics",
+                collect_sdk_diagnostics(&sdk, ready_status.clone()),
+            ) {
+                Ok(diagnostics) => {
+                    ready_status.storage_diagnostics = Some(diagnostics.storage);
+                    ready_status.integrity_diagnostics = Some(diagnostics.integrity);
+                    ready_status.sync_diagnostics = Some(diagnostics.sync);
+                }
+                Err(error) => {
+                    ready_status.state = DesktopRuntimeLifecycleState::Degraded;
+                    ready_status.last_issue = Some(error);
+                }
+            }
+            replace_status(&shared, ready_status);
             Some(sdk)
         }
         Err(error) => {
             replace_status(
                 &shared,
-                AppSdkRuntimeStatus::from_config(
+                DesktopRuntimeSnapshot::from_config(
                     &config,
-                    AppSdkLifecycleState::Degraded,
+                    DesktopRuntimeLifecycleState::Degraded,
+                    Some(vec![DesktopRuntimeStartupMilestone::ShellReady]),
                     None,
-                    Some(AppSdkRuntimeIssue::from_sdk_error(&error)),
+                    Some(DesktopRuntimeIssue::from_sdk_error(&error)),
                 ),
             );
             None
         }
     };
 
-    while let Ok(command) = command_receiver.recv() {
+    loop {
         if shared.shutdown_requested.load(Ordering::SeqCst) {
             break;
         }
 
+        let command = match command_receiver.try_recv() {
+            Ok(command) => command,
+            Err(TryRecvError::Empty) => {
+                thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+            Err(TryRecvError::Disconnected) => break,
+        };
+
         match command {
-            AppSdkWorkerCommand::StorageStatus(response_sender) => {
+            DesktopRuntimeEffect::RefreshDiagnostics(receipt) => {
                 let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
                     Err(issue)
                 } else {
                     match sdk.as_ref() {
-                        Some(sdk) => runtime
-                            .block_on(sdk.storage_status(StorageStatusRequest::new()))
-                            .map(AppSdkStorageDiagnostics::from)
-                            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error)),
+                        Some(sdk) => refresh_supervisor_diagnostics(&runtime, &shared, sdk),
                         None => Err(runtime_unavailable_issue(&shared)),
                     }
                 };
-                send_worker_result(&shared, response_sender, result);
+                finish_effect_result(&shared, receipt, result.map(|()| None));
             }
-            AppSdkWorkerCommand::IntegrityStatus(response_sender) => {
-                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
-                    Err(issue)
-                } else {
-                    match sdk.as_ref() {
-                        Some(sdk) => runtime
-                            .block_on(sdk.integrity(IntegrityRequest::new()))
-                            .map(AppSdkIntegrityDiagnostics::from)
-                            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error)),
-                        None => Err(runtime_unavailable_issue(&shared)),
-                    }
-                };
-                send_worker_result(&shared, response_sender, result);
-            }
-            AppSdkWorkerCommand::SyncStatus(response_sender) => {
-                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
-                    Err(issue)
-                } else {
-                    match sdk.as_ref() {
-                        Some(sdk) => runtime
-                            .block_on(sdk.sync().status(SyncStatusRequest::new()))
-                            .map(AppSdkSyncDiagnostics::from)
-                            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error)),
-                        None => Err(runtime_unavailable_issue(&shared)),
-                    }
-                };
-                send_worker_result(&shared, response_sender, result);
-            }
-            AppSdkWorkerCommand::Diagnostics(response_sender) => {
-                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
-                    Err(issue)
-                } else {
-                    match sdk.as_ref() {
-                        Some(sdk) => {
-                            let mut runtime_status = lock_status(&shared).clone();
-                            runtime_status.last_issue = None;
-                            runtime
-                                .block_on(collect_sdk_diagnostics(sdk, runtime_status))
-                                .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))
-                        }
-                        None => Err(runtime_unavailable_issue(&shared)),
-                    }
-                };
-                send_worker_result(&shared, response_sender, result);
-            }
-            AppSdkWorkerCommand::RestorePreflight(request, response_sender) => {
+            DesktopRuntimeEffect::RestorePreflight(receipt, request) => {
                 let result = match sdk.as_ref() {
                     Some(_) => run_restore_preflight(&runtime, &shared, &config, request),
                     None => Err(runtime_unavailable_issue(&shared)),
                 };
-                send_worker_result(&shared, response_sender, result);
+                finish_restore_preflight_result(&shared, receipt, result);
             }
-            AppSdkWorkerCommand::FarmPublicLocation(request, response_sender) => {
-                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
-                    Err(issue)
-                } else {
-                    match sdk.as_ref() {
-                        Some(sdk) => farm_public_location_with_sdk(&runtime, sdk, request),
-                        None => Err(runtime_unavailable_issue(&shared)),
-                    }
-                };
-                send_worker_result(&shared, response_sender, result);
-            }
-            AppSdkWorkerCommand::EnqueueFarmPublish(request, response_sender) => {
+            DesktopRuntimeEffect::EnqueueFarmPublish(receipt, request) => {
                 let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
                     Err(issue)
                 } else {
@@ -1106,9 +1175,9 @@ fn run_app_sdk_worker(
                         None => Err(runtime_unavailable_issue(&shared)),
                     }
                 };
-                send_worker_result(&shared, response_sender, result);
+                finish_workflow_result(&shared, receipt, result);
             }
-            AppSdkWorkerCommand::EnqueueListingPublish(request, response_sender) => {
+            DesktopRuntimeEffect::EnqueueListingPublish(receipt, request) => {
                 let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
                     Err(issue)
                 } else {
@@ -1117,9 +1186,9 @@ fn run_app_sdk_worker(
                         None => Err(runtime_unavailable_issue(&shared)),
                     }
                 };
-                send_worker_result(&shared, response_sender, result);
+                finish_workflow_result(&shared, receipt, result);
             }
-            AppSdkWorkerCommand::TradePropose(request, response_sender) => {
+            DesktopRuntimeEffect::TradePropose(receipt, request) => {
                 let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
                     Err(issue)
                 } else {
@@ -1128,9 +1197,9 @@ fn run_app_sdk_worker(
                         None => Err(runtime_unavailable_issue(&shared)),
                     }
                 };
-                send_worker_result(&shared, response_sender, result);
+                finish_workflow_result(&shared, receipt, result);
             }
-            AppSdkWorkerCommand::TradeDecision(request, response_sender) => {
+            DesktopRuntimeEffect::TradeDecision(receipt, request) => {
                 let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
                     Err(issue)
                 } else {
@@ -1139,9 +1208,9 @@ fn run_app_sdk_worker(
                         None => Err(runtime_unavailable_issue(&shared)),
                     }
                 };
-                send_worker_result(&shared, response_sender, result);
+                finish_workflow_result(&shared, receipt, result);
             }
-            AppSdkWorkerCommand::TradeCancellation(request, response_sender) => {
+            DesktopRuntimeEffect::TradeCancellation(receipt, request) => {
                 let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
                     Err(issue)
                 } else {
@@ -1150,142 +1219,70 @@ fn run_app_sdk_worker(
                         None => Err(runtime_unavailable_issue(&shared)),
                     }
                 };
-                send_worker_result(&shared, response_sender, result);
+                finish_workflow_result(&shared, receipt, result);
             }
-            AppSdkWorkerCommand::BeginProjectionRebuild(response_sender) => {
+            DesktopRuntimeEffect::BeginProjectionRebuild(receipt) => {
                 let result = match sdk.as_ref() {
                     Some(_) => Ok(begin_projection_rebuild(&shared)),
                     None => Err(runtime_unavailable_issue(&shared)),
                 };
-                send_worker_result(&shared, response_sender, result);
+                finish_projection_result(&shared, receipt, result);
             }
-            AppSdkWorkerCommand::CompleteProjectionRebuild(response_sender) => {
+            DesktopRuntimeEffect::CompleteProjectionRebuild(receipt) => {
                 let result = match sdk.as_ref() {
                     Some(_) => complete_projection_rebuild(&shared),
                     None => Err(runtime_unavailable_issue(&shared)),
                 };
-                send_worker_result(&shared, response_sender, result);
+                finish_projection_result(&shared, receipt, result);
             }
         }
     }
 
     drop(sdk.take());
-    transition_status_state(&shared, AppSdkLifecycleState::Stopped);
+    transition_status_state(&shared, DesktopRuntimeLifecycleState::Stopped);
 }
 
 fn run_degraded_worker(
-    config: AppSdkConfig,
-    shared: Arc<AppSdkRuntimeShared>,
-    command_receiver: Receiver<AppSdkWorkerCommand>,
+    config: DesktopRuntimeSupervisorConfig,
+    shared: Arc<DesktopRuntimeSupervisorShared>,
+    command_receiver: Receiver<DesktopRuntimeEffect>,
 ) {
-    while let Ok(command) = command_receiver.recv() {
+    loop {
         if shared.shutdown_requested.load(Ordering::SeqCst) {
             break;
         }
 
-        match command {
-            AppSdkWorkerCommand::StorageStatus(response_sender) => {
-                send_worker_result(
-                    &shared,
-                    response_sender,
-                    Err(runtime_unavailable_issue(&shared)),
-                );
+        let command = match command_receiver.try_recv() {
+            Ok(command) => command,
+            Err(TryRecvError::Empty) => {
+                thread::sleep(Duration::from_millis(10));
+                continue;
             }
-            AppSdkWorkerCommand::IntegrityStatus(response_sender) => {
-                send_worker_result(
-                    &shared,
-                    response_sender,
-                    Err(runtime_unavailable_issue(&shared)),
-                );
-            }
-            AppSdkWorkerCommand::SyncStatus(response_sender) => {
-                send_worker_result(
-                    &shared,
-                    response_sender,
-                    Err(runtime_unavailable_issue(&shared)),
-                );
-            }
-            AppSdkWorkerCommand::Diagnostics(response_sender) => {
-                send_worker_result(
-                    &shared,
-                    response_sender,
-                    Err(runtime_unavailable_issue(&shared)),
-                );
-            }
-            AppSdkWorkerCommand::RestorePreflight(_, response_sender) => {
-                send_worker_result(
-                    &shared,
-                    response_sender,
-                    Err(runtime_unavailable_issue(&shared)),
-                );
-            }
-            AppSdkWorkerCommand::FarmPublicLocation(_, response_sender) => {
-                send_worker_result(
-                    &shared,
-                    response_sender,
-                    Err(runtime_unavailable_issue(&shared)),
-                );
-            }
-            AppSdkWorkerCommand::EnqueueFarmPublish(_, response_sender) => {
-                send_worker_result(
-                    &shared,
-                    response_sender,
-                    Err(runtime_unavailable_issue(&shared)),
-                );
-            }
-            AppSdkWorkerCommand::EnqueueListingPublish(_, response_sender) => {
-                send_worker_result(
-                    &shared,
-                    response_sender,
-                    Err(runtime_unavailable_issue(&shared)),
-                );
-            }
-            AppSdkWorkerCommand::TradePropose(_, response_sender) => {
-                send_worker_result(
-                    &shared,
-                    response_sender,
-                    Err(runtime_unavailable_issue(&shared)),
-                );
-            }
-            AppSdkWorkerCommand::TradeDecision(_, response_sender) => {
-                send_worker_result(
-                    &shared,
-                    response_sender,
-                    Err(runtime_unavailable_issue(&shared)),
-                );
-            }
-            AppSdkWorkerCommand::TradeCancellation(_, response_sender) => {
-                send_worker_result(
-                    &shared,
-                    response_sender,
-                    Err(runtime_unavailable_issue(&shared)),
-                );
-            }
-            AppSdkWorkerCommand::BeginProjectionRebuild(response_sender) => {
-                send_worker_result(
-                    &shared,
-                    response_sender,
-                    Err(runtime_unavailable_issue(&shared)),
-                );
-            }
-            AppSdkWorkerCommand::CompleteProjectionRebuild(response_sender) => {
-                send_worker_result(
-                    &shared,
-                    response_sender,
-                    Err(runtime_unavailable_issue(&shared)),
-                );
-            }
-        }
+            Err(TryRecvError::Disconnected) => break,
+        };
+        set_effect_failed(
+            &shared,
+            effect_receipt(&command),
+            runtime_unavailable_issue(&shared),
+        );
     }
 
     let last_issue = lock_status(&shared).last_issue.clone();
     replace_status(
         &shared,
-        AppSdkRuntimeStatus::from_config(&config, AppSdkLifecycleState::Stopped, None, last_issue),
+        DesktopRuntimeSnapshot::from_config(
+            &config,
+            DesktopRuntimeLifecycleState::Stopped,
+            Some(vec![DesktopRuntimeStartupMilestone::ShellReady]),
+            None,
+            last_issue,
+        ),
     );
 }
 
-async fn build_sdk_runtime(config: &AppSdkConfig) -> Result<RadrootsClient, RadrootsSdkError> {
+async fn build_sdk_runtime(
+    config: &DesktopRuntimeSupervisorConfig,
+) -> Result<RadrootsClient, RadrootsSdkError> {
     RadrootsClient::builder()
         .directory_storage(config.storage_root.clone())
         .transport_profile(app_transport_profile(config)?)
@@ -1294,26 +1291,28 @@ async fn build_sdk_runtime(config: &AppSdkConfig) -> Result<RadrootsClient, Radr
 }
 
 async fn build_sdk_runtime_with_signer(
-    config: &AppSdkConfig,
-    keys: RadrootsNostrKeys,
-) -> Result<RadrootsClient, AppSdkRuntimeIssue> {
-    let local_signer = RadrootsLocalEventSigner::new(keys).map_err(|error| {
-        AppSdkRuntimeIssue::runtime_error("sdk_signer_init_failed", error.to_string())
+    config: &DesktopRuntimeSupervisorConfig,
+    signer: DesktopRuntimeLocalSigner,
+) -> Result<RadrootsClient, DesktopRuntimeIssue> {
+    let local_signer = RadrootsLocalEventSigner::new(signer.into_keys()).map_err(|error| {
+        DesktopRuntimeIssue::runtime_error("sdk_signer_init_failed", error.to_string())
     })?;
     let signer = RadrootsSdkLocalKeySigner::from_event_signer(local_signer)
-        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+        .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?;
     let transport_profile = app_transport_profile(config)
-        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+        .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?;
     RadrootsClient::builder()
         .directory_storage(config.storage_root.clone())
         .transport_profile(transport_profile)
         .signer_provider(RadrootsSdkSignerProvider::LocalKey(signer))
         .build()
         .await
-        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))
+        .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))
 }
 
-fn app_transport_profile(config: &AppSdkConfig) -> Result<TransportProfile, RadrootsSdkError> {
+fn app_transport_profile(
+    config: &DesktopRuntimeSupervisorConfig,
+) -> Result<TransportProfile, RadrootsSdkError> {
     if config.relay_urls.is_empty() {
         return Ok(TransportProfile::local_only());
     }
@@ -1344,52 +1343,96 @@ fn app_trade_privacy_confirmation(confirm_public_note: bool) -> PrivacyPreflight
     }
 }
 
+fn block_on_sdk_result<T>(
+    runtime: &tokio::runtime::Runtime,
+    operation: &'static str,
+    future: impl Future<Output = Result<T, RadrootsSdkError>>,
+) -> Result<T, DesktopRuntimeIssue> {
+    match runtime.block_on(async {
+        tokio::time::timeout(
+            Duration::from_millis(DESKTOP_RUNTIME_SDK_EFFECT_TIMEOUT_MS),
+            future,
+        )
+        .await
+    }) {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(error)) => Err(DesktopRuntimeIssue::from_sdk_error(&error)),
+        Err(_) => Err(sdk_effect_timeout_issue(operation)),
+    }
+}
+
+fn block_on_desktop_result<T>(
+    runtime: &tokio::runtime::Runtime,
+    operation: &'static str,
+    future: impl Future<Output = Result<T, DesktopRuntimeIssue>>,
+) -> Result<T, DesktopRuntimeIssue> {
+    match runtime.block_on(async {
+        tokio::time::timeout(
+            Duration::from_millis(DESKTOP_RUNTIME_SDK_EFFECT_TIMEOUT_MS),
+            future,
+        )
+        .await
+    }) {
+        Ok(result) => result,
+        Err(_) => Err(sdk_effect_timeout_issue(operation)),
+    }
+}
+
+fn sdk_effect_timeout_issue(operation: &'static str) -> DesktopRuntimeIssue {
+    DesktopRuntimeIssue::runtime_error(
+        "desktop_runtime_sdk_effect_timeout",
+        format!("{operation} did not complete within {DESKTOP_RUNTIME_SDK_EFFECT_TIMEOUT_MS} ms"),
+    )
+}
+
 fn run_restore_preflight(
     runtime: &tokio::runtime::Runtime,
-    shared: &AppSdkRuntimeShared,
-    config: &AppSdkConfig,
-    request: AppSdkRestorePreflightRequest,
-) -> Result<AppSdkRestorePreflightReceipt, AppSdkRuntimeIssue> {
+    shared: &DesktopRuntimeSupervisorShared,
+    config: &DesktopRuntimeSupervisorConfig,
+    request: DesktopRuntimeRestorePreflightRequest,
+) -> Result<DesktopRuntimeRestorePreflightReceipt, DesktopRuntimeIssue> {
     if let Some(issue) = lifecycle_busy_issue(shared) {
         return Err(issue);
     }
-    transition_status_state(shared, AppSdkLifecycleState::Pausing);
-    transition_status_state(shared, AppSdkLifecycleState::Paused);
-    transition_status_state(shared, AppSdkLifecycleState::Restoring);
+    transition_status_state(shared, DesktopRuntimeLifecycleState::Pausing);
+    transition_status_state(shared, DesktopRuntimeLifecycleState::Paused);
+    transition_status_state(shared, DesktopRuntimeLifecycleState::Restoring);
 
     let restore_request = RestoreRequest::new(request.source.clone())
         .with_destination(config.storage_root.clone())
         .with_overwrite(request.overwrite_existing_sdk_storage)
         .dry_run();
-    let result = runtime
-        .block_on(RadrootsClient::restore(restore_request))
-        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))
-        .map(|receipt| {
-            let projection_lifecycle = mark_projections_stale(
-                shared,
-                "sdk_restore_preflight",
-                Some(request.source.clone()),
-            );
-            AppSdkRestorePreflightReceipt::from_restore_receipt(
-                receipt,
-                config.storage_root.clone(),
-                projection_lifecycle,
-            )
-        });
+    let result = block_on_sdk_result(
+        runtime,
+        "desktop_runtime_restore_preflight",
+        RadrootsClient::restore(restore_request),
+    )
+    .map(|receipt| {
+        let projection_lifecycle = mark_projections_stale(
+            shared,
+            "sdk_restore_preflight",
+            Some(request.source.clone()),
+        );
+        DesktopRuntimeRestorePreflightReceipt::from_restore_receipt(
+            receipt,
+            config.storage_root.clone(),
+            projection_lifecycle,
+        )
+    });
     if result.is_err() {
-        transition_status_state(shared, AppSdkLifecycleState::Ready);
+        transition_status_state(shared, DesktopRuntimeLifecycleState::Ready);
     }
     result
 }
 
 async fn collect_sdk_diagnostics(
     sdk: &RadrootsClient,
-    runtime: AppSdkRuntimeStatus,
-) -> Result<AppSdkDiagnostics, RadrootsSdkError> {
+    runtime: DesktopRuntimeSnapshot,
+) -> Result<DesktopRuntimeDiagnostics, RadrootsSdkError> {
     let storage = sdk.storage_status(StorageStatusRequest::new()).await?;
     let integrity = sdk.integrity(IntegrityRequest::new()).await?;
     let sync = sdk.sync().status(SyncStatusRequest::new()).await?;
-    Ok(AppSdkDiagnostics {
+    Ok(DesktopRuntimeDiagnostics {
         runtime,
         storage: storage.into(),
         integrity: integrity.into(),
@@ -1400,91 +1443,124 @@ async fn collect_sdk_diagnostics(
 fn farm_public_location_with_sdk(
     runtime: &tokio::runtime::Runtime,
     sdk: &RadrootsClient,
-    request: AppSdkFarmPublicLocationRequest,
-) -> Result<Option<AppSdkPublicFarmLocation>, AppSdkRuntimeIssue> {
+    request: DesktopRuntimeFarmPublicLocationRequest,
+) -> Result<Option<DesktopRuntimePublicFarmLocation>, DesktopRuntimeIssue> {
     let farm_addr = RadrootsAddressableCoordinate::parse(format!(
         "{KIND_FARM}:{}:{}",
         request.actor_pubkey, request.farm_d_tag
     ))
     .map_err(|error| {
-        AppSdkRuntimeIssue::from_sdk_error(&RadrootsSdkError::InvalidRequest {
+        DesktopRuntimeIssue::from_sdk_error(&RadrootsSdkError::InvalidRequest {
             message: format!("farm public location address is invalid: {error}"),
         })
     })?;
-    runtime
-        .block_on(sdk.farms().private_location(&farm_addr))
-        .map(|location| location.map(|receipt| receipt.public_locality.into()))
-        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))
+    block_on_sdk_result(
+        runtime,
+        "desktop_runtime_farm_public_location",
+        sdk.farms().private_location(&farm_addr),
+    )
+    .map(|location| location.map(|receipt| receipt.public_locality.into()))
 }
 
 fn enqueue_farm_publish_with_sdk(
     runtime: &tokio::runtime::Runtime,
     sdk: &RadrootsClient,
-    request: AppSdkFarmPublishRequest,
-) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+    request: DesktopRuntimeFarmPublishRequest,
+) -> Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue> {
     let actor = sdk_actor_context(
         request.actor_pubkey.as_str(),
         request.actor_account_id.as_str(),
         RadrootsActorRole::Farmer,
     )?;
-    let signer = sdk_local_signer(request.signer_keys)?;
+    let signer = sdk_local_signer(request.signer)?;
     let target_relays = sdk_transport_targets(request.target_relays, request.relay_url_policy)?;
-    let mut enqueue = FarmEnqueuePublishRequest::new(actor, request.farm, target_relays);
+    let mut farm = request.farm;
+    if farm.location.is_none() {
+        let public_location = farm_public_location_with_sdk(
+            runtime,
+            sdk,
+            DesktopRuntimeFarmPublicLocationRequest {
+                actor_pubkey: request.actor_pubkey.clone(),
+                farm_d_tag: farm.d_tag.clone(),
+            },
+        )?;
+        farm.location = public_location.map(desktop_runtime_public_farm_location_to_protocol);
+    }
+    let mut enqueue = FarmEnqueuePublishRequest::new(actor, farm, target_relays);
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
         enqueue = enqueue
             .try_with_idempotency_key(idempotency_key)
-            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+            .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?;
     }
-    let receipt = runtime
-        .block_on(
-            sdk.farms()
-                .enqueue_publish_with_explicit_signer(enqueue, &signer),
-        )
-        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
-    Ok(app_sdk_farm_receipt(receipt, request.actor_pubkey))
+    let receipt = block_on_sdk_result(
+        runtime,
+        "desktop_runtime_farm_publish",
+        sdk.farms()
+            .enqueue_publish_with_explicit_signer(enqueue, &signer),
+    )?;
+    Ok(desktop_runtime_farm_receipt(receipt, request.actor_pubkey))
 }
 
 fn enqueue_listing_publish_with_sdk(
     runtime: &tokio::runtime::Runtime,
     sdk: &RadrootsClient,
-    request: AppSdkListingPublishRequest,
-) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+    request: DesktopRuntimeListingPublishRequest,
+) -> Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue> {
     let actor = sdk_actor_context(
         request.actor_pubkey.as_str(),
         request.actor_account_id.as_str(),
         RadrootsActorRole::Seller,
     )?;
-    let signer = sdk_local_signer(request.signer_keys)?;
+    let signer = sdk_local_signer(request.signer)?;
     let target_relays = sdk_transport_targets(request.target_relays, request.relay_url_policy)?;
-    let mut enqueue = ListingEnqueuePublishRequest::new(actor, request.listing, target_relays);
+    let mut listing = request.listing;
+    if listing.location.is_none() {
+        let public_location = farm_public_location_with_sdk(
+            runtime,
+            sdk,
+            DesktopRuntimeFarmPublicLocationRequest {
+                actor_pubkey: listing.farm.pubkey.clone(),
+                farm_d_tag: listing.farm.d_tag.clone(),
+            },
+        )?;
+        listing.location = public_location.map(desktop_runtime_public_listing_location_to_protocol);
+    }
+    let mut enqueue = ListingEnqueuePublishRequest::new(actor, listing, target_relays);
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
         enqueue = enqueue
             .try_with_idempotency_key(idempotency_key)
-            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+            .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?;
     }
-    let receipt = runtime
-        .block_on(
-            sdk.listings()
-                .enqueue_publish_with_explicit_signer(enqueue, &signer),
-        )
-        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
-    Ok(app_sdk_listing_receipt(receipt, request.actor_pubkey))
+    let receipt = block_on_sdk_result(
+        runtime,
+        "desktop_runtime_listing_publish",
+        sdk.listings()
+            .enqueue_publish_with_explicit_signer(enqueue, &signer),
+    )?;
+    Ok(desktop_runtime_listing_receipt(
+        receipt,
+        request.actor_pubkey,
+    ))
 }
 
 fn trade_propose_with_sdk(
     runtime: &tokio::runtime::Runtime,
-    config: &AppSdkConfig,
-    request: AppSdkTradeProposeRequest,
-) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+    config: &DesktopRuntimeSupervisorConfig,
+    request: DesktopRuntimeTradeProposeRequest,
+) -> Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue> {
     let actor = sdk_actor_context(
         request.actor_pubkey.as_str(),
         request.actor_account_id.as_str(),
         RadrootsActorRole::Buyer,
     )?;
-    let sdk = runtime.block_on(build_sdk_runtime_with_signer(config, request.signer_keys))?;
+    let sdk = block_on_desktop_result(
+        runtime,
+        "desktop_runtime_trade_propose_build",
+        build_sdk_runtime_with_signer(config, request.signer),
+    )?;
     let buyer_pubkey =
         RadrootsPublicKey::parse(request.actor_pubkey.as_str()).map_err(|error| {
-            AppSdkRuntimeIssue::from_sdk_error(&RadrootsSdkError::InvalidRequest {
+            DesktopRuntimeIssue::from_sdk_error(&RadrootsSdkError::InvalidRequest {
                 message: format!("trade proposal buyer public key is invalid: {error}"),
             })
         })?;
@@ -1509,29 +1585,35 @@ fn trade_propose_with_sdk(
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
         sdk_request = sdk_request
             .try_with_idempotency_key(idempotency_key)
-            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+            .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?;
     }
-    let outcome = runtime
-        .block_on(sdk.trades().buyer().propose_trade(sdk_request))
-        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
-    app_sdk_trade_propose_receipt(outcome, request.actor_pubkey)
+    let outcome = block_on_sdk_result(
+        runtime,
+        "desktop_runtime_trade_propose",
+        sdk.trades().buyer().propose_trade(sdk_request),
+    )?;
+    desktop_runtime_trade_propose_receipt(outcome, request.actor_pubkey)
 }
 
 fn trade_decision_with_sdk(
     runtime: &tokio::runtime::Runtime,
-    config: &AppSdkConfig,
-    request: AppSdkTradeDecisionRequest,
-) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+    config: &DesktopRuntimeSupervisorConfig,
+    request: DesktopRuntimeTradeDecisionRequest,
+) -> Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue> {
     let actor = sdk_actor_context(
         request.actor_pubkey.as_str(),
         request.actor_account_id.as_str(),
         RadrootsActorRole::Seller,
     )?;
-    let sdk = runtime.block_on(build_sdk_runtime_with_signer(config, request.signer_keys))?;
+    let sdk = block_on_desktop_result(
+        runtime,
+        "desktop_runtime_trade_decision_build",
+        build_sdk_runtime_with_signer(config, request.signer),
+    )?;
     let publish_mode = app_trade_publish_mode();
     let satisfaction_policy = app_trade_satisfaction_policy();
     let outcome = match request.decision {
-        AppSdkTradeDecision::Accept {
+        DesktopRuntimeTradeDecision::Accept {
             inventory_commitments,
         } => {
             let mut sdk_request = TradeAcceptRequest::new(
@@ -1547,13 +1629,15 @@ fn trade_decision_with_sdk(
             if let Some(idempotency_key) = request.idempotency_key.as_deref() {
                 sdk_request = sdk_request
                     .try_with_idempotency_key(idempotency_key)
-                    .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+                    .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?;
             }
-            runtime
-                .block_on(sdk.trades().seller().accept_trade(sdk_request))
-                .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?
+            block_on_sdk_result(
+                runtime,
+                "desktop_runtime_trade_accept",
+                sdk.trades().seller().accept_trade(sdk_request),
+            )?
         }
-        AppSdkTradeDecision::Decline { reason } => {
+        DesktopRuntimeTradeDecision::Decline { reason } => {
             let mut sdk_request = TradeDeclineRequest::new(
                 actor,
                 request.locator,
@@ -1567,27 +1651,33 @@ fn trade_decision_with_sdk(
             if let Some(idempotency_key) = request.idempotency_key.as_deref() {
                 sdk_request = sdk_request
                     .try_with_idempotency_key(idempotency_key)
-                    .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+                    .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?;
             }
-            runtime
-                .block_on(sdk.trades().seller().decline_trade(sdk_request))
-                .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?
+            block_on_sdk_result(
+                runtime,
+                "desktop_runtime_trade_decline",
+                sdk.trades().seller().decline_trade(sdk_request),
+            )?
         }
     };
-    app_sdk_trade_decision_receipt(outcome, request.actor_pubkey)
+    desktop_runtime_trade_decision_receipt(outcome, request.actor_pubkey)
 }
 
 fn trade_cancel_with_sdk(
     runtime: &tokio::runtime::Runtime,
-    config: &AppSdkConfig,
-    request: AppSdkTradeCancellationRequest,
-) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+    config: &DesktopRuntimeSupervisorConfig,
+    request: DesktopRuntimeTradeCancellationRequest,
+) -> Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue> {
     let actor = sdk_actor_context(
         request.actor_pubkey.as_str(),
         request.actor_account_id.as_str(),
         RadrootsActorRole::Buyer,
     )?;
-    let sdk = runtime.block_on(build_sdk_runtime_with_signer(config, request.signer_keys))?;
+    let sdk = block_on_desktop_result(
+        runtime,
+        "desktop_runtime_trade_cancel_build",
+        build_sdk_runtime_with_signer(config, request.signer),
+    )?;
     let mut sdk_request = TradeCancelRequest::new(
         actor,
         request.locator,
@@ -1601,45 +1691,71 @@ fn trade_cancel_with_sdk(
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
         sdk_request = sdk_request
             .try_with_idempotency_key(idempotency_key)
-            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+            .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?;
     }
-    let outcome = runtime
-        .block_on(sdk.trades().buyer().cancel_trade(sdk_request))
-        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
-    app_sdk_trade_cancellation_receipt(outcome, request.actor_pubkey)
+    let outcome = block_on_sdk_result(
+        runtime,
+        "desktop_runtime_trade_cancel",
+        sdk.trades().buyer().cancel_trade(sdk_request),
+    )?;
+    desktop_runtime_trade_cancellation_receipt(outcome, request.actor_pubkey)
 }
 
 fn sdk_actor_context(
     actor_pubkey: &str,
     actor_account_id: &str,
     role: RadrootsActorRole,
-) -> Result<RadrootsActorContext, AppSdkRuntimeIssue> {
+) -> Result<RadrootsActorContext, DesktopRuntimeIssue> {
     RadrootsActorContext::local_account(actor_pubkey, actor_account_id.to_owned(), [role]).map_err(
-        |error| AppSdkRuntimeIssue::runtime_error("sdk_actor_context_invalid", error.to_string()),
+        |error| DesktopRuntimeIssue::runtime_error("sdk_actor_context_invalid", error.to_string()),
     )
 }
 
 fn sdk_local_signer(
-    keys: RadrootsNostrKeys,
-) -> Result<RadrootsLocalEventSigner, AppSdkRuntimeIssue> {
-    RadrootsLocalEventSigner::new(keys).map_err(|error| {
-        AppSdkRuntimeIssue::runtime_error("sdk_signer_init_failed", error.to_string())
+    signer: DesktopRuntimeLocalSigner,
+) -> Result<RadrootsLocalEventSigner, DesktopRuntimeIssue> {
+    RadrootsLocalEventSigner::new(signer.into_keys()).map_err(|error| {
+        DesktopRuntimeIssue::runtime_error("sdk_signer_init_failed", error.to_string())
     })
+}
+
+fn desktop_runtime_public_farm_location_to_protocol(
+    location: DesktopRuntimePublicFarmLocation,
+) -> RadrootsFarmPublicLocation {
+    RadrootsFarmPublicLocation {
+        primary: location.primary,
+        city: location.city,
+        region: location.region,
+        country: location.country,
+        geohash: location.geohash5,
+    }
+}
+
+fn desktop_runtime_public_listing_location_to_protocol(
+    location: DesktopRuntimePublicFarmLocation,
+) -> RadrootsListingPublicLocation {
+    RadrootsListingPublicLocation {
+        primary: location.primary,
+        city: location.city,
+        region: location.region,
+        country: location.country,
+        geohash: location.geohash5,
+    }
 }
 
 fn sdk_transport_targets(
     relays: Vec<String>,
-    policy: AppSdkRelayUrlPolicy,
-) -> Result<TargetPolicy, AppSdkRuntimeIssue> {
+    policy: DesktopRuntimeRelayUrlPolicy,
+) -> Result<TargetPolicy, DesktopRuntimeIssue> {
     TargetPolicy::try_nostr_relays(relays, policy.into())
-        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))
+        .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))
 }
 
-fn app_sdk_farm_receipt(
+fn desktop_runtime_farm_receipt(
     receipt: FarmEnqueueReceipt,
     actor_pubkey: String,
-) -> AppSdkWorkflowReceipt {
-    AppSdkWorkflowReceipt {
+) -> DesktopRuntimeWorkflowReceipt {
+    DesktopRuntimeWorkflowReceipt {
         operation_kind: FARM_PUBLISH_OPERATION_KIND.to_owned(),
         expected_event_id: receipt.expected_event_id.as_str().to_owned(),
         signed_event_id: receipt.signed_event_id.as_str().to_owned(),
@@ -1651,11 +1767,11 @@ fn app_sdk_farm_receipt(
     }
 }
 
-fn app_sdk_listing_receipt(
+fn desktop_runtime_listing_receipt(
     receipt: ListingEnqueueReceipt,
     actor_pubkey: String,
-) -> AppSdkWorkflowReceipt {
-    AppSdkWorkflowReceipt {
+) -> DesktopRuntimeWorkflowReceipt {
+    DesktopRuntimeWorkflowReceipt {
         operation_kind: LISTING_PUBLISH_OPERATION_KIND.to_owned(),
         expected_event_id: receipt.expected_event_id.as_str().to_owned(),
         signed_event_id: receipt.signed_event_id.as_str().to_owned(),
@@ -1667,13 +1783,13 @@ fn app_sdk_listing_receipt(
     }
 }
 
-fn app_sdk_trade_propose_receipt(
+fn desktop_runtime_trade_propose_receipt(
     outcome: TradeMutationOutcome<TradeSubmitPlan, TradeSubmitReceipt>,
     actor_pubkey: String,
-) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+) -> Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue> {
     match outcome {
         TradeMutationOutcome::Enqueued { receipt }
-        | TradeMutationOutcome::Published { receipt, .. } => Ok(AppSdkWorkflowReceipt {
+        | TradeMutationOutcome::Published { receipt, .. } => Ok(DesktopRuntimeWorkflowReceipt {
             operation_kind: TRADE_SUBMIT_OPERATION_KIND.to_owned(),
             expected_event_id: receipt.expected_event_id.as_str().to_owned(),
             signed_event_id: receipt.signed_event_id.as_str().to_owned(),
@@ -1687,13 +1803,13 @@ fn app_sdk_trade_propose_receipt(
     }
 }
 
-fn app_sdk_trade_decision_receipt(
+fn desktop_runtime_trade_decision_receipt(
     outcome: TradeMutationOutcome<TradeDecisionPlan, TradeDecisionReceipt>,
     actor_pubkey: String,
-) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+) -> Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue> {
     match outcome {
         TradeMutationOutcome::Enqueued { receipt }
-        | TradeMutationOutcome::Published { receipt, .. } => Ok(AppSdkWorkflowReceipt {
+        | TradeMutationOutcome::Published { receipt, .. } => Ok(DesktopRuntimeWorkflowReceipt {
             operation_kind: TRADE_DECISION_OPERATION_KIND.to_owned(),
             expected_event_id: receipt.expected_event_id.as_str().to_owned(),
             signed_event_id: receipt.signed_event_id.as_str().to_owned(),
@@ -1707,13 +1823,13 @@ fn app_sdk_trade_decision_receipt(
     }
 }
 
-fn app_sdk_trade_cancellation_receipt(
+fn desktop_runtime_trade_cancellation_receipt(
     outcome: TradeMutationOutcome<TradeCancellationPlan, TradeCancellationReceipt>,
     actor_pubkey: String,
-) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+) -> Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue> {
     match outcome {
         TradeMutationOutcome::Enqueued { receipt }
-        | TradeMutationOutcome::Published { receipt, .. } => Ok(AppSdkWorkflowReceipt {
+        | TradeMutationOutcome::Published { receipt, .. } => Ok(DesktopRuntimeWorkflowReceipt {
             operation_kind: TRADE_CANCELLATION_OPERATION_KIND.to_owned(),
             expected_event_id: receipt.expected_event_id.as_str().to_owned(),
             signed_event_id: receipt.signed_event_id.as_str().to_owned(),
@@ -1727,8 +1843,8 @@ fn app_sdk_trade_cancellation_receipt(
     }
 }
 
-fn unexpected_trade_dry_run_issue(operation: &'static str) -> AppSdkRuntimeIssue {
-    AppSdkRuntimeIssue::runtime_error(
+fn unexpected_trade_dry_run_issue(operation: &'static str) -> DesktopRuntimeIssue {
+    DesktopRuntimeIssue::runtime_error(
         "sdk_trade_unexpected_dry_run",
         format!("{operation} returned a dry-run plan for an enqueue-only Studio command"),
     )
@@ -1742,106 +1858,258 @@ fn sdk_mutation_state_key(state: SdkMutationState) -> &'static str {
     }
 }
 
-fn send_worker_result<T>(
-    shared: &AppSdkRuntimeShared,
-    response_sender: mpsc::Sender<Result<T, AppSdkRuntimeIssue>>,
-    result: Result<T, AppSdkRuntimeIssue>,
-) {
-    set_last_issue(
-        shared,
-        match &result {
-            Ok(_) => None,
-            Err(issue) => Some(issue.clone()),
-        },
-    );
-    let _ = response_sender.send(result);
+fn ready_startup_milestones(
+    config: &DesktopRuntimeSupervisorConfig,
+    storage_paths: Option<&DesktopRuntimeStoragePaths>,
+) -> Vec<DesktopRuntimeStartupMilestone> {
+    let mut milestones = vec![DesktopRuntimeStartupMilestone::ShellReady];
+    if storage_paths.is_some() {
+        milestones.push(DesktopRuntimeStartupMilestone::RuntimeStoreReady);
+        milestones.push(DesktopRuntimeStartupMilestone::PrivateStoreReady);
+    }
+    milestones.push(DesktopRuntimeStartupMilestone::SignerReady);
+    milestones.push(DesktopRuntimeStartupMilestone::ProjectionsReady);
+    if !config.relay_urls.is_empty() {
+        milestones.push(DesktopRuntimeStartupMilestone::NetworkObserved);
+    }
+    milestones
 }
 
-fn lifecycle_busy_issue(shared: &AppSdkRuntimeShared) -> Option<AppSdkRuntimeIssue> {
+fn refresh_supervisor_diagnostics(
+    runtime: &tokio::runtime::Runtime,
+    shared: &DesktopRuntimeSupervisorShared,
+    sdk: &RadrootsClient,
+) -> Result<(), DesktopRuntimeIssue> {
+    let mut runtime_status = lock_status(shared).clone();
+    runtime_status.last_issue = None;
+    let diagnostics = block_on_sdk_result(
+        runtime,
+        "desktop_runtime_refresh_diagnostics",
+        collect_sdk_diagnostics(sdk, runtime_status),
+    )?;
+    let mut status = lock_status(shared);
+    status.storage_diagnostics = Some(diagnostics.storage);
+    status.integrity_diagnostics = Some(diagnostics.integrity);
+    status.sync_diagnostics = Some(diagnostics.sync);
+    status.last_issue = None;
+    Ok(())
+}
+
+fn finish_effect_result(
+    shared: &DesktopRuntimeSupervisorShared,
+    receipt: DesktopRuntimeEffectReceipt,
+    result: Result<Option<DesktopRuntimeWorkflowReceipt>, DesktopRuntimeIssue>,
+) {
+    match result {
+        Ok(workflow_receipt) => set_effect_completed(shared, receipt, workflow_receipt, None),
+        Err(issue) => set_effect_failed(shared, receipt, issue),
+    }
+}
+
+fn finish_workflow_result(
+    shared: &DesktopRuntimeSupervisorShared,
+    receipt: DesktopRuntimeEffectReceipt,
+    result: Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue>,
+) {
+    finish_effect_result(shared, receipt, result.map(Some));
+}
+
+fn finish_restore_preflight_result(
+    shared: &DesktopRuntimeSupervisorShared,
+    receipt: DesktopRuntimeEffectReceipt,
+    result: Result<DesktopRuntimeRestorePreflightReceipt, DesktopRuntimeIssue>,
+) {
+    match result {
+        Ok(restore_preflight) => {
+            set_effect_completed(shared, receipt, None, Some(restore_preflight));
+        }
+        Err(issue) => set_effect_failed(shared, receipt, issue),
+    }
+}
+
+fn finish_projection_result(
+    shared: &DesktopRuntimeSupervisorShared,
+    receipt: DesktopRuntimeEffectReceipt,
+    result: Result<DesktopRuntimeProjectionLifecycleStatus, DesktopRuntimeIssue>,
+) {
+    match result {
+        Ok(_) => set_effect_completed(shared, receipt, None, None),
+        Err(issue) => set_effect_failed(shared, receipt, issue),
+    }
+}
+
+fn set_effect_completed(
+    shared: &DesktopRuntimeSupervisorShared,
+    receipt: DesktopRuntimeEffectReceipt,
+    workflow_receipt: Option<DesktopRuntimeWorkflowReceipt>,
+    restore_preflight: Option<DesktopRuntimeRestorePreflightReceipt>,
+) {
+    let mut status = lock_status(shared);
+    status.last_issue = None;
+    status.last_effect = Some(DesktopRuntimeEffectStatus::completed(
+        receipt,
+        workflow_receipt,
+        restore_preflight,
+    ));
+}
+
+fn set_effect_failed(
+    shared: &DesktopRuntimeSupervisorShared,
+    receipt: DesktopRuntimeEffectReceipt,
+    issue: DesktopRuntimeIssue,
+) {
+    let mut status = lock_status(shared);
+    status.last_issue = Some(issue.clone());
+    status.last_effect = Some(DesktopRuntimeEffectStatus::failed(receipt, issue));
+}
+
+fn set_last_effect(shared: &DesktopRuntimeSupervisorShared, status: DesktopRuntimeEffectStatus) {
+    lock_status(shared).last_effect = Some(status);
+}
+
+fn clear_last_effect(shared: &DesktopRuntimeSupervisorShared, effect_id: u64) {
+    let mut status = lock_status(shared);
+    if status
+        .last_effect
+        .as_ref()
+        .is_some_and(|effect| effect.receipt.effect_id == effect_id)
+    {
+        status.last_effect = None;
+    }
+}
+
+fn set_startup_milestone(
+    status: &mut DesktopRuntimeSnapshot,
+    milestone: DesktopRuntimeStartupMilestone,
+    enabled: bool,
+) {
+    if enabled {
+        if !status.startup_milestones.contains(&milestone) {
+            status.startup_milestones.push(milestone);
+            status.startup_milestones.sort();
+        }
+    } else {
+        status
+            .startup_milestones
+            .retain(|candidate| *candidate != milestone);
+    }
+}
+
+fn effect_receipt(effect: &DesktopRuntimeEffect) -> DesktopRuntimeEffectReceipt {
+    match effect {
+        DesktopRuntimeEffect::RefreshDiagnostics(receipt)
+        | DesktopRuntimeEffect::RestorePreflight(receipt, _)
+        | DesktopRuntimeEffect::EnqueueFarmPublish(receipt, _)
+        | DesktopRuntimeEffect::EnqueueListingPublish(receipt, _)
+        | DesktopRuntimeEffect::TradePropose(receipt, _)
+        | DesktopRuntimeEffect::TradeDecision(receipt, _)
+        | DesktopRuntimeEffect::TradeCancellation(receipt, _)
+        | DesktopRuntimeEffect::BeginProjectionRebuild(receipt)
+        | DesktopRuntimeEffect::CompleteProjectionRebuild(receipt) => receipt.clone(),
+    }
+}
+
+fn lifecycle_busy_issue(shared: &DesktopRuntimeSupervisorShared) -> Option<DesktopRuntimeIssue> {
     let state = lock_status(shared).state;
     if matches!(
         state,
-        AppSdkLifecycleState::Pausing
-            | AppSdkLifecycleState::Paused
-            | AppSdkLifecycleState::Restoring
-            | AppSdkLifecycleState::RebuildingProjections
-            | AppSdkLifecycleState::ShuttingDown
+        DesktopRuntimeLifecycleState::Pausing
+            | DesktopRuntimeLifecycleState::Paused
+            | DesktopRuntimeLifecycleState::Restoring
+            | DesktopRuntimeLifecycleState::RebuildingProjections
+            | DesktopRuntimeLifecycleState::ShuttingDown
     ) {
-        Some(AppSdkRuntimeIssue::lifecycle_blocked(state))
+        Some(DesktopRuntimeIssue::lifecycle_blocked(state))
     } else {
         None
     }
 }
 
-fn runtime_unavailable_issue(shared: &AppSdkRuntimeShared) -> AppSdkRuntimeIssue {
+fn runtime_unavailable_issue(shared: &DesktopRuntimeSupervisorShared) -> DesktopRuntimeIssue {
     let status = lock_status(shared).clone();
     if let Some(issue) = status.last_issue {
         issue
     } else {
-        AppSdkRuntimeIssue::runtime_error(
+        DesktopRuntimeIssue::runtime_error(
             "sdk_runtime_not_ready",
             format!("app sdk runtime is {:?}", status.state),
         )
     }
 }
 
-fn replace_status(shared: &AppSdkRuntimeShared, status: AppSdkRuntimeStatus) {
+fn replace_status(shared: &DesktopRuntimeSupervisorShared, status: DesktopRuntimeSnapshot) {
     *lock_status(shared) = status;
-    shared.status_changed.notify_all();
 }
 
-fn set_last_issue(shared: &AppSdkRuntimeShared, issue: Option<AppSdkRuntimeIssue>) {
-    lock_status(shared).last_issue = issue;
-    shared.status_changed.notify_all();
-}
-
-fn transition_status_state(shared: &AppSdkRuntimeShared, state: AppSdkLifecycleState) {
+fn transition_status_state(
+    shared: &DesktopRuntimeSupervisorShared,
+    state: DesktopRuntimeLifecycleState,
+) {
     lock_status(shared).state = state;
-    shared.status_changed.notify_all();
 }
 
 fn mark_projections_stale(
-    shared: &AppSdkRuntimeShared,
+    shared: &DesktopRuntimeSupervisorShared,
     reason: impl Into<String>,
     restore_source: Option<PathBuf>,
-) -> AppSdkProjectionLifecycleStatus {
+) -> DesktopRuntimeProjectionLifecycleStatus {
     let mut status = lock_status(shared);
-    status.projection_lifecycle = AppSdkProjectionLifecycleStatus::stale(reason, restore_source);
-    status.state = AppSdkLifecycleState::Ready;
+    status.projection_lifecycle =
+        DesktopRuntimeProjectionLifecycleStatus::stale(reason, restore_source);
+    status.state = DesktopRuntimeLifecycleState::Ready;
+    set_startup_milestone(
+        &mut status,
+        DesktopRuntimeStartupMilestone::ProjectionsReady,
+        false,
+    );
     let projection_lifecycle = status.projection_lifecycle.clone();
-    shared.status_changed.notify_all();
     projection_lifecycle
 }
 
-fn begin_projection_rebuild(shared: &AppSdkRuntimeShared) -> AppSdkProjectionLifecycleStatus {
+fn begin_projection_rebuild(
+    shared: &DesktopRuntimeSupervisorShared,
+) -> DesktopRuntimeProjectionLifecycleStatus {
     let restore_source = lock_status(shared)
         .projection_lifecycle
         .restore_source
         .clone();
     let mut status = lock_status(shared);
-    status.state = AppSdkLifecycleState::RebuildingProjections;
-    status.projection_lifecycle =
-        AppSdkProjectionLifecycleStatus::rebuilding("sdk_projection_rebuild", restore_source);
+    status.state = DesktopRuntimeLifecycleState::RebuildingProjections;
+    status.projection_lifecycle = DesktopRuntimeProjectionLifecycleStatus::rebuilding(
+        "sdk_projection_rebuild",
+        restore_source,
+    );
+    set_startup_milestone(
+        &mut status,
+        DesktopRuntimeStartupMilestone::ProjectionsReady,
+        false,
+    );
     let projection_lifecycle = status.projection_lifecycle.clone();
-    shared.status_changed.notify_all();
     projection_lifecycle
 }
 
 fn complete_projection_rebuild(
-    shared: &AppSdkRuntimeShared,
-) -> Result<AppSdkProjectionLifecycleStatus, AppSdkRuntimeIssue> {
+    shared: &DesktopRuntimeSupervisorShared,
+) -> Result<DesktopRuntimeProjectionLifecycleStatus, DesktopRuntimeIssue> {
     let mut status = lock_status(shared);
-    if !matches!(status.state, AppSdkLifecycleState::RebuildingProjections) {
-        return Err(AppSdkRuntimeIssue::lifecycle_blocked(status.state));
+    if !matches!(
+        status.state,
+        DesktopRuntimeLifecycleState::RebuildingProjections
+    ) {
+        return Err(DesktopRuntimeIssue::lifecycle_blocked(status.state));
     }
-    status.state = AppSdkLifecycleState::Ready;
-    status.projection_lifecycle = AppSdkProjectionLifecycleStatus::current();
+    status.state = DesktopRuntimeLifecycleState::Ready;
+    status.projection_lifecycle = DesktopRuntimeProjectionLifecycleStatus::current();
+    set_startup_milestone(
+        &mut status,
+        DesktopRuntimeStartupMilestone::ProjectionsReady,
+        true,
+    );
     let projection_lifecycle = status.projection_lifecycle.clone();
-    shared.status_changed.notify_all();
     Ok(projection_lifecycle)
 }
 
-fn lock_status(shared: &AppSdkRuntimeShared) -> MutexGuard<'_, AppSdkRuntimeStatus> {
+fn lock_status(shared: &DesktopRuntimeSupervisorShared) -> MutexGuard<'_, DesktopRuntimeSnapshot> {
     shared
         .status
         .lock()
@@ -1865,13 +2133,7 @@ fn serialized_label(value: &(impl Serialize + fmt::Debug)) -> String {
 #[cfg(test)]
 mod tests {
     use std::{
-        fs,
-        sync::{
-            Arc, Condvar, Mutex,
-            atomic::{AtomicBool, Ordering},
-            mpsc,
-        },
-        thread,
+        fs, thread,
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
@@ -1900,10 +2162,12 @@ mod tests {
     };
 
     use super::{
-        APP_SDK_STORAGE_DIR_NAME, AppSdkConfig, AppSdkLifecycleState, AppSdkListingPublishRequest,
-        AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy, AppSdkRestorePreflightRequest,
-        AppSdkRuntime, AppSdkRuntimeError, AppSdkRuntimeShared, AppSdkRuntimeStatus,
-        AppSdkWorkerCommand, app_sdk_storage_root_from_data_root, transition_status_state,
+        DESKTOP_RUNTIME_STORAGE_DIR_NAME, DesktopRuntimeEffectKind, DesktopRuntimeEffectState,
+        DesktopRuntimeLifecycleState, DesktopRuntimeListingPublishRequest,
+        DesktopRuntimeLocalSigner, DesktopRuntimeProjectionLifecycleState,
+        DesktopRuntimeRelayUrlPolicy, DesktopRuntimeRestorePreflightRequest,
+        DesktopRuntimeSnapshot, DesktopRuntimeStartupMilestone, DesktopRuntimeSupervisor,
+        DesktopRuntimeSupervisorConfig, desktop_runtime_storage_root_from_data_root,
     };
 
     const SDK_TEST_SELLER_SECRET_KEY_HEX: &str =
@@ -1919,25 +2183,30 @@ mod tests {
             },
         )
         .expect("desktop paths should resolve");
-        let config =
-            AppSdkConfig::from_desktop_paths(&paths, vec!["wss://relay.example".to_owned()]);
+        let config = DesktopRuntimeSupervisorConfig::from_desktop_paths(
+            &paths,
+            vec!["wss://relay.example".to_owned()],
+        );
 
         assert_eq!(
             config.storage_root,
-            paths.app.data.join(APP_SDK_STORAGE_DIR_NAME)
+            paths.app.data.join(DESKTOP_RUNTIME_STORAGE_DIR_NAME)
         );
         assert_eq!(
             config.storage_root,
-            app_sdk_storage_root_from_data_root(paths.app.data.as_path())
+            desktop_runtime_storage_root_from_data_root(paths.app.data.as_path())
         );
         assert_eq!(config.storage_root.parent(), Some(paths.app.data.as_path()));
         assert!(paths.app.data.ends_with(APP_RUNTIME_NAMESPACE));
-        assert_eq!(config.relay_url_policy, AppSdkRelayUrlPolicy::Public);
+        assert_eq!(
+            config.relay_url_policy,
+            DesktopRuntimeRelayUrlPolicy::Public
+        );
     }
 
     #[test]
     fn sdk_config_uses_localhost_policy_for_ws_relay_urls() {
-        let config = AppSdkConfig::from_app_data_root(
+        let config = DesktopRuntimeSupervisorConfig::from_app_data_root(
             "/tmp/radroots-app-data".as_ref(),
             vec![
                 "wss://relay.example".to_owned(),
@@ -1945,27 +2214,69 @@ mod tests {
             ],
         );
 
-        assert_eq!(config.relay_url_policy, AppSdkRelayUrlPolicy::Localhost);
+        assert_eq!(
+            config.relay_url_policy,
+            DesktopRuntimeRelayUrlPolicy::Localhost
+        );
     }
 
     #[test]
-    fn sdk_runtime_reaches_ready_with_directory_storage() {
+    fn desktop_runtime_supervisor_reaches_ready_with_snapshot_diagnostics() {
         let storage_root = temp_storage_root("ready");
-        let config = AppSdkConfig::from_app_data_root(
+        let config = DesktopRuntimeSupervisorConfig::from_app_data_root(
             storage_root
                 .parent()
                 .expect("storage root should have parent"),
             vec!["ws://127.0.0.1:8080".to_owned()],
         );
-        let runtime = AppSdkRuntime::start(config).expect("sdk runtime should start");
+        let runtime = DesktopRuntimeSupervisor::start(config).expect("supervisor should start");
 
-        let status = runtime.wait_for_startup(Duration::from_secs(5));
+        let status = poll_snapshot(&runtime, |snapshot| {
+            matches!(snapshot.state, DesktopRuntimeLifecycleState::Ready)
+                && snapshot.storage_diagnostics.is_some()
+                && snapshot.integrity_diagnostics.is_some()
+                && snapshot.sync_diagnostics.is_some()
+        });
 
-        assert_eq!(status.state, AppSdkLifecycleState::Ready);
+        assert_eq!(status.state, DesktopRuntimeLifecycleState::Ready);
         assert_eq!(status.storage_root, storage_root);
-        assert_eq!(status.relay_url_policy, AppSdkRelayUrlPolicy::Localhost);
+        assert_eq!(
+            status.relay_url_policy,
+            DesktopRuntimeRelayUrlPolicy::Localhost
+        );
+        assert!(
+            status
+                .startup_milestones
+                .contains(&DesktopRuntimeStartupMilestone::ShellReady)
+        );
+        assert!(
+            status
+                .startup_milestones
+                .contains(&DesktopRuntimeStartupMilestone::RuntimeStoreReady)
+        );
+        assert!(
+            status
+                .startup_milestones
+                .contains(&DesktopRuntimeStartupMilestone::PrivateStoreReady)
+        );
+        assert!(
+            status
+                .startup_milestones
+                .contains(&DesktopRuntimeStartupMilestone::SignerReady)
+        );
+        assert!(
+            status
+                .startup_milestones
+                .contains(&DesktopRuntimeStartupMilestone::ProjectionsReady)
+        );
+        assert!(
+            status
+                .startup_milestones
+                .contains(&DesktopRuntimeStartupMilestone::NetworkObserved)
+        );
         let storage_paths = status
             .storage_paths
+            .as_ref()
             .expect("storage paths should be present");
         assert_eq!(
             storage_paths.runtime_path,
@@ -1979,88 +2290,124 @@ mod tests {
             storage_paths.studio_path,
             storage_root.join("studio.sqlite")
         );
-        let storage = runtime
-            .storage_status()
+        let storage = status
+            .storage_diagnostics
+            .as_ref()
             .expect("storage diagnostics should load");
         assert_eq!(storage.storage_kind, "directory");
         assert!(storage.event_store.store.integrity_ok);
         assert!(storage.outbox.store.integrity_ok);
-        let integrity = runtime
-            .integrity_status()
+        let integrity = status
+            .integrity_diagnostics
+            .as_ref()
             .expect("integrity diagnostics should load");
         assert!(integrity.event_store_ok);
         assert!(integrity.outbox_ok);
-        let sync = runtime.sync_status().expect("sync diagnostics should load");
+        let sync = status
+            .sync_diagnostics
+            .as_ref()
+            .expect("sync diagnostics should load");
         assert_eq!(sync.source, "sdk_canonical_stores");
         assert_eq!(sync.transport_targets.configured_count, 1);
-        let diagnostics = runtime.diagnostics().expect("diagnostics should load");
-        assert_eq!(diagnostics.runtime.state, AppSdkLifecycleState::Ready);
-        assert_eq!(diagnostics.storage.storage_kind, "directory");
-        assert_eq!(diagnostics.sync.transport_targets.configured_count, 1);
-        runtime.shutdown().expect("sdk runtime should shut down");
-        assert_eq!(runtime.status().state, AppSdkLifecycleState::Stopped);
+        assert!(runtime.request_shutdown());
+        let stopped = poll_snapshot(&runtime, |snapshot| {
+            matches!(snapshot.state, DesktopRuntimeLifecycleState::Stopped)
+        });
+        assert_eq!(stopped.state, DesktopRuntimeLifecycleState::Stopped);
         let _ = fs::remove_dir_all(storage_root);
     }
 
     #[test]
-    fn sdk_runtime_enqueues_listing_publish_work() {
+    fn desktop_runtime_supervisor_enqueues_listing_publish_as_effect() {
         let storage_root = temp_storage_root("listing_enqueue");
-        let config = AppSdkConfig::from_app_data_root(
+        let config = DesktopRuntimeSupervisorConfig::from_app_data_root(
             storage_root
                 .parent()
                 .expect("storage root should have parent"),
             vec!["ws://127.0.0.1:8080".to_owned()],
         );
-        let runtime = AppSdkRuntime::start(config).expect("sdk runtime should start");
-        assert_eq!(
-            runtime.wait_for_startup(Duration::from_secs(5)).state,
-            AppSdkLifecycleState::Ready
-        );
+        let runtime = DesktopRuntimeSupervisor::start(config).expect("supervisor should start");
+        poll_snapshot(&runtime, |snapshot| {
+            matches!(snapshot.state, DesktopRuntimeLifecycleState::Ready)
+        });
         let secret_key = RadrootsNostrSecretKey::from_hex(SDK_TEST_SELLER_SECRET_KEY_HEX)
             .expect("secret key should parse");
-        let signer_keys = RadrootsNostrKeys::new(secret_key);
-        let seller_pubkey = signer_keys.public_key().to_hex();
+        let local_identity_keys = RadrootsNostrKeys::new(secret_key);
+        let seller_pubkey = local_identity_keys.public_key().to_hex();
 
         let receipt = runtime
-            .enqueue_listing_publish(AppSdkListingPublishRequest {
+            .enqueue_listing_publish(DesktopRuntimeListingPublishRequest {
                 actor_account_id: "seller-account".to_owned(),
                 actor_pubkey: seller_pubkey.clone(),
-                signer_keys,
+                signer: DesktopRuntimeLocalSigner::from_local_identity_keys(local_identity_keys),
                 listing: test_listing(seller_pubkey.as_str()),
-                target_relays: vec!["ws://127.0.0.1:8080".to_owned()],
-                relay_url_policy: AppSdkRelayUrlPolicy::Localhost,
-                idempotency_key: Some("listing-enqueue-idempotency".to_owned()),
+                target_relays: vec!["wss://relay.radroots.test".to_owned()],
+                relay_url_policy: DesktopRuntimeRelayUrlPolicy::Public,
+                idempotency_key: Some("01890f0e-6c00-7000-8000-000000000224".to_owned()),
             })
-            .expect("listing publish should enqueue");
+            .expect("listing publish effect should enqueue");
 
-        assert_eq!(receipt.operation_kind, LISTING_PUBLISH_OPERATION_KIND);
-        assert_eq!(receipt.actor_pubkey, seller_pubkey);
-        assert_eq!(receipt.state, "enqueued");
-        assert!(!receipt.expected_event_id.is_empty());
-        assert_eq!(receipt.expected_event_id, receipt.signed_event_id);
-        assert!(receipt.outbox_operation_id > 0);
-        assert!(receipt.outbox_event_id > 0);
-        assert!(receipt.idempotency_digest_prefix.is_some());
-        let sync = runtime.sync_status().expect("sync diagnostics should load");
-        assert_eq!(sync.outbox.ready_signed_events, 1);
-        runtime.shutdown().expect("sdk runtime should shut down");
+        assert_eq!(
+            receipt.effect_kind,
+            DesktopRuntimeEffectKind::ListingPublish
+        );
+        assert_eq!(
+            receipt.operation_kind.as_deref(),
+            Some(LISTING_PUBLISH_OPERATION_KIND)
+        );
+        assert_eq!(
+            receipt.actor_pubkey.as_deref(),
+            Some(seller_pubkey.as_str())
+        );
+        assert!(receipt.effect_id > 0);
+
+        let completed = poll_snapshot(&runtime, |snapshot| {
+            snapshot.last_effect.as_ref().is_some_and(|effect| {
+                effect.receipt.effect_id == receipt.effect_id
+                    && matches!(effect.state, DesktopRuntimeEffectState::Completed)
+                    && effect.workflow_receipt.is_some()
+            })
+        });
+        let completed_effect = completed
+            .last_effect
+            .as_ref()
+            .expect("listing effect should be captured in snapshot");
+        assert_eq!(completed_effect.receipt.effect_id, receipt.effect_id);
+        assert!(matches!(
+            completed_effect.state,
+            DesktopRuntimeEffectState::Completed
+        ));
+        let workflow = completed_effect
+            .workflow_receipt
+            .as_ref()
+            .expect("workflow receipt should be captured in snapshot");
+        assert_eq!(workflow.operation_kind, LISTING_PUBLISH_OPERATION_KIND);
+        assert_eq!(workflow.actor_pubkey, seller_pubkey);
+        assert_eq!(workflow.state, "enqueued");
+        assert!(!workflow.expected_event_id.is_empty());
+        assert_eq!(workflow.expected_event_id, workflow.signed_event_id);
+        assert!(workflow.outbox_operation_id > 0);
+        assert!(workflow.outbox_event_id > 0);
+        assert!(workflow.idempotency_digest_prefix.is_some());
+        assert!(runtime.request_shutdown());
         let _ = fs::remove_dir_all(storage_root);
     }
 
     #[test]
-    fn sdk_runtime_degrades_with_structured_sdk_error() {
+    fn desktop_runtime_supervisor_degrades_with_structured_sdk_error() {
         let storage_root = temp_storage_root("invalid_relay");
-        let config = AppSdkConfig::from_app_data_root(
+        let config = DesktopRuntimeSupervisorConfig::from_app_data_root(
             storage_root
                 .parent()
                 .expect("storage root should have parent"),
             vec!["ws://relay.example".to_owned()],
         );
-        let runtime = AppSdkRuntime::start(config).expect("sdk runtime should start");
+        let runtime = DesktopRuntimeSupervisor::start(config).expect("supervisor should start");
 
-        let status = runtime.wait_for_startup(Duration::from_secs(5));
+        let status = poll_snapshot(&runtime, |snapshot| {
+            matches!(snapshot.state, DesktopRuntimeLifecycleState::Degraded)
+        });
 
-        assert_eq!(status.state, AppSdkLifecycleState::Degraded);
         let issue = status
             .last_issue
             .expect("degraded status should include issue");
@@ -2073,77 +2420,27 @@ mod tests {
                 .contains(&"configure_transport_targets".to_owned())
         );
         assert_eq!(issue.detail_json["code"], "invalid_relay_url");
-        let error = runtime
-            .diagnostics()
-            .expect_err("degraded diagnostics should fail");
-        match error {
-            AppSdkRuntimeError::CommandFailed(issue) => {
-                assert_eq!(issue.code, "invalid_relay_url");
-                assert_eq!(issue.class, "configuration");
-                assert_eq!(issue.detail_json["code"], "invalid_relay_url");
-            }
-            unexpected => panic!("unexpected degraded diagnostics error: {unexpected:?}"),
-        }
-        runtime.shutdown().expect("sdk runtime should shut down");
+        let refresh = runtime
+            .request_diagnostics_refresh()
+            .expect("diagnostics refresh effect should be accepted");
+        let failed = poll_snapshot(&runtime, |snapshot| {
+            snapshot.last_effect.as_ref().is_some_and(|effect| {
+                effect.receipt.effect_id == refresh.effect_id
+                    && matches!(effect.state, DesktopRuntimeEffectState::Failed)
+            })
+        });
+        let issue = failed
+            .last_effect
+            .as_ref()
+            .and_then(|effect| effect.issue.as_ref())
+            .expect("failed diagnostics effect should include issue");
+        assert_eq!(issue.code, "invalid_relay_url");
+        assert!(runtime.request_shutdown());
         let _ = fs::remove_dir_all(storage_root);
     }
 
     #[test]
-    fn sdk_shutdown_joins_when_normal_command_queue_is_full() {
-        let config = AppSdkConfig::from_app_data_root(
-            "/tmp/radroots-app-sdk-full-queue".as_ref(),
-            vec!["ws://127.0.0.1:8080".to_owned()],
-        )
-        .with_command_queue_capacity(1);
-        let shared = Arc::new(AppSdkRuntimeShared {
-            status: Mutex::new(AppSdkRuntimeStatus::from_config(
-                &config,
-                AppSdkLifecycleState::Ready,
-                None,
-                None,
-            )),
-            status_changed: Condvar::new(),
-            shutdown_requested: AtomicBool::new(false),
-        });
-        let (command_sender, command_receiver) = mpsc::sync_channel(config.command_queue_capacity);
-        let worker_shared = Arc::clone(&shared);
-        let worker = thread::spawn(move || {
-            while !worker_shared.shutdown_requested.load(Ordering::SeqCst) {
-                thread::sleep(Duration::from_millis(1));
-            }
-            drop(command_receiver);
-            transition_status_state(&worker_shared, AppSdkLifecycleState::Stopped);
-        });
-        let runtime = AppSdkRuntime {
-            command_sender: Mutex::new(Some(command_sender)),
-            shared,
-            worker: Mutex::new(Some(worker)),
-        };
-        let (response_sender, _response_receiver) = mpsc::channel();
-        runtime
-            .command_sender
-            .lock()
-            .expect("command sender lock")
-            .as_ref()
-            .expect("command sender")
-            .try_send(AppSdkWorkerCommand::Diagnostics(response_sender))
-            .expect("normal command queue should fill");
-
-        assert!(matches!(
-            runtime.sync_status(),
-            Err(AppSdkRuntimeError::CommandQueueFull)
-        ));
-        assert_eq!(runtime.status().state, AppSdkLifecycleState::Ready);
-
-        runtime
-            .shutdown()
-            .expect("shutdown should not depend on normal command queue capacity");
-
-        assert_eq!(runtime.status().state, AppSdkLifecycleState::Stopped);
-    }
-
-    #[test]
-    fn sdk_restore_preflight_marks_projections_stale_without_writing_destination() {
+    fn desktop_runtime_supervisor_restore_preflight_marks_projections_stale() {
         let backup_source_root = temp_storage_root("restore_backup_source");
         let backup_archive = backup_source_root
             .parent()
@@ -2173,43 +2470,53 @@ mod tests {
             .parent()
             .expect("app storage root should have parent")
             .to_path_buf();
-        let config = AppSdkConfig::from_app_data_root(
+        let config = DesktopRuntimeSupervisorConfig::from_app_data_root(
             app_data_root.as_path(),
             vec!["ws://127.0.0.1:8080".to_owned()],
         );
-        let runtime = AppSdkRuntime::start(config).expect("sdk runtime should start");
-        assert_eq!(
-            runtime.wait_for_startup(Duration::from_secs(5)).state,
-            AppSdkLifecycleState::Ready
-        );
+        let runtime = DesktopRuntimeSupervisor::start(config).expect("supervisor should start");
+        poll_snapshot(&runtime, |snapshot| {
+            matches!(snapshot.state, DesktopRuntimeLifecycleState::Ready)
+        });
         let sentinel = app_storage_root.join("restore-preflight-sentinel");
         fs::write(&sentinel, "existing destination").expect("sentinel should write");
 
-        let receipt = runtime
-            .restore_preflight(
-                AppSdkRestorePreflightRequest::new(backup_archive.clone())
+        let effect = runtime
+            .request_restore_preflight(
+                DesktopRuntimeRestorePreflightRequest::new(backup_archive.clone())
                     .with_overwrite_existing_sdk_storage(true),
             )
-            .expect("restore preflight should succeed");
+            .expect("restore preflight effect should be accepted");
 
+        let completed = poll_snapshot(&runtime, |snapshot| {
+            snapshot.last_effect.as_ref().is_some_and(|last_effect| {
+                last_effect.receipt.effect_id == effect.effect_id
+                    && matches!(last_effect.state, DesktopRuntimeEffectState::Completed)
+            })
+        });
+        let receipt = completed
+            .last_effect
+            .as_ref()
+            .and_then(|effect| effect.restore_preflight.as_ref())
+            .expect("restore preflight receipt should be captured");
         assert_eq!(receipt.state, "dry_run");
         assert_eq!(receipt.destination, app_storage_root);
         assert_eq!(receipt.restored_paths, None);
         assert!(sentinel.exists());
         assert_eq!(
             receipt.projection_lifecycle.state,
-            AppSdkProjectionLifecycleState::Stale
+            DesktopRuntimeProjectionLifecycleState::Stale
         );
         assert_eq!(
-            receipt.projection_lifecycle.reason.as_deref(),
-            Some("sdk_restore_preflight")
+            completed.projection_lifecycle.state,
+            DesktopRuntimeProjectionLifecycleState::Stale
         );
-        assert_eq!(
-            runtime.status().projection_lifecycle.state,
-            AppSdkProjectionLifecycleState::Stale
+        assert!(
+            !completed
+                .startup_milestones
+                .contains(&DesktopRuntimeStartupMilestone::ProjectionsReady)
         );
-        assert_eq!(runtime.status().state, AppSdkLifecycleState::Ready);
-        runtime.shutdown().expect("sdk runtime should shut down");
+        assert!(runtime.request_shutdown());
         let _ = fs::remove_dir_all(
             backup_source_root
                 .parent()
@@ -2219,51 +2526,93 @@ mod tests {
     }
 
     #[test]
-    fn sdk_projection_rebuild_state_rejects_conflicting_commands() {
+    fn desktop_runtime_supervisor_projection_rebuild_uses_effect_snapshots() {
         let storage_root = temp_storage_root("projection_rebuild");
-        let config = AppSdkConfig::from_app_data_root(
+        let config = DesktopRuntimeSupervisorConfig::from_app_data_root(
             storage_root
                 .parent()
                 .expect("storage root should have parent"),
             vec!["ws://127.0.0.1:8080".to_owned()],
         );
-        let runtime = AppSdkRuntime::start(config).expect("sdk runtime should start");
-        assert_eq!(
-            runtime.wait_for_startup(Duration::from_secs(5)).state,
-            AppSdkLifecycleState::Ready
-        );
+        let runtime = DesktopRuntimeSupervisor::start(config).expect("supervisor should start");
+        poll_snapshot(&runtime, |snapshot| {
+            matches!(snapshot.state, DesktopRuntimeLifecycleState::Ready)
+        });
 
-        let rebuilding = runtime
+        let begin = runtime
             .begin_projection_rebuild()
-            .expect("projection rebuild should start");
-
-        assert_eq!(rebuilding.state, AppSdkProjectionLifecycleState::Rebuilding);
+            .expect("projection rebuild begin effect should enqueue");
+        let rebuilding = poll_snapshot(&runtime, |snapshot| {
+            snapshot
+                .last_effect
+                .as_ref()
+                .is_some_and(|effect| effect.receipt.effect_id == begin.effect_id)
+                && matches!(
+                    snapshot.state,
+                    DesktopRuntimeLifecycleState::RebuildingProjections
+                )
+        });
         assert_eq!(
-            runtime.status().state,
-            AppSdkLifecycleState::RebuildingProjections
+            rebuilding.projection_lifecycle.state,
+            DesktopRuntimeProjectionLifecycleState::Rebuilding
         );
-        let error = runtime
-            .sync_status()
-            .expect_err("sync status should wait for rebuild completion");
-        match error {
-            AppSdkRuntimeError::CommandFailed(issue) => {
-                assert_eq!(issue.code, "sdk_lifecycle_busy");
-                assert_eq!(issue.detail_json["state"], "RebuildingProjections");
-            }
-            unexpected => panic!("unexpected lifecycle error: {unexpected:?}"),
-        }
+        assert!(
+            !rebuilding
+                .startup_milestones
+                .contains(&DesktopRuntimeStartupMilestone::ProjectionsReady)
+        );
+
+        let refresh = runtime
+            .request_diagnostics_refresh()
+            .expect("diagnostics refresh should be accepted while rebuilding");
+        let blocked = poll_snapshot(&runtime, |snapshot| {
+            snapshot.last_effect.as_ref().is_some_and(|effect| {
+                effect.receipt.effect_id == refresh.effect_id
+                    && matches!(effect.state, DesktopRuntimeEffectState::Failed)
+            })
+        });
+        let issue = blocked
+            .last_effect
+            .as_ref()
+            .and_then(|effect| effect.issue.as_ref())
+            .expect("blocked refresh should expose lifecycle issue");
+        assert_eq!(issue.code, "sdk_lifecycle_busy");
+        assert_eq!(issue.detail_json["state"], "RebuildingProjections");
 
         let complete = runtime
             .complete_projection_rebuild()
-            .expect("projection rebuild should complete");
-
-        assert_eq!(complete.state, AppSdkProjectionLifecycleState::Current);
-        assert_eq!(runtime.status().state, AppSdkLifecycleState::Ready);
-        runtime
-            .sync_status()
-            .expect("sync status should work after rebuild");
-        runtime.shutdown().expect("sdk runtime should shut down");
+            .expect("projection rebuild complete effect should enqueue");
+        let current = poll_snapshot(&runtime, |snapshot| {
+            snapshot.last_effect.as_ref().is_some_and(|effect| {
+                effect.receipt.effect_id == complete.effect_id
+                    && matches!(effect.state, DesktopRuntimeEffectState::Completed)
+            }) && matches!(snapshot.state, DesktopRuntimeLifecycleState::Ready)
+        });
+        assert_eq!(
+            current.projection_lifecycle.state,
+            DesktopRuntimeProjectionLifecycleState::Current
+        );
+        assert!(
+            current
+                .startup_milestones
+                .contains(&DesktopRuntimeStartupMilestone::ProjectionsReady)
+        );
+        assert!(runtime.request_shutdown());
         let _ = fs::remove_dir_all(storage_root);
+    }
+
+    fn poll_snapshot(
+        runtime: &DesktopRuntimeSupervisor,
+        predicate: impl Fn(&DesktopRuntimeSnapshot) -> bool,
+    ) -> DesktopRuntimeSnapshot {
+        for _ in 0..500 {
+            let snapshot = runtime.snapshot();
+            if predicate(&snapshot) {
+                return snapshot;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        runtime.snapshot()
     }
 
     fn temp_storage_root(label: &str) -> std::path::PathBuf {
@@ -2272,8 +2621,8 @@ mod tests {
             .expect("clock")
             .as_nanos();
         std::env::temp_dir()
-            .join(format!("radroots_studio_app_sdk_runtime_{label}_{nanos}"))
-            .join(APP_SDK_STORAGE_DIR_NAME)
+            .join(format!("radroots_studio_desktop_runtime_{label}_{nanos}"))
+            .join(DESKTOP_RUNTIME_STORAGE_DIR_NAME)
     }
 
     fn test_listing(seller_pubkey: &str) -> RadrootsListing {

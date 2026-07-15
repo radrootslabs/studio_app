@@ -116,7 +116,7 @@ const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 28,
-        sql: include_str!("../migrations/0028_sdk_workflow_receipts.sql"),
+        sql: include_str!("../migrations/0028_runtime_workflow_receipts.sql"),
     },
     Migration {
         version: 29,

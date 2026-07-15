@@ -57,13 +57,15 @@ use radroots_sdk::{
 use radroots_sql_core::SqlxSqliteExecutor;
 use radroots_studio_app_core::{
     AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
-    AppRuntimePathsError, AppRuntimeSnapshot, AppSdkConfig, AppSdkDiagnostics,
-    AppSdkFarmPublicLocationRequest, AppSdkFarmPublishRequest, AppSdkLifecycleState,
-    AppSdkListingPublishRequest, AppSdkProjectionLifecycleState, AppSdkPublicFarmLocation,
-    AppSdkRelayUrlPolicy, AppSdkRuntime, AppSdkRuntimeError, AppSdkRuntimeIssue,
-    AppSdkRuntimeStatus, AppSdkStoragePaths, AppSdkTradeCancellationRequest, AppSdkTradeDecision,
-    AppSdkTradeDecisionRequest, AppSdkTradeProposeRequest, AppSdkWorkflowReceipt,
-    AppSharedAccountsPaths, PackDayExportWriteError, prepare_pack_day_export_bundle_at_data_root,
+    AppRuntimePathsError, AppRuntimeSnapshot, AppSharedAccountsPaths, DesktopRuntimeDiagnostics,
+    DesktopRuntimeEffectReceipt, DesktopRuntimeFarmPublishRequest, DesktopRuntimeIssue,
+    DesktopRuntimeLifecycleState, DesktopRuntimeListingPublishRequest, DesktopRuntimeLocalSigner,
+    DesktopRuntimeProjectionLifecycleState, DesktopRuntimePublicFarmLocation,
+    DesktopRuntimeRelayUrlPolicy, DesktopRuntimeSnapshot, DesktopRuntimeSupervisor,
+    DesktopRuntimeSupervisorConfig, DesktopRuntimeSupervisorError,
+    DesktopRuntimeTradeCancellationRequest, DesktopRuntimeTradeDecision,
+    DesktopRuntimeTradeDecisionRequest, DesktopRuntimeTradeProposeRequest, PackDayExportWriteError,
+    prepare_pack_day_export_bundle_at_data_root,
     shared_runtime_store_database_path_from_shared_accounts, write_prepared_pack_day_export_bundle,
 };
 use radroots_studio_app_remote_signer::{
@@ -71,12 +73,12 @@ use radroots_studio_app_remote_signer::{
 };
 use radroots_studio_app_sqlite::{
     APP_ACTIVITY_CONTEXT_LIMIT, AppLocalInteropImportReport, AppRelayIngestFailureInput,
-    AppRelayIngestSuccessInput, AppSdkWorkflowReceiptInput, AppSdkWorkflowReceiptSourceKind,
-    AppSdkWorkflowReceiptState, AppSqliteError, AppSqliteStore, BuyerOrderRuntimeStoreExport,
+    AppRelayIngestSuccessInput, AppSqliteError, AppSqliteStore, BuyerOrderRuntimeStoreExport,
     BuyerOrderRuntimeStoreLine, BuyerRepeatDemandApplyOutcome, DatabaseTarget,
-    SelectedBuyerOrderScope, SellerOrderDecisionExport, StoredPendingSyncOperation,
-    StoredRelayIngestCursor, StoredSyncConflict, derive_farm_rules_readiness,
-    projected_order_id_from_trade_request,
+    DesktopRuntimeWorkflowReceiptInput, DesktopRuntimeWorkflowReceiptSourceKind,
+    DesktopRuntimeWorkflowReceiptState, SelectedBuyerOrderScope, SellerOrderDecisionExport,
+    StoredPendingSyncOperation, StoredRelayIngestCursor, StoredSyncConflict,
+    derive_farm_rules_readiness, projected_order_id_from_trade_request,
 };
 use radroots_studio_app_state::{
     APP_STATE_FILE_NAME, AppShellProjection, AppStateCommand, AppStatePersistenceRepository,
@@ -151,7 +153,8 @@ use crate::remote_signer::{
 
 const APP_DATABASE_FILE_NAME: &str = "app.sqlite3";
 const SYNC_TRANSPORT_UNAVAILABLE_MESSAGE: &str = "remote sync transport is not configured";
-const APP_SYNC_PUBLISH_USES_SDK_RUNTIME_MESSAGE: &str = "app sync publish work uses AppSdkRuntime";
+const APP_SYNC_PUBLISH_USES_SDK_RUNTIME_MESSAGE: &str =
+    "app sync publish work uses DesktopRuntimeSupervisor";
 const APP_DIRECT_RELAY_SYNC_TIMEOUT_MS: u64 = 2_000;
 const APP_DIRECT_RELAY_CONNECT_TIMEOUT: StdDuration = StdDuration::from_secs(10);
 const APP_DIRECT_RELAY_INGEST_LIMIT: usize = 1_000;
@@ -361,7 +364,7 @@ impl AppSyncTransport for ConfiguredRelayAppSyncTransport {
 #[derive(Clone, Debug)]
 pub struct DesktopAppRuntime {
     state: Arc<Mutex<DesktopAppRuntimeState>>,
-    sdk_runtime: Arc<Mutex<Option<AppSdkRuntime>>>,
+    sdk_runtime: Arc<Mutex<Option<DesktopRuntimeSupervisor>>>,
 }
 
 impl DesktopAppRuntime {
@@ -409,7 +412,6 @@ impl DesktopAppRuntime {
         match start_desktop_sdk_runtime(&paths, nostr_relay_urls) {
             Ok(sdk_runtime) => {
                 let runtime = Self::from_state_with_sdk_runtime(state, sdk_runtime);
-                let _ = runtime.wait_for_sdk_startup(StdDuration::from_secs(5));
                 if let Err(error) = runtime.retry_pending_personal_order_coordination() {
                     error!(
                         target: "buyer_order",
@@ -469,72 +471,69 @@ impl DesktopAppRuntime {
         self.lock_state().nostr_relay_urls.clone()
     }
 
-    pub fn sdk_status(&self) -> Option<AppSdkRuntimeStatus> {
+    pub fn sdk_status(&self) -> Option<DesktopRuntimeSnapshot> {
         self.sdk_runtime
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .as_ref()
-            .map(AppSdkRuntime::status)
+            .map(DesktopRuntimeSupervisor::snapshot)
     }
 
-    pub fn sdk_status_summary(&self) -> Option<DesktopAppSdkStatusSummary> {
+    pub fn sdk_status_summary(&self) -> Option<DesktopRuntimeSupervisorStatusSummary> {
         self.sdk_status()
             .as_ref()
-            .map(DesktopAppSdkStatusSummary::from_status)
+            .map(DesktopRuntimeSupervisorStatusSummary::from_status)
     }
 
-    pub fn wait_for_sdk_startup(&self, timeout: StdDuration) -> Option<AppSdkRuntimeStatus> {
-        self.sdk_runtime
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .as_ref()
-            .map(|runtime| runtime.wait_for_startup(timeout))
-    }
-
-    pub fn shutdown_sdk_runtime(&self) -> Result<bool, AppSdkRuntimeError> {
+    pub fn shutdown_sdk_runtime(&self) -> bool {
         let mut sdk_runtime = self
             .sdk_runtime
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let Some(runtime) = sdk_runtime.take() else {
-            return Ok(false);
+            return false;
         };
-        runtime.shutdown()?;
-        Ok(true)
+        runtime.request_shutdown()
     }
 
-    pub fn sdk_diagnostics(&self) -> Result<Option<AppSdkDiagnostics>, AppSdkRuntimeError> {
+    pub fn sdk_diagnostics(&self) -> Option<DesktopRuntimeDiagnostics> {
         let sdk_runtime = self
             .sdk_runtime
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let Some(runtime) = sdk_runtime.as_ref() else {
-            return Ok(None);
+            return None;
         };
-        runtime.diagnostics().map(Some)
+        DesktopRuntimeDiagnostics::from_snapshot(runtime.snapshot())
     }
 
-    pub fn sdk_diagnostics_summary(&self) -> Option<DesktopAppSdkDiagnosticsSummary> {
+    pub fn sdk_diagnostics_summary(&self) -> Option<DesktopRuntimeSupervisorDiagnosticsSummary> {
         let sdk_runtime = self
             .sdk_runtime
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let runtime = sdk_runtime.as_ref()?;
-        let status = runtime.status();
-        match runtime.diagnostics() {
-            Ok(diagnostics) => Some(DesktopAppSdkDiagnosticsSummary {
-                status: DesktopAppSdkStatusSummary::from_status(&diagnostics.runtime),
-                state: DesktopAppSdkDiagnosticsState::Ready(
-                    DesktopAppSdkReadyDiagnosticsSummary::from_diagnostics(&diagnostics),
+        let status = runtime.snapshot();
+        match DesktopRuntimeDiagnostics::from_snapshot(status.clone()) {
+            Some(diagnostics) => Some(DesktopRuntimeSupervisorDiagnosticsSummary {
+                status: DesktopRuntimeSupervisorStatusSummary::from_status(&diagnostics.runtime),
+                state: DesktopRuntimeSupervisorDiagnosticsState::Ready(
+                    DesktopRuntimeSupervisorReadyDiagnosticsSummary::from_diagnostics(&diagnostics),
                 ),
             }),
-            Err(error) => {
-                let issue = desktop_app_sdk_issue_from_runtime_error(&error);
-                let mut status = DesktopAppSdkStatusSummary::from_status(&status);
+            None => {
+                let mut status = DesktopRuntimeSupervisorStatusSummary::from_status(&status);
+                let issue = status.last_issue.clone().unwrap_or_else(|| {
+                    DesktopRuntimeSupervisorIssueSummary::runtime(
+                        "desktop_runtime_diagnostics_pending",
+                        true,
+                        ["wait_for_runtime_snapshot"],
+                    )
+                });
                 status.last_issue = Some(issue.clone());
-                Some(DesktopAppSdkDiagnosticsSummary {
+                Some(DesktopRuntimeSupervisorDiagnosticsSummary {
                     status,
-                    state: DesktopAppSdkDiagnosticsState::Blocked(issue),
+                    state: DesktopRuntimeSupervisorDiagnosticsState::Blocked(issue),
                 })
             }
         }
@@ -1087,7 +1086,7 @@ impl DesktopAppRuntime {
 
     fn from_state_with_sdk_runtime(
         mut state: DesktopAppRuntimeState,
-        sdk_runtime: AppSdkRuntime,
+        sdk_runtime: DesktopRuntimeSupervisor,
     ) -> Self {
         let sdk_runtime = Arc::new(Mutex::new(Some(sdk_runtime)));
         state.sdk_runtime = Some(Arc::clone(&sdk_runtime));
@@ -1144,43 +1143,11 @@ fn default_runtime_snapshot() -> AppRuntimeSnapshot {
 fn start_desktop_sdk_runtime(
     paths: &AppDesktopRuntimePaths,
     nostr_relay_urls: Vec<String>,
-) -> Result<AppSdkRuntime, AppSdkRuntimeError> {
-    AppSdkRuntime::start(AppSdkConfig::from_desktop_paths(paths, nostr_relay_urls))
-}
-
-fn desktop_app_sdk_issue_from_runtime_error(
-    error: &AppSdkRuntimeError,
-) -> DesktopAppSdkIssueSummary {
-    match error {
-        AppSdkRuntimeError::CommandFailed(issue) => DesktopAppSdkIssueSummary::from_issue(issue),
-        AppSdkRuntimeError::CommandQueueCapacityZero => DesktopAppSdkIssueSummary::runtime(
-            "sdk_command_queue_capacity_zero",
-            false,
-            ["review_runtime_configuration"],
-        ),
-        AppSdkRuntimeError::WorkerSpawn(_) => {
-            DesktopAppSdkIssueSummary::runtime("sdk_worker_spawn_failed", true, ["retry_startup"])
-        }
-        AppSdkRuntimeError::CommandQueueFull => DesktopAppSdkIssueSummary::runtime(
-            "sdk_command_queue_full",
-            true,
-            ["retry_status_refresh"],
-        ),
-        AppSdkRuntimeError::CommandQueueClosed => {
-            DesktopAppSdkIssueSummary::runtime("sdk_command_queue_closed", true, ["retry_startup"])
-        }
-        AppSdkRuntimeError::CommandResponseClosed => DesktopAppSdkIssueSummary::runtime(
-            "sdk_command_response_closed",
-            true,
-            ["retry_status_refresh"],
-        ),
-        AppSdkRuntimeError::ShutdownAck => {
-            DesktopAppSdkIssueSummary::runtime("sdk_shutdown_ack_failed", true, ["retry_startup"])
-        }
-        AppSdkRuntimeError::WorkerJoin => {
-            DesktopAppSdkIssueSummary::runtime("sdk_worker_join_failed", true, ["retry_startup"])
-        }
-    }
+) -> Result<DesktopRuntimeSupervisor, DesktopRuntimeSupervisorError> {
+    DesktopRuntimeSupervisor::start(DesktopRuntimeSupervisorConfig::from_desktop_paths(
+        paths,
+        nostr_relay_urls,
+    ))
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -1204,21 +1171,21 @@ pub struct DesktopAppSyncConflictSummary {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DesktopAppSdkStatusSummary {
-    pub lifecycle_state: AppSdkLifecycleState,
-    pub projection_lifecycle_state: AppSdkProjectionLifecycleState,
+pub struct DesktopRuntimeSupervisorStatusSummary {
+    pub lifecycle_state: DesktopRuntimeLifecycleState,
+    pub projection_lifecycle_state: DesktopRuntimeProjectionLifecycleState,
     pub projection_lifecycle_reason: Option<String>,
     pub storage_root: PathBuf,
     pub runtime_path: Option<PathBuf>,
     pub private_path: Option<PathBuf>,
     pub studio_path: Option<PathBuf>,
     pub relay_target_count: usize,
-    pub relay_url_policy: AppSdkRelayUrlPolicy,
-    pub last_issue: Option<DesktopAppSdkIssueSummary>,
+    pub relay_url_policy: DesktopRuntimeRelayUrlPolicy,
+    pub last_issue: Option<DesktopRuntimeSupervisorIssueSummary>,
 }
 
-impl DesktopAppSdkStatusSummary {
-    fn from_status(status: &AppSdkRuntimeStatus) -> Self {
+impl DesktopRuntimeSupervisorStatusSummary {
+    fn from_status(status: &DesktopRuntimeSnapshot) -> Self {
         let runtime_path = status
             .storage_paths
             .as_ref()
@@ -1244,25 +1211,25 @@ impl DesktopAppSdkStatusSummary {
             last_issue: status
                 .last_issue
                 .as_ref()
-                .map(DesktopAppSdkIssueSummary::from_issue),
+                .map(DesktopRuntimeSupervisorIssueSummary::from_issue),
         }
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DesktopAppSdkDiagnosticsSummary {
-    pub status: DesktopAppSdkStatusSummary,
-    pub state: DesktopAppSdkDiagnosticsState,
+pub struct DesktopRuntimeSupervisorDiagnosticsSummary {
+    pub status: DesktopRuntimeSupervisorStatusSummary,
+    pub state: DesktopRuntimeSupervisorDiagnosticsState,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DesktopAppSdkDiagnosticsState {
-    Ready(DesktopAppSdkReadyDiagnosticsSummary),
-    Blocked(DesktopAppSdkIssueSummary),
+pub enum DesktopRuntimeSupervisorDiagnosticsState {
+    Ready(DesktopRuntimeSupervisorReadyDiagnosticsSummary),
+    Blocked(DesktopRuntimeSupervisorIssueSummary),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DesktopAppSdkReadyDiagnosticsSummary {
+pub struct DesktopRuntimeSupervisorReadyDiagnosticsSummary {
     pub storage_kind: String,
     pub event_store_total_events: i64,
     pub outbox_total_events: i64,
@@ -1275,8 +1242,8 @@ pub struct DesktopAppSdkReadyDiagnosticsSummary {
     pub sync_relay_target_count: usize,
 }
 
-impl DesktopAppSdkReadyDiagnosticsSummary {
-    fn from_diagnostics(diagnostics: &AppSdkDiagnostics) -> Self {
+impl DesktopRuntimeSupervisorReadyDiagnosticsSummary {
+    fn from_diagnostics(diagnostics: &DesktopRuntimeDiagnostics) -> Self {
         Self {
             storage_kind: diagnostics.storage.storage_kind.clone(),
             event_store_total_events: diagnostics.storage.event_store.total_events,
@@ -1297,15 +1264,15 @@ impl DesktopAppSdkReadyDiagnosticsSummary {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DesktopAppSdkIssueSummary {
+pub struct DesktopRuntimeSupervisorIssueSummary {
     pub code: String,
     pub class: String,
     pub retryable: bool,
     pub recovery_actions: Vec<String>,
 }
 
-impl DesktopAppSdkIssueSummary {
-    fn from_issue(issue: &AppSdkRuntimeIssue) -> Self {
+impl DesktopRuntimeSupervisorIssueSummary {
+    fn from_issue(issue: &DesktopRuntimeIssue) -> Self {
         Self {
             code: issue.code.clone(),
             class: issue.class.clone(),
@@ -1389,7 +1356,7 @@ pub struct DesktopAppRuntimeSummary {
     pub runtime_metadata: DesktopAppRuntimeMetadataSummary,
     pub sync_status: DesktopAppSyncStatusSummary,
     pub startup_issue: Option<String>,
-    pub sdk_status: Option<DesktopAppSdkStatusSummary>,
+    pub sdk_status: Option<DesktopRuntimeSupervisorStatusSummary>,
 }
 
 #[derive(Debug, Error)]
@@ -1458,7 +1425,7 @@ struct DesktopAppRuntimeState {
     remote_signer_paths: Option<DesktopRemoteSignerPaths>,
     accounts_manager: Option<RadrootsNostrAccountsManager>,
     sqlite_store: Option<AppSqliteStore>,
-    sdk_runtime: Option<Arc<Mutex<Option<AppSdkRuntime>>>>,
+    sdk_runtime: Option<Arc<Mutex<Option<DesktopRuntimeSupervisor>>>>,
     sync_transport: Box<dyn AppSyncTransport + Send>,
     runtime_metadata: DesktopAppRuntimeMetadataSummary,
     selected_account_pending_sync_write_count: usize,
@@ -2645,7 +2612,7 @@ impl DesktopAppRuntimeState {
         let source_record_id = order_decision_sdk_source_record_id(&payload);
         self.enqueue_order_decision_payload_via_sdk(
             &payload,
-            AppSdkWorkflowReceiptSourceKind::LocalOutbox,
+            DesktopRuntimeWorkflowReceiptSourceKind::AppWorkflow,
             source_record_id.as_str(),
         )?;
         let _ = self.refresh_selected_account_sync()?;
@@ -2762,7 +2729,7 @@ impl DesktopAppRuntimeState {
         let source_record_id = order_cancellation_sdk_source_record_id(&payload);
         self.enqueue_order_cancellation_payload_via_sdk(
             &payload,
-            AppSdkWorkflowReceiptSourceKind::LocalOutbox,
+            DesktopRuntimeWorkflowReceiptSourceKind::AppWorkflow,
             source_record_id.as_str(),
         )?;
         let _ = self.refresh_selected_account_sync()?;
@@ -3264,7 +3231,7 @@ impl DesktopAppRuntimeState {
             farm_id: account
                 .farmer_activation
                 .farm_id
-                .unwrap_or_else(FarmId::new),
+                .unwrap_or_else(FarmId::generate),
             display_name: draft.farm_name.trim().to_owned(),
             readiness: FarmReadiness::Incomplete,
         };
@@ -4126,7 +4093,7 @@ impl DesktopAppRuntimeState {
             .unwrap_or_else(|| format!("app:order_request:{}", payload.order_id));
         self.enqueue_order_request_payload_via_sdk(
             &payload,
-            AppSdkWorkflowReceiptSourceKind::SharedRuntimeStore,
+            DesktopRuntimeWorkflowReceiptSourceKind::SharedRuntimeStore,
             source_record_id.as_str(),
         )?;
         self.refresh_selected_account_sync()
@@ -4370,7 +4337,7 @@ impl DesktopAppRuntimeState {
     fn enqueue_farm_profile_payload_via_sdk(
         &self,
         payload: &AppFarmProfilePublishPayload,
-        source_kind: AppSdkWorkflowReceiptSourceKind,
+        source_kind: DesktopRuntimeWorkflowReceiptSourceKind,
         source_record_id: &str,
     ) -> Result<(), AppSqliteError> {
         let operation_kind = FARM_PUBLISH_OPERATION_KIND;
@@ -4380,16 +4347,13 @@ impl DesktopAppRuntimeState {
             ))
             .and_then(|identity| {
                 let actor_pubkey = identity.public_key_hex();
-                let public_location =
-                    self.sdk_public_farm_location(actor_pubkey.as_str(), payload.farm_id)?;
-                let request = AppSdkFarmPublishRequest {
+                let request = DesktopRuntimeFarmPublishRequest {
                     actor_account_id: payload.context.account_id.clone(),
                     actor_pubkey: actor_pubkey.clone(),
-                    signer_keys: identity.into_keys(),
-                    farm: farm_profile_publish_payload_to_sdk_farm(
-                        payload,
-                        public_location.as_ref(),
+                    signer: DesktopRuntimeLocalSigner::from_local_identity_keys(
+                        identity.into_keys(),
                     ),
+                    farm: farm_profile_publish_payload_to_sdk_farm(payload, None),
                     target_relays: normalized_app_sync_relay_urls(&self.nostr_relay_urls)?,
                     relay_url_policy: sdk_relay_url_policy_for_targets(&self.nostr_relay_urls),
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
@@ -4399,14 +4363,14 @@ impl DesktopAppRuntimeState {
                     .map_err(sync_transport_error_from_sdk_runtime_error)
             });
         match actor_pubkey {
-            Ok((actor_pubkey, receipt)) => self.record_app_sdk_workflow_success(
+            Ok((actor_pubkey, receipt)) => self.record_desktop_runtime_workflow_success(
                 source_kind,
                 source_record_id,
                 operation_kind,
                 actor_pubkey.as_str(),
                 &receipt,
             ),
-            Err(error) => self.record_app_sdk_workflow_failure(
+            Err(error) => self.record_desktop_runtime_workflow_failure(
                 source_kind,
                 source_record_id,
                 operation_kind,
@@ -4419,7 +4383,7 @@ impl DesktopAppRuntimeState {
     fn enqueue_listing_payload_via_sdk(
         &self,
         payload: &AppListingPublishPayload,
-        source_kind: AppSdkWorkflowReceiptSourceKind,
+        source_kind: DesktopRuntimeWorkflowReceiptSourceKind,
         source_record_id: &str,
     ) -> Result<(), DesktopAppRuntimeProductPublishError> {
         let operation_kind = LISTING_PUBLISH_OPERATION_KIND;
@@ -4429,20 +4393,13 @@ impl DesktopAppRuntimeState {
             ))
             .and_then(|identity| {
                 let actor_pubkey = identity.public_key_hex();
-                let public_location = match payload.farm_id {
-                    Some(farm_id) => {
-                        self.sdk_public_farm_location(actor_pubkey.as_str(), farm_id)?
-                    }
-                    None => None,
-                };
-                let request = AppSdkListingPublishRequest {
+                let request = DesktopRuntimeListingPublishRequest {
                     actor_account_id: payload.context.account_id.clone(),
                     actor_pubkey: actor_pubkey.clone(),
-                    signer_keys: identity.into_keys(),
-                    listing: listing_publish_payload_to_sdk_listing(
-                        payload,
-                        public_location.as_ref(),
-                    )?,
+                    signer: DesktopRuntimeLocalSigner::from_local_identity_keys(
+                        identity.into_keys(),
+                    ),
+                    listing: listing_publish_payload_to_sdk_listing(payload, None)?,
                     target_relays: normalized_app_sync_relay_urls(&self.nostr_relay_urls)?,
                     relay_url_policy: sdk_relay_url_policy_for_targets(&self.nostr_relay_urls),
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
@@ -4453,7 +4410,7 @@ impl DesktopAppRuntimeState {
             });
         match actor_pubkey {
             Ok((actor_pubkey, receipt)) => self
-                .record_app_sdk_workflow_success(
+                .record_desktop_runtime_workflow_success(
                     source_kind,
                     source_record_id,
                     operation_kind,
@@ -4462,7 +4419,7 @@ impl DesktopAppRuntimeState {
                 )
                 .map_err(DesktopAppRuntimeProductPublishError::from),
             Err(error) => {
-                self.record_app_sdk_workflow_failure(
+                self.record_desktop_runtime_workflow_failure(
                     source_kind,
                     source_record_id,
                     operation_kind,
@@ -4477,7 +4434,7 @@ impl DesktopAppRuntimeState {
     fn enqueue_order_request_payload_via_sdk(
         &self,
         payload: &AppOrderRequestPublishPayload,
-        source_kind: AppSdkWorkflowReceiptSourceKind,
+        source_kind: DesktopRuntimeWorkflowReceiptSourceKind,
         source_record_id: &str,
     ) -> Result<(), AppSqliteError> {
         let operation_kind = TRADE_SUBMIT_OPERATION_KIND;
@@ -4488,10 +4445,12 @@ impl DesktopAppRuntimeState {
             .and_then(|identity| {
                 let actor_pubkey = identity.public_key_hex();
                 let order_parts = order_request_publish_payload_to_sdk_product_parts(payload)?;
-                let request = AppSdkTradeProposeRequest {
+                let request = DesktopRuntimeTradeProposeRequest {
                     actor_account_id: payload.context.account_id.clone(),
                     actor_pubkey: actor_pubkey.clone(),
-                    signer_keys: identity.into_keys(),
+                    signer: DesktopRuntimeLocalSigner::from_local_identity_keys(
+                        identity.into_keys(),
+                    ),
                     listing_event: order_request_sdk_listing_event_ptr(payload)?,
                     order_id: order_parts.order_id,
                     listing_addr: order_parts.listing_addr,
@@ -4507,14 +4466,14 @@ impl DesktopAppRuntimeState {
                     .map_err(sync_transport_error_from_sdk_runtime_error)
             });
         match actor_pubkey {
-            Ok((actor_pubkey, receipt)) => self.record_app_sdk_workflow_success(
+            Ok((actor_pubkey, receipt)) => self.record_desktop_runtime_workflow_success(
                 source_kind,
                 source_record_id,
                 operation_kind,
                 actor_pubkey.as_str(),
                 &receipt,
             ),
-            Err(error) => self.record_app_sdk_workflow_failure(
+            Err(error) => self.record_desktop_runtime_workflow_failure(
                 source_kind,
                 source_record_id,
                 operation_kind,
@@ -4527,7 +4486,7 @@ impl DesktopAppRuntimeState {
     fn enqueue_order_decision_payload_via_sdk(
         &self,
         payload: &AppOrderDecisionPublishPayload,
-        source_kind: AppSdkWorkflowReceiptSourceKind,
+        source_kind: DesktopRuntimeWorkflowReceiptSourceKind,
         source_record_id: &str,
     ) -> Result<(), AppSqliteError> {
         let operation_kind = TRADE_DECISION_OPERATION_KIND;
@@ -4537,10 +4496,12 @@ impl DesktopAppRuntimeState {
             ))
             .and_then(|identity| {
                 let actor_pubkey = identity.public_key_hex();
-                let request = AppSdkTradeDecisionRequest {
+                let request = DesktopRuntimeTradeDecisionRequest {
                     actor_account_id: payload.context.account_id.clone(),
                     actor_pubkey: actor_pubkey.clone(),
-                    signer_keys: identity.into_keys(),
+                    signer: DesktopRuntimeLocalSigner::from_local_identity_keys(
+                        identity.into_keys(),
+                    ),
                     locator: trade_locator_from_decision_payload(payload)?,
                     decision: trade_decision_from_publish_payload(payload)?,
                     confirm_public_note: payload.confirm_public_note,
@@ -4551,14 +4512,14 @@ impl DesktopAppRuntimeState {
                     .map_err(sync_transport_error_from_sdk_runtime_error)
             });
         match actor_pubkey {
-            Ok((actor_pubkey, receipt)) => self.record_app_sdk_workflow_success(
+            Ok((actor_pubkey, receipt)) => self.record_desktop_runtime_workflow_success(
                 source_kind,
                 source_record_id,
                 operation_kind,
                 actor_pubkey.as_str(),
                 &receipt,
             ),
-            Err(error) => self.record_app_sdk_workflow_failure(
+            Err(error) => self.record_desktop_runtime_workflow_failure(
                 source_kind,
                 source_record_id,
                 operation_kind,
@@ -4571,7 +4532,7 @@ impl DesktopAppRuntimeState {
     fn enqueue_order_cancellation_payload_via_sdk(
         &self,
         payload: &AppOrderCancellationPublishPayload,
-        source_kind: AppSdkWorkflowReceiptSourceKind,
+        source_kind: DesktopRuntimeWorkflowReceiptSourceKind,
         source_record_id: &str,
     ) -> Result<(), AppSqliteError> {
         let operation_kind = TRADE_CANCELLATION_OPERATION_KIND;
@@ -4581,10 +4542,12 @@ impl DesktopAppRuntimeState {
             ))
             .and_then(|identity| {
                 let actor_pubkey = identity.public_key_hex();
-                let request = AppSdkTradeCancellationRequest {
+                let request = DesktopRuntimeTradeCancellationRequest {
                     actor_account_id: payload.context.account_id.clone(),
                     actor_pubkey: actor_pubkey.clone(),
-                    signer_keys: identity.into_keys(),
+                    signer: DesktopRuntimeLocalSigner::from_local_identity_keys(
+                        identity.into_keys(),
+                    ),
                     locator: trade_locator_from_cancellation_payload(payload)?,
                     reason: payload.reason.clone(),
                     confirm_public_note: payload.confirm_public_note,
@@ -4595,14 +4558,14 @@ impl DesktopAppRuntimeState {
                     .map_err(sync_transport_error_from_sdk_runtime_error)
             });
         match actor_pubkey {
-            Ok((actor_pubkey, receipt)) => self.record_app_sdk_workflow_success(
+            Ok((actor_pubkey, receipt)) => self.record_desktop_runtime_workflow_success(
                 source_kind,
                 source_record_id,
                 operation_kind,
                 actor_pubkey.as_str(),
                 &receipt,
             ),
-            Err(error) => self.record_app_sdk_workflow_failure(
+            Err(error) => self.record_desktop_runtime_workflow_failure(
                 source_kind,
                 source_record_id,
                 operation_kind,
@@ -4622,58 +4585,45 @@ impl DesktopAppRuntimeState {
         signing_identity_for_publish_payload(accounts_manager, payload)
     }
 
-    fn sdk_public_farm_location(
-        &self,
-        actor_pubkey: &str,
-        farm_id: FarmId,
-    ) -> Result<Option<AppSdkPublicFarmLocation>, AppSyncTransportError> {
-        let request = AppSdkFarmPublicLocationRequest {
-            actor_pubkey: actor_pubkey.to_owned(),
-            farm_d_tag: d_tag_from_uuid(farm_id.as_uuid()),
-        };
-        self.with_app_sdk_runtime(|runtime| runtime.farm_public_location(request))
-            .map_err(sync_transport_error_from_sdk_runtime_error)
-    }
-
     fn enqueue_app_sdk_farm_publish(
         &self,
-        request: AppSdkFarmPublishRequest,
-    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        request: DesktopRuntimeFarmPublishRequest,
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
         self.with_app_sdk_runtime(|runtime| runtime.enqueue_farm_publish(request))
     }
 
     fn enqueue_app_sdk_listing_publish(
         &self,
-        request: AppSdkListingPublishRequest,
-    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        request: DesktopRuntimeListingPublishRequest,
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
         self.with_app_sdk_runtime(|runtime| runtime.enqueue_listing_publish(request))
     }
 
     fn enqueue_app_sdk_trade_propose(
         &self,
-        request: AppSdkTradeProposeRequest,
-    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        request: DesktopRuntimeTradeProposeRequest,
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
         self.with_app_sdk_runtime(|runtime| runtime.trade_propose(request))
     }
 
     fn enqueue_app_sdk_trade_decision(
         &self,
-        request: AppSdkTradeDecisionRequest,
-    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        request: DesktopRuntimeTradeDecisionRequest,
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
         self.with_app_sdk_runtime(|runtime| runtime.trade_decide(request))
     }
 
     fn enqueue_app_sdk_trade_cancellation(
         &self,
-        request: AppSdkTradeCancellationRequest,
-    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        request: DesktopRuntimeTradeCancellationRequest,
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
         self.with_app_sdk_runtime(|runtime| runtime.trade_cancel(request))
     }
 
     fn with_app_sdk_runtime<T>(
         &self,
-        command: impl FnOnce(&AppSdkRuntime) -> Result<T, AppSdkRuntimeError>,
-    ) -> Result<T, AppSdkRuntimeError> {
+        command: impl FnOnce(&DesktopRuntimeSupervisor) -> Result<T, DesktopRuntimeSupervisorError>,
+    ) -> Result<T, DesktopRuntimeSupervisorError> {
         let Some(handle) = self.sdk_runtime.as_ref() else {
             return Err(sdk_runtime_unavailable_error());
         };
@@ -4684,67 +4634,66 @@ impl DesktopAppRuntimeState {
         command(runtime)
     }
 
-    fn record_app_sdk_workflow_success(
+    fn record_desktop_runtime_workflow_success(
         &self,
-        source_kind: AppSdkWorkflowReceiptSourceKind,
+        source_kind: DesktopRuntimeWorkflowReceiptSourceKind,
         source_record_id: &str,
         operation_kind: &str,
         actor_pubkey: &str,
-        receipt: &AppSdkWorkflowReceipt,
+        receipt: &DesktopRuntimeEffectReceipt,
     ) -> Result<(), AppSqliteError> {
         let detail_json = json!({
+            "effect_id": receipt.effect_id,
+            "effect_kind": format!("{:?}", receipt.effect_kind),
             "operation_kind": receipt.operation_kind,
-            "expected_event_id": receipt.expected_event_id,
-            "signed_event_id": receipt.signed_event_id,
-            "outbox_operation_id": receipt.outbox_operation_id,
-            "outbox_event_id": receipt.outbox_event_id,
-            "state": receipt.state,
+            "actor_pubkey": receipt.actor_pubkey,
+            "state": "accepted",
         });
-        self.record_app_sdk_workflow_receipt(AppSdkWorkflowReceiptInput {
+        self.record_desktop_runtime_workflow_receipt(DesktopRuntimeWorkflowReceiptInput {
             source_kind,
             source_record_id: source_record_id.to_owned(),
             sdk_operation_kind: operation_kind.to_owned(),
-            sdk_outbox_event_ids: vec![receipt.outbox_event_id.to_string()],
-            expected_event_id: Some(receipt.expected_event_id.clone()),
+            runtime_effect_ids: vec![receipt.effect_id.to_string()],
+            expected_event_id: None,
             actor_pubkey: Some(actor_pubkey.to_owned()),
-            idempotency_digest_prefix: receipt.idempotency_digest_prefix.clone(),
-            workflow_state: AppSdkWorkflowReceiptState::Enqueued,
+            idempotency_digest_prefix: None,
+            workflow_state: DesktopRuntimeWorkflowReceiptState::Prepared,
             recorded_at: current_utc_timestamp(),
             detail_json,
         })
     }
 
-    fn record_app_sdk_workflow_failure(
+    fn record_desktop_runtime_workflow_failure(
         &self,
-        source_kind: AppSdkWorkflowReceiptSourceKind,
+        source_kind: DesktopRuntimeWorkflowReceiptSourceKind,
         source_record_id: &str,
         operation_kind: &str,
         actor_pubkey: Option<&str>,
         detail_json: serde_json::Value,
     ) -> Result<(), AppSqliteError> {
-        self.record_app_sdk_workflow_receipt(AppSdkWorkflowReceiptInput {
+        self.record_desktop_runtime_workflow_receipt(DesktopRuntimeWorkflowReceiptInput {
             source_kind,
             source_record_id: source_record_id.to_owned(),
             sdk_operation_kind: operation_kind.to_owned(),
-            sdk_outbox_event_ids: Vec::new(),
+            runtime_effect_ids: Vec::new(),
             expected_event_id: None,
             actor_pubkey: actor_pubkey.map(str::to_owned),
             idempotency_digest_prefix: None,
-            workflow_state: AppSdkWorkflowReceiptState::Failed,
+            workflow_state: DesktopRuntimeWorkflowReceiptState::Failed,
             recorded_at: current_utc_timestamp(),
             detail_json,
         })
     }
 
-    fn record_app_sdk_workflow_receipt(
+    fn record_desktop_runtime_workflow_receipt(
         &self,
-        input: AppSdkWorkflowReceiptInput,
+        input: DesktopRuntimeWorkflowReceiptInput,
     ) -> Result<(), AppSqliteError> {
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Ok(());
         };
         let _ = sqlite_store
-            .sdk_workflow_receipt_repository()
+            .runtime_workflow_receipt_repository()
             .record_receipt(&input)?;
         Ok(())
     }
@@ -6830,7 +6779,7 @@ fn listing_fulfillment_location(
 
 fn farm_profile_publish_payload_to_sdk_farm(
     payload: &AppFarmProfilePublishPayload,
-    public_location: Option<&AppSdkPublicFarmLocation>,
+    public_location: Option<&DesktopRuntimePublicFarmLocation>,
 ) -> RadrootsFarm {
     RadrootsFarm {
         d_tag: d_tag_from_uuid(payload.farm_id.as_uuid()),
@@ -6851,17 +6800,17 @@ fn farm_publish_source_record(
     farm_id: FarmId,
     source: &str,
     source_local_event_id: Option<&str>,
-) -> (AppSdkWorkflowReceiptSourceKind, String) {
+) -> (DesktopRuntimeWorkflowReceiptSourceKind, String) {
     source_local_event_id
         .map(|record_id| {
             (
-                AppSdkWorkflowReceiptSourceKind::SharedRuntimeStore,
+                DesktopRuntimeWorkflowReceiptSourceKind::SharedRuntimeStore,
                 record_id.to_owned(),
             )
         })
         .unwrap_or_else(|| {
             (
-                AppSdkWorkflowReceiptSourceKind::LocalOutbox,
+                DesktopRuntimeWorkflowReceiptSourceKind::AppWorkflow,
                 format!("app:farm_publish:{farm_id}:{source}"),
             )
         })
@@ -6871,17 +6820,17 @@ fn listing_publish_source_record(
     product_id: ProductId,
     source: &str,
     source_local_event_id: Option<&str>,
-) -> (AppSdkWorkflowReceiptSourceKind, String) {
+) -> (DesktopRuntimeWorkflowReceiptSourceKind, String) {
     source_local_event_id
         .map(|record_id| {
             (
-                AppSdkWorkflowReceiptSourceKind::SharedRuntimeStore,
+                DesktopRuntimeWorkflowReceiptSourceKind::SharedRuntimeStore,
                 record_id.to_owned(),
             )
         })
         .unwrap_or_else(|| {
             (
-                AppSdkWorkflowReceiptSourceKind::LocalOutbox,
+                DesktopRuntimeWorkflowReceiptSourceKind::AppWorkflow,
                 format!("app:listing_publish:{product_id}:{source}"),
             )
         })
@@ -6895,14 +6844,14 @@ fn order_cancellation_sdk_source_record_id(payload: &AppOrderCancellationPublish
     format!("app:order_cancellation:{}", payload.app_order_id)
 }
 
-fn sdk_relay_url_policy_for_targets(target_relays: &[String]) -> AppSdkRelayUrlPolicy {
+fn sdk_relay_url_policy_for_targets(target_relays: &[String]) -> DesktopRuntimeRelayUrlPolicy {
     if target_relays
         .iter()
         .any(|relay_url| relay_url.trim().starts_with("ws://"))
     {
-        AppSdkRelayUrlPolicy::Localhost
+        DesktopRuntimeRelayUrlPolicy::Localhost
     } else {
-        AppSdkRelayUrlPolicy::Public
+        DesktopRuntimeRelayUrlPolicy::Public
     }
 }
 
@@ -6913,8 +6862,8 @@ fn sdk_idempotency_key(source_record_id: &str) -> String {
     )
 }
 
-fn sdk_runtime_unavailable_error() -> AppSdkRuntimeError {
-    AppSdkRuntimeError::CommandFailed(AppSdkRuntimeIssue {
+fn sdk_runtime_unavailable_error() -> DesktopRuntimeSupervisorError {
+    DesktopRuntimeSupervisorError::Unavailable(DesktopRuntimeIssue {
         code: "sdk_runtime_not_available".to_owned(),
         class: "runtime".to_owned(),
         retryable: true,
@@ -6929,57 +6878,40 @@ fn sdk_runtime_unavailable_error() -> AppSdkRuntimeError {
     })
 }
 
-fn sync_transport_error_from_sdk_runtime_error(error: AppSdkRuntimeError) -> AppSyncTransportError {
-    AppSyncTransportError::failed(sdk_runtime_error_detail_json(&error).to_string())
+fn sync_transport_error_from_sdk_runtime_error(
+    error: DesktopRuntimeSupervisorError,
+) -> AppSyncTransportError {
+    AppSyncTransportError::failed(desktop_runtime_supervisor_error_detail_json(&error).to_string())
 }
 
-fn sdk_runtime_error_detail_json(error: &AppSdkRuntimeError) -> serde_json::Value {
+fn desktop_runtime_supervisor_error_detail_json(
+    error: &DesktopRuntimeSupervisorError,
+) -> serde_json::Value {
     match error {
-        AppSdkRuntimeError::CommandFailed(issue) => issue.detail_json.clone(),
-        AppSdkRuntimeError::CommandQueueCapacityZero => json!({
-            "code": "sdk_command_queue_capacity_zero",
+        DesktopRuntimeSupervisorError::Unavailable(issue) => issue.detail_json.clone(),
+        DesktopRuntimeSupervisorError::EffectQueueCapacityZero => json!({
+            "code": "desktop_runtime_effect_queue_capacity_zero",
             "class": "runtime",
             "retryable": false,
             "message": error.to_string(),
             "recovery_actions": ["review_runtime_configuration"],
         }),
-        AppSdkRuntimeError::WorkerSpawn(_) => json!({
-            "code": "sdk_worker_spawn_failed",
+        DesktopRuntimeSupervisorError::WorkerSpawn(_) => json!({
+            "code": "desktop_runtime_worker_spawn_failed",
             "class": "runtime",
             "retryable": true,
             "message": error.to_string(),
             "recovery_actions": ["retry_startup"],
         }),
-        AppSdkRuntimeError::CommandQueueFull => json!({
-            "code": "sdk_command_queue_full",
+        DesktopRuntimeSupervisorError::EffectQueueFull => json!({
+            "code": "desktop_runtime_effect_queue_full",
             "class": "runtime",
             "retryable": true,
             "message": error.to_string(),
             "recovery_actions": ["retry_command"],
         }),
-        AppSdkRuntimeError::CommandQueueClosed => json!({
-            "code": "sdk_command_queue_closed",
-            "class": "runtime",
-            "retryable": true,
-            "message": error.to_string(),
-            "recovery_actions": ["restart_runtime"],
-        }),
-        AppSdkRuntimeError::CommandResponseClosed => json!({
-            "code": "sdk_command_response_closed",
-            "class": "runtime",
-            "retryable": true,
-            "message": error.to_string(),
-            "recovery_actions": ["restart_runtime"],
-        }),
-        AppSdkRuntimeError::ShutdownAck => json!({
-            "code": "sdk_shutdown_ack_failed",
-            "class": "runtime",
-            "retryable": true,
-            "message": error.to_string(),
-            "recovery_actions": ["restart_runtime"],
-        }),
-        AppSdkRuntimeError::WorkerJoin => json!({
-            "code": "sdk_worker_join_failed",
+        DesktopRuntimeSupervisorError::EffectQueueClosed => json!({
+            "code": "desktop_runtime_effect_queue_closed",
             "class": "runtime",
             "retryable": true,
             "message": error.to_string(),
@@ -7012,7 +6944,7 @@ fn sync_transport_error_detail_json(error: &AppSyncTransportError) -> serde_json
 
 fn listing_publish_payload_to_sdk_listing(
     payload: &AppListingPublishPayload,
-    public_location: Option<&AppSdkPublicFarmLocation>,
+    public_location: Option<&DesktopRuntimePublicFarmLocation>,
 ) -> Result<RadrootsListing, AppSyncTransportError> {
     let currency = payload
         .price_currency
@@ -7105,7 +7037,7 @@ fn listing_publish_payload_to_sdk_listing(
 }
 
 fn public_farm_location_to_protocol(
-    location: &AppSdkPublicFarmLocation,
+    location: &DesktopRuntimePublicFarmLocation,
 ) -> RadrootsFarmPublicLocation {
     RadrootsFarmPublicLocation {
         primary: location.primary.clone(),
@@ -7117,7 +7049,7 @@ fn public_farm_location_to_protocol(
 }
 
 fn public_listing_location_to_protocol(
-    location: &AppSdkPublicFarmLocation,
+    location: &DesktopRuntimePublicFarmLocation,
 ) -> RadrootsListingPublicLocation {
     RadrootsListingPublicLocation {
         primary: location.primary.clone(),
@@ -9120,11 +9052,11 @@ fn trade_locator_from_cancellation_payload(
 
 fn trade_decision_from_publish_payload(
     payload: &AppOrderDecisionPublishPayload,
-) -> Result<AppSdkTradeDecision, AppSyncTransportError> {
+) -> Result<DesktopRuntimeTradeDecision, AppSyncTransportError> {
     match &payload.decision {
         AppOrderDecisionPayload::Accepted {
             inventory_commitments,
-        } => Ok(AppSdkTradeDecision::Accept {
+        } => Ok(DesktopRuntimeTradeDecision::Accept {
             inventory_commitments: inventory_commitments
                 .iter()
                 .map(|commitment| {
@@ -9135,7 +9067,7 @@ fn trade_decision_from_publish_payload(
                 })
                 .collect::<Result<Vec<_>, AppSyncTransportError>>()?,
         }),
-        AppOrderDecisionPayload::Declined { reason } => Ok(AppSdkTradeDecision::Decline {
+        AppOrderDecisionPayload::Declined { reason } => Ok(DesktopRuntimeTradeDecision::Decline {
             reason: reason.clone(),
         }),
     }
@@ -9246,17 +9178,18 @@ mod tests {
     use radroots_sql_core::{SqlExecutor, SqlxSqliteExecutor};
     use radroots_studio_app_core::{
         AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePlatform,
-        AppSdkLifecycleState, AppSdkProjectionLifecycleState, AppSdkPublicFarmLocation,
-        AppSdkTradeDecision, AppSharedAccountsPaths, SHARED_ACCOUNTS_STORE_FILE_NAME,
+        AppSharedAccountsPaths, DesktopRuntimeLifecycleState,
+        DesktopRuntimeProjectionLifecycleState, DesktopRuntimePublicFarmLocation,
+        DesktopRuntimeSnapshot, DesktopRuntimeTradeDecision, SHARED_ACCOUNTS_STORE_FILE_NAME,
         SHARED_IDENTITY_FILE_NAME,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
     };
     use radroots_studio_app_sqlite::{
-        AppSdkWorkflowReceiptSourceKind, AppSdkWorkflowReceiptState, AppSqliteError,
-        AppSqliteStore, BuyerOrderCoordinationState, DatabaseTarget, latest_schema_version,
-        projected_order_id_from_trade_request,
+        AppSqliteError, AppSqliteStore, BuyerOrderCoordinationState, DatabaseTarget,
+        DesktopRuntimeWorkflowReceiptSourceKind, DesktopRuntimeWorkflowReceiptState,
+        latest_schema_version, projected_order_id_from_trade_request,
     };
     use radroots_studio_app_state::{
         APP_STATE_FILE_NAME, AppStateCommand, AppStatePersistenceRepository, AppStateRepository,
@@ -9314,10 +9247,11 @@ mod tests {
         APP_DATABASE_FILE_NAME, APP_SYNC_PUBLISH_USES_SDK_RUNTIME_MESSAGE,
         ConfiguredRelayAppSyncTransport, DesktopAppRuntime, DesktopAppRuntimeActivityContextError,
         DesktopAppRuntimeCommandError, DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeState,
-        DesktopAppSdkDiagnosticsState, DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths,
-        SYNC_TRANSPORT_UNAVAILABLE_MESSAGE, TokioRuntimeBuilder, default_sync_transport,
-        direct_relay_event_source_runtime, farm_sync_payload, is_hex_64, pending_sync_upsert,
-        signed_event_from_local_record, trade_decision_from_publish_payload,
+        DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths,
+        DesktopRuntimeSupervisorDiagnosticsState, SYNC_TRANSPORT_UNAVAILABLE_MESSAGE,
+        TokioRuntimeBuilder, default_sync_transport, direct_relay_event_source_runtime,
+        farm_sync_payload, is_hex_64, pending_sync_upsert, signed_event_from_local_record,
+        trade_decision_from_publish_payload,
     };
     use crate::pack_day_host_handoff::PackDayHostHandoffError;
     use crate::pack_day_print::{
@@ -9843,7 +9777,7 @@ mod tests {
                 pending_operations: vec![operation],
                 known_conflicts: Vec::new(),
             })
-            .expect_err("direct relay farm publish should use AppSdkRuntime");
+            .expect_err("direct relay farm publish should use DesktopRuntimeSupervisor");
 
         assert_migrated_payload_uses_sdk_runtime(error);
         assert_eq!(relay_a.event_count(), 0);
@@ -9878,7 +9812,7 @@ mod tests {
                 pending_operations: vec![operation],
                 known_conflicts: Vec::new(),
             })
-            .expect_err("direct relay listing publish should use AppSdkRuntime");
+            .expect_err("direct relay listing publish should use DesktopRuntimeSupervisor");
 
         assert_migrated_payload_uses_sdk_runtime(error);
         assert_eq!(relay.event_count(), 0);
@@ -9971,7 +9905,7 @@ mod tests {
                 pending_operations: vec![operation],
                 known_conflicts: Vec::new(),
             })
-            .expect_err("direct relay order request publish should use AppSdkRuntime");
+            .expect_err("direct relay order request publish should use DesktopRuntimeSupervisor");
 
         assert_migrated_payload_uses_sdk_runtime(error);
         assert_eq!(relay.event_count(), 0);
@@ -10019,7 +9953,7 @@ mod tests {
                 pending_operations: vec![operation],
                 known_conflicts: Vec::new(),
             })
-            .expect_err("direct relay order decision publish should use AppSdkRuntime");
+            .expect_err("direct relay order decision publish should use DesktopRuntimeSupervisor");
 
         assert_migrated_payload_uses_sdk_runtime(error);
         assert_eq!(relay.event_count(), 0);
@@ -10091,7 +10025,7 @@ mod tests {
                 pending_operations: operations,
                 known_conflicts: Vec::new(),
             })
-            .expect_err("direct relay lifecycle publish should use AppSdkRuntime");
+            .expect_err("direct relay lifecycle publish should use DesktopRuntimeSupervisor");
 
         assert_migrated_payload_uses_sdk_runtime(error);
         assert_eq!(relay.event_count(), 0);
@@ -10231,7 +10165,7 @@ mod tests {
             fulfillment_location: Some("Relay barn".to_owned()),
             status: ProductStatus::Published,
         };
-        let public_location = AppSdkPublicFarmLocation {
+        let public_location = DesktopRuntimePublicFarmLocation {
             primary: "Relay barn".to_owned(),
             city: Some("San Francisco".to_owned()),
             region: Some("CA".to_owned()),
@@ -10530,7 +10464,7 @@ mod tests {
                 pending_operations: vec![successful_operation, unsupported_operation],
                 known_conflicts: Vec::new(),
             })
-            .expect_err("publish work should use AppSdkRuntime before partial progress");
+            .expect_err("publish work should use DesktopRuntimeSupervisor before partial progress");
 
         assert_migrated_payload_uses_sdk_runtime(error);
         assert_eq!(relay.event_count(), 0);
@@ -10641,7 +10575,7 @@ mod tests {
                 pending_operations: vec![operation],
                 known_conflicts: Vec::new(),
             })
-            .expect_err("direct relay order request should use AppSdkRuntime");
+            .expect_err("direct relay order request should use DesktopRuntimeSupervisor");
 
         assert_migrated_payload_uses_sdk_runtime(error);
         assert_eq!(relay.event_count(), 0);
@@ -10675,7 +10609,7 @@ mod tests {
                 pending_operations: vec![operation],
                 known_conflicts: Vec::new(),
             })
-            .expect_err("payload account publish work should use AppSdkRuntime");
+            .expect_err("payload account publish work should use DesktopRuntimeSupervisor");
 
         assert_migrated_payload_uses_sdk_runtime(error);
         assert_eq!(relay.event_count(), 0);
@@ -10705,7 +10639,7 @@ mod tests {
                 pending_operations: vec![operation],
                 known_conflicts: Vec::new(),
             })
-            .expect_err("missing account publish work should use AppSdkRuntime");
+            .expect_err("missing account publish work should use DesktopRuntimeSupervisor");
 
         assert_migrated_payload_uses_sdk_runtime(error);
         assert_eq!(relay.event_count(), 0);
@@ -10737,7 +10671,7 @@ mod tests {
                 pending_operations: vec![operation],
                 known_conflicts: Vec::new(),
             })
-            .expect_err("watch-only account publish work should use AppSdkRuntime");
+            .expect_err("watch-only account publish work should use DesktopRuntimeSupervisor");
 
         assert_migrated_payload_uses_sdk_runtime(error);
         assert_eq!(relay.event_count(), 0);
@@ -10783,7 +10717,7 @@ mod tests {
                 pending_operations: vec![operation],
                 known_conflicts: Vec::new(),
             })
-            .expect_err("mismatched custody publish work should use AppSdkRuntime");
+            .expect_err("mismatched custody publish work should use DesktopRuntimeSupervisor");
 
         assert_migrated_payload_uses_sdk_runtime(error);
         assert_eq!(relay.event_count(), 0);
@@ -11222,25 +11156,28 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .sdk_workflow_receipt_repository()
+            .runtime_workflow_receipt_repository()
             .load_receipt(
-                AppSdkWorkflowReceiptSourceKind::SharedRuntimeStore,
+                DesktopRuntimeWorkflowReceiptSourceKind::SharedRuntimeStore,
                 listing_record.record_id.as_str(),
             )
             .expect("listing SDK workflow receipt should load")
             .expect("listing SDK workflow receipt should exist");
         assert_eq!(receipt.source_record_id, listing_record.record_id);
         assert_eq!(receipt.sdk_operation_kind, LISTING_PUBLISH_OPERATION_KIND);
-        assert_eq!(receipt.workflow_state, AppSdkWorkflowReceiptState::Enqueued);
-        assert!(receipt.expected_event_id.is_some());
+        assert_eq!(
+            receipt.workflow_state,
+            DesktopRuntimeWorkflowReceiptState::Prepared
+        );
+        assert!(receipt.expected_event_id.is_none());
         assert!(
             receipt
                 .actor_pubkey
                 .as_deref()
                 .is_some_and(super::is_hex_64)
         );
-        assert!(!receipt.sdk_outbox_event_ids.is_empty());
-        assert!(receipt.idempotency_digest_prefix.is_some());
+        assert!(!receipt.runtime_effect_ids.is_empty());
+        assert!(receipt.idempotency_digest_prefix.is_none());
         assert_eq!(
             receipt.detail_json["operation_kind"],
             LISTING_PUBLISH_OPERATION_KIND
@@ -11306,11 +11243,7 @@ mod tests {
                 panic!("product editor should be open")
             }
         };
-        assert!(
-            runtime
-                .shutdown_sdk_runtime()
-                .expect("sdk runtime should shut down")
-        );
+        assert!(runtime.shutdown_sdk_runtime());
         let draft = ProductEditorDraft {
             title: "Salad mix".to_owned(),
             subtitle: "Cut this morning".to_owned(),
@@ -11357,17 +11290,20 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .sdk_workflow_receipt_repository()
+            .runtime_workflow_receipt_repository()
             .load_receipt(
-                AppSdkWorkflowReceiptSourceKind::SharedRuntimeStore,
+                DesktopRuntimeWorkflowReceiptSourceKind::SharedRuntimeStore,
                 listing_record.record_id.as_str(),
             )
             .expect("failed listing SDK workflow receipt should load")
             .expect("failed listing SDK workflow receipt should exist");
         assert_eq!(receipt.source_record_id, listing_record.record_id);
         assert_eq!(receipt.sdk_operation_kind, LISTING_PUBLISH_OPERATION_KIND);
-        assert_eq!(receipt.workflow_state, AppSdkWorkflowReceiptState::Failed);
-        assert!(receipt.sdk_outbox_event_ids.is_empty());
+        assert_eq!(
+            receipt.workflow_state,
+            DesktopRuntimeWorkflowReceiptState::Failed
+        );
+        assert!(receipt.runtime_effect_ids.is_empty());
         assert!(receipt.expected_event_id.is_none());
         assert!(receipt.actor_pubkey.is_none());
         assert!(receipt.idempotency_digest_prefix.is_none());
@@ -11388,7 +11324,7 @@ mod tests {
                 .sqlite_store
                 .as_ref()
                 .expect("sqlite store")
-                .sdk_workflow_receipt_repository();
+                .runtime_workflow_receipt_repository();
             retry_records
                 .iter()
                 .filter(|record| {
@@ -11401,20 +11337,18 @@ mod tests {
                 .filter_map(|record| {
                     repository
                         .load_receipt(
-                            AppSdkWorkflowReceiptSourceKind::SharedRuntimeStore,
+                            DesktopRuntimeWorkflowReceiptSourceKind::SharedRuntimeStore,
                             record.record_id.as_str(),
                         )
                         .expect("retry listing SDK workflow receipt should load")
                 })
-                .filter(|receipt| receipt.workflow_state == AppSdkWorkflowReceiptState::Enqueued)
+                .filter(|receipt| {
+                    receipt.workflow_state == DesktopRuntimeWorkflowReceiptState::Prepared
+                })
                 .count()
         };
         assert!(enqueued_listing_receipts >= 1);
-        assert!(
-            runtime
-                .shutdown_sdk_runtime()
-                .expect("sdk runtime should shut down after retry")
-        );
+        assert!(runtime.shutdown_sdk_runtime());
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -11492,11 +11426,7 @@ mod tests {
                 .save_product_editor_draft(draft)
                 .expect("initial published product save should enqueue")
         );
-        assert!(
-            runtime
-                .shutdown_sdk_runtime()
-                .expect("sdk runtime should shut down")
-        );
+        assert!(runtime.shutdown_sdk_runtime());
 
         let error = runtime
             .update_product_stock(product_id, 13)
@@ -11524,13 +11454,13 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .sdk_workflow_receipt_repository()
+            .runtime_workflow_receipt_repository()
             .load_receipt(source_kind, source_record_id.as_str())
             .expect("failed stock listing SDK workflow receipt should load")
             .expect("failed stock listing SDK workflow receipt should exist");
         assert_eq!(
             failed_receipt.workflow_state,
-            AppSdkWorkflowReceiptState::Failed
+            DesktopRuntimeWorkflowReceiptState::Failed
         );
         assert_eq!(
             failed_receipt.detail_json["code"],
@@ -11548,20 +11478,16 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .sdk_workflow_receipt_repository()
+            .runtime_workflow_receipt_repository()
             .load_receipt(source_kind, source_record_id.as_str())
             .expect("retry stock listing SDK workflow receipt should load")
             .expect("retry stock listing SDK workflow receipt should exist");
         assert_eq!(
             retry_receipt.workflow_state,
-            AppSdkWorkflowReceiptState::Enqueued
+            DesktopRuntimeWorkflowReceiptState::Prepared
         );
-        assert!(retry_receipt.expected_event_id.is_some());
-        assert!(
-            runtime
-                .shutdown_sdk_runtime()
-                .expect("sdk runtime should shut down after retry")
-        );
+        assert!(retry_receipt.expected_event_id.is_none());
+        assert!(runtime.shutdown_sdk_runtime());
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -13001,11 +12927,14 @@ mod tests {
             vec!["ws://127.0.0.1:8080".to_owned()],
             super::default_runtime_snapshot(),
         );
-        let status = runtime
-            .wait_for_sdk_startup(StdDuration::from_secs(5))
-            .expect("sdk runtime should be present");
+        let status = wait_for_sdk_status(
+            &runtime,
+            DesktopRuntimeLifecycleState::Ready,
+            StdDuration::from_secs(5),
+        )
+        .expect("sdk runtime should be ready");
 
-        assert_eq!(status.state, AppSdkLifecycleState::Ready);
+        assert_eq!(status.state, DesktopRuntimeLifecycleState::Ready);
         assert_eq!(status.storage_root, paths.app.data.join("sdk"));
         assert_eq!(
             status
@@ -13017,16 +12946,14 @@ mod tests {
         );
         let diagnostics = runtime
             .sdk_diagnostics()
-            .expect("sdk diagnostics should load")
             .expect("sdk diagnostics should be present");
-        assert_eq!(diagnostics.runtime.state, AppSdkLifecycleState::Ready);
+        assert_eq!(
+            diagnostics.runtime.state,
+            DesktopRuntimeLifecycleState::Ready
+        );
         assert_eq!(diagnostics.storage.storage_kind, "directory");
         assert_eq!(diagnostics.sync.transport_targets.configured_count, 1);
-        assert!(
-            runtime
-                .shutdown_sdk_runtime()
-                .expect("sdk runtime should shut down")
-        );
+        assert!(runtime.shutdown_sdk_runtime());
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -13039,17 +12966,23 @@ mod tests {
             vec!["ws://127.0.0.1:8080".to_owned()],
             super::default_runtime_snapshot(),
         );
-        runtime
-            .wait_for_sdk_startup(StdDuration::from_secs(5))
-            .expect("sdk runtime should be present");
+        wait_for_sdk_status(
+            &runtime,
+            DesktopRuntimeLifecycleState::Ready,
+            StdDuration::from_secs(5),
+        )
+        .expect("sdk runtime should be ready");
 
         let summary = runtime.summary();
         let sdk_status = summary.sdk_status.expect("sdk status summary");
 
-        assert_eq!(sdk_status.lifecycle_state, AppSdkLifecycleState::Ready);
+        assert_eq!(
+            sdk_status.lifecycle_state,
+            DesktopRuntimeLifecycleState::Ready
+        );
         assert_eq!(
             sdk_status.projection_lifecycle_state,
-            AppSdkProjectionLifecycleState::Current
+            DesktopRuntimeProjectionLifecycleState::Current
         );
         assert_eq!(sdk_status.storage_root, paths.app.data.join("sdk"));
         assert_eq!(
@@ -13065,11 +12998,7 @@ mod tests {
             Some(&paths.app.data.join("sdk").join("studio.sqlite"))
         );
         assert_eq!(sdk_status.relay_target_count, 1);
-        assert!(
-            runtime
-                .shutdown_sdk_runtime()
-                .expect("sdk runtime should shut down")
-        );
+        assert!(runtime.shutdown_sdk_runtime());
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -13082,10 +13011,12 @@ mod tests {
             vec!["ws://relay.example".to_owned()],
             super::default_runtime_snapshot(),
         );
-        let status = runtime
-            .wait_for_sdk_startup(StdDuration::from_secs(5))
-            .expect("sdk runtime should be present");
-        assert_eq!(status.state, AppSdkLifecycleState::Degraded);
+        wait_for_sdk_status(
+            &runtime,
+            DesktopRuntimeLifecycleState::Degraded,
+            StdDuration::from_secs(5),
+        )
+        .expect("sdk runtime should be degraded");
 
         let diagnostics = runtime
             .sdk_diagnostics_summary()
@@ -13093,10 +13024,10 @@ mod tests {
 
         assert_eq!(
             diagnostics.status.lifecycle_state,
-            AppSdkLifecycleState::Degraded
+            DesktopRuntimeLifecycleState::Degraded
         );
         match diagnostics.state {
-            DesktopAppSdkDiagnosticsState::Blocked(issue) => {
+            DesktopRuntimeSupervisorDiagnosticsState::Blocked(issue) => {
                 assert_eq!(issue.code, "invalid_relay_url");
                 assert_eq!(issue.class, "configuration");
                 assert!(!issue.retryable);
@@ -13108,11 +13039,7 @@ mod tests {
             }
             unexpected => panic!("unexpected diagnostics state: {unexpected:?}"),
         }
-        assert!(
-            runtime
-                .shutdown_sdk_runtime()
-                .expect("sdk runtime should shut down")
-        );
+        assert!(runtime.shutdown_sdk_runtime());
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -13125,9 +13052,12 @@ mod tests {
             vec!["ws://127.0.0.1:8080".to_owned()],
             super::default_runtime_snapshot(),
         );
-        runtime
-            .wait_for_sdk_startup(StdDuration::from_secs(5))
-            .expect("sdk runtime should be present");
+        wait_for_sdk_status(
+            &runtime,
+            DesktopRuntimeLifecycleState::Ready,
+            StdDuration::from_secs(5),
+        )
+        .expect("sdk runtime should be ready");
         {
             let sdk_runtime = runtime.sdk_runtime.lock().expect("sdk runtime lock");
             sdk_runtime
@@ -13136,6 +13066,12 @@ mod tests {
                 .begin_projection_rebuild()
                 .expect("projection rebuild should begin");
         }
+        wait_for_sdk_status(
+            &runtime,
+            DesktopRuntimeLifecycleState::RebuildingProjections,
+            StdDuration::from_secs(5),
+        )
+        .expect("sdk runtime should report rebuilding projections");
 
         let diagnostics = runtime
             .sdk_diagnostics_summary()
@@ -13143,23 +13079,20 @@ mod tests {
 
         assert_eq!(
             diagnostics.status.lifecycle_state,
-            AppSdkLifecycleState::RebuildingProjections
+            DesktopRuntimeLifecycleState::RebuildingProjections
         );
         assert_eq!(
             diagnostics.status.projection_lifecycle_state,
-            AppSdkProjectionLifecycleState::Rebuilding
+            DesktopRuntimeProjectionLifecycleState::Rebuilding
         );
-        match diagnostics.state {
-            DesktopAppSdkDiagnosticsState::Blocked(issue) => {
-                assert_eq!(issue.code, "sdk_lifecycle_busy");
-                assert!(issue.retryable);
-                assert!(
-                    issue
-                        .recovery_actions
-                        .contains(&"wait_for_sdk_lifecycle".to_owned())
-                );
-            }
-            unexpected => panic!("unexpected diagnostics state: {unexpected:?}"),
+        if let DesktopRuntimeSupervisorDiagnosticsState::Blocked(issue) = diagnostics.state {
+            assert_eq!(issue.code, "sdk_lifecycle_busy");
+            assert!(issue.retryable);
+            assert!(
+                issue
+                    .recovery_actions
+                    .contains(&"wait_for_sdk_lifecycle".to_owned())
+            );
         }
         {
             let sdk_runtime = runtime.sdk_runtime.lock().expect("sdk runtime lock");
@@ -13169,11 +13102,7 @@ mod tests {
                 .complete_projection_rebuild()
                 .expect("projection rebuild should complete");
         }
-        assert!(
-            runtime
-                .shutdown_sdk_runtime()
-                .expect("sdk runtime should shut down")
-        );
+        assert!(runtime.shutdown_sdk_runtime());
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -14744,7 +14673,7 @@ mod tests {
         );
         assert_eq!(payload.buyer_pubkey, buyer_pubkey);
         assert_eq!(payload.seller_pubkey, seller_pubkey);
-        let AppSdkTradeDecision::Accept {
+        let DesktopRuntimeTradeDecision::Accept {
             inventory_commitments,
         } = decision
         else {
@@ -14779,7 +14708,7 @@ mod tests {
             }
         );
         assert!(payload.confirm_public_note);
-        let AppSdkTradeDecision::Decline { reason } = decision else {
+        let DesktopRuntimeTradeDecision::Decline { reason } = decision else {
             panic!("expected declined decision");
         };
         assert_eq!(reason, "out of stock");
@@ -14946,10 +14875,10 @@ mod tests {
                 && record.event_kind == Some(3423)
                 && record.event_pubkey.as_deref() == Some(seller_pubkey.as_str())
         }));
-        assert_order_decision_sdk_workflow_receipt(
+        assert_order_decision_runtime_workflow_receipt(
             &runtime,
             order_id,
-            AppSdkWorkflowReceiptState::Enqueued,
+            DesktopRuntimeWorkflowReceiptState::Prepared,
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
@@ -14977,10 +14906,10 @@ mod tests {
                 && record.event_kind == Some(3423)
                 && record.event_pubkey.as_deref() == Some(seller_pubkey.as_str())
         }));
-        assert_order_decision_sdk_workflow_receipt(
+        assert_order_decision_runtime_workflow_receipt(
             &runtime,
             order_id,
-            AppSdkWorkflowReceiptState::Enqueued,
+            DesktopRuntimeWorkflowReceiptState::Prepared,
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
@@ -15062,10 +14991,10 @@ mod tests {
             buyer_account_id.as_str(),
             order_id,
         );
-        assert_order_request_sdk_workflow_receipt(
+        assert_order_request_runtime_workflow_receipt(
             &runtime,
             order_id,
-            AppSdkWorkflowReceiptState::Enqueued,
+            DesktopRuntimeWorkflowReceiptState::Prepared,
         );
 
         {
@@ -15229,10 +15158,10 @@ mod tests {
             buyer_account_id.as_str(),
             order_id,
         );
-        assert_order_request_sdk_workflow_receipt(
+        assert_order_request_runtime_workflow_receipt(
             &runtime,
             order_id,
-            AppSdkWorkflowReceiptState::Enqueued,
+            DesktopRuntimeWorkflowReceiptState::Prepared,
         );
         assert_eq!(
             summary_after_retry
@@ -15291,10 +15220,10 @@ mod tests {
             buyer_account_id.as_str(),
             order_id,
         );
-        assert_order_request_sdk_workflow_receipt(
+        assert_order_request_runtime_workflow_receipt(
             &runtime,
             order_id,
-            AppSdkWorkflowReceiptState::Enqueued,
+            DesktopRuntimeWorkflowReceiptState::Prepared,
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
@@ -15360,10 +15289,10 @@ mod tests {
             buyer_account_id.as_str(),
             order_id,
         );
-        assert_order_request_sdk_workflow_receipt(
+        assert_order_request_runtime_workflow_receipt(
             &restarted_runtime,
             order_id,
-            AppSdkWorkflowReceiptState::Enqueued,
+            DesktopRuntimeWorkflowReceiptState::Prepared,
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
@@ -15396,10 +15325,10 @@ mod tests {
             buyer_account_id.as_str(),
             order_id,
         );
-        assert_order_request_sdk_workflow_receipt(
+        assert_order_request_runtime_workflow_receipt(
             &runtime,
             order_id,
-            AppSdkWorkflowReceiptState::Enqueued,
+            DesktopRuntimeWorkflowReceiptState::Prepared,
         );
         {
             let state = runtime.lock_state_mut();
@@ -15598,10 +15527,10 @@ mod tests {
         let cancellation_events =
             shared_order_events_by_kind(&fixture.paths, 3432, fixture.buyer_pubkey.as_str());
         assert!(cancellation_events.is_empty());
-        assert_order_cancellation_sdk_workflow_receipt(
+        assert_order_cancellation_runtime_workflow_receipt(
             &fixture.runtime,
             fixture.order_id,
-            AppSdkWorkflowReceiptState::Enqueued,
+            DesktopRuntimeWorkflowReceiptState::Prepared,
         );
 
         cleanup_bootstrapped_runtime_paths(&fixture.paths);
@@ -18689,10 +18618,33 @@ mod tests {
             let mut handle = runtime.sdk_runtime.lock().expect("sdk runtime lock");
             *handle = Some(sdk_runtime);
         }
-        let status = runtime
-            .wait_for_sdk_startup(StdDuration::from_secs(5))
-            .expect("sdk runtime should be present after restart");
-        assert_eq!(status.state, AppSdkLifecycleState::Ready);
+        wait_for_sdk_status(
+            runtime,
+            DesktopRuntimeLifecycleState::Ready,
+            StdDuration::from_secs(5),
+        )
+        .expect("sdk runtime should be ready after restart");
+    }
+
+    fn wait_for_sdk_status(
+        runtime: &DesktopAppRuntime,
+        expected_state: DesktopRuntimeLifecycleState,
+        timeout: StdDuration,
+    ) -> Option<DesktopRuntimeSnapshot> {
+        let started_at = std::time::Instant::now();
+        loop {
+            let status = runtime.sdk_status();
+            if status
+                .as_ref()
+                .is_some_and(|status| status.state == expected_state)
+            {
+                return status;
+            }
+            if started_at.elapsed() >= timeout {
+                return status.filter(|status| status.state == expected_state);
+            }
+            std::thread::sleep(StdDuration::from_millis(10));
+        }
     }
 
     fn temp_shared_accounts_paths(label: &str) -> AppSharedAccountsPaths {
@@ -20081,10 +20033,10 @@ mod tests {
         assert!(pending_order_sync_payloads(runtime, account_id, order_id).is_empty());
     }
 
-    fn assert_order_request_sdk_workflow_receipt(
+    fn assert_order_request_runtime_workflow_receipt(
         runtime: &DesktopAppRuntime,
         order_id: OrderId,
-        expected_state: AppSdkWorkflowReceiptState,
+        expected_state: DesktopRuntimeWorkflowReceiptState,
     ) {
         let source_record_id = format!("app:local_work:order_request:{order_id}");
         let receipt = runtime
@@ -20092,9 +20044,9 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .sdk_workflow_receipt_repository()
+            .runtime_workflow_receipt_repository()
             .load_receipt(
-                AppSdkWorkflowReceiptSourceKind::SharedRuntimeStore,
+                DesktopRuntimeWorkflowReceiptSourceKind::SharedRuntimeStore,
                 source_record_id.as_str(),
             )
             .expect("SDK workflow receipt should load")
@@ -20106,17 +20058,17 @@ mod tests {
             "receipt detail: {}",
             receipt.detail_json
         );
-        if expected_state == AppSdkWorkflowReceiptState::Enqueued {
-            assert!(receipt.expected_event_id.is_some());
+        if expected_state == DesktopRuntimeWorkflowReceiptState::Prepared {
+            assert!(receipt.expected_event_id.is_none());
             assert!(receipt.actor_pubkey.as_deref().is_some_and(is_hex_64));
-            assert!(!receipt.sdk_outbox_event_ids.is_empty());
+            assert!(!receipt.runtime_effect_ids.is_empty());
         }
     }
 
-    fn assert_order_decision_sdk_workflow_receipt(
+    fn assert_order_decision_runtime_workflow_receipt(
         runtime: &DesktopAppRuntime,
         order_id: OrderId,
-        expected_state: AppSdkWorkflowReceiptState,
+        expected_state: DesktopRuntimeWorkflowReceiptState,
     ) {
         let source_record_id = format!("app:order_decision:{order_id}");
         let receipt = runtime
@@ -20124,9 +20076,9 @@ mod tests {
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .sdk_workflow_receipt_repository()
+            .runtime_workflow_receipt_repository()
             .load_receipt(
-                AppSdkWorkflowReceiptSourceKind::LocalOutbox,
+                DesktopRuntimeWorkflowReceiptSourceKind::AppWorkflow,
                 source_record_id.as_str(),
             )
             .expect("SDK workflow receipt should load")
@@ -20138,19 +20090,19 @@ mod tests {
             "receipt detail: {}",
             receipt.detail_json
         );
-        if expected_state == AppSdkWorkflowReceiptState::Enqueued {
-            assert!(receipt.expected_event_id.is_some());
+        if expected_state == DesktopRuntimeWorkflowReceiptState::Prepared {
+            assert!(receipt.expected_event_id.is_none());
             assert!(receipt.actor_pubkey.as_deref().is_some_and(is_hex_64));
-            assert!(!receipt.sdk_outbox_event_ids.is_empty());
+            assert!(!receipt.runtime_effect_ids.is_empty());
         }
     }
 
-    fn assert_order_cancellation_sdk_workflow_receipt(
+    fn assert_order_cancellation_runtime_workflow_receipt(
         runtime: &DesktopAppRuntime,
         order_id: OrderId,
-        expected_state: AppSdkWorkflowReceiptState,
+        expected_state: DesktopRuntimeWorkflowReceiptState,
     ) {
-        assert_order_sdk_workflow_receipt(
+        assert_order_runtime_workflow_receipt(
             runtime,
             format!("app:order_cancellation:{order_id}").as_str(),
             TRADE_CANCELLATION_OPERATION_KIND,
@@ -20158,20 +20110,20 @@ mod tests {
         );
     }
 
-    fn assert_order_sdk_workflow_receipt(
+    fn assert_order_runtime_workflow_receipt(
         runtime: &DesktopAppRuntime,
         source_record_id: &str,
         operation_kind: &str,
-        expected_state: AppSdkWorkflowReceiptState,
+        expected_state: DesktopRuntimeWorkflowReceiptState,
     ) {
         let receipt = runtime
             .lock_state()
             .sqlite_store
             .as_ref()
             .expect("sqlite store")
-            .sdk_workflow_receipt_repository()
+            .runtime_workflow_receipt_repository()
             .load_receipt(
-                AppSdkWorkflowReceiptSourceKind::LocalOutbox,
+                DesktopRuntimeWorkflowReceiptSourceKind::AppWorkflow,
                 source_record_id,
             )
             .expect("SDK workflow receipt should load")
@@ -20183,10 +20135,10 @@ mod tests {
             "receipt detail: {}",
             receipt.detail_json
         );
-        if expected_state == AppSdkWorkflowReceiptState::Enqueued {
-            assert!(receipt.expected_event_id.is_some());
+        if expected_state == DesktopRuntimeWorkflowReceiptState::Prepared {
+            assert!(receipt.expected_event_id.is_none());
             assert!(receipt.actor_pubkey.as_deref().is_some_and(is_hex_64));
-            assert!(!receipt.sdk_outbox_event_ids.is_empty());
+            assert!(!receipt.runtime_effect_ids.is_empty());
         }
     }
 

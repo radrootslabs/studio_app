@@ -13,7 +13,8 @@ use gpui_component::{
 };
 use radroots_nostr::prelude::RadrootsNostrClient;
 use radroots_studio_app_core::{
-    AppSdkLifecycleState, AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy,
+    DesktopRuntimeLifecycleState, DesktopRuntimeProjectionLifecycleState,
+    DesktopRuntimeRelayUrlPolicy,
 };
 use radroots_studio_app_i18n::{AppTextKey, app_text};
 use radroots_studio_app_remote_signer::{
@@ -103,9 +104,10 @@ use crate::pack_day_print::{
 use crate::runtime::{
     DesktopAppRuntime, DesktopAppRuntimeProductEditorSaveError,
     DesktopAppRuntimeProductStockUpdateError, DesktopAppRuntimeSummary,
-    DesktopAppSdkDiagnosticsState, DesktopAppSdkDiagnosticsSummary, DesktopAppSdkIssueSummary,
-    DesktopAppSdkReadyDiagnosticsSummary, DesktopAppSdkStatusSummary,
     DesktopAppSyncConflictSummary, DesktopAppSyncStatusSummary,
+    DesktopRuntimeSupervisorDiagnosticsState, DesktopRuntimeSupervisorDiagnosticsSummary,
+    DesktopRuntimeSupervisorIssueSummary, DesktopRuntimeSupervisorReadyDiagnosticsSummary,
+    DesktopRuntimeSupervisorStatusSummary,
 };
 
 const HOME_WINDOW_MIN_WIDTH_PX: f32 = 1080.0;
@@ -6231,7 +6233,7 @@ impl SettingsFarmPanelState {
             .farm_profile
             .as_ref()
             .map(|farm_profile| farm_profile.farm_id)
-            .unwrap_or_else(FarmId::new);
+            .unwrap_or_else(FarmId::generate);
         let initial_draft = SettingsFarmRulesDraft::from_projection(farm_id, &projection);
         let farm_name_input = cx.new(|cx| {
             InputState::new(window, cx)
@@ -8184,7 +8186,7 @@ fn settings_account_activation_key(
 
 fn about_status_rows(
     runtime: &DesktopAppRuntimeSummary,
-    sdk_diagnostics: Option<&DesktopAppSdkDiagnosticsSummary>,
+    sdk_diagnostics: Option<&DesktopRuntimeSupervisorDiagnosticsSummary>,
 ) -> Vec<LabelValueRow> {
     let mut rows = vec![
         LabelValueRow::new(
@@ -8248,8 +8250,8 @@ fn about_status_rows(
 
 fn append_sdk_status_rows(
     rows: &mut Vec<LabelValueRow>,
-    sdk_status: Option<&DesktopAppSdkStatusSummary>,
-    sdk_diagnostics: Option<&DesktopAppSdkDiagnosticsSummary>,
+    sdk_status: Option<&DesktopRuntimeSupervisorStatusSummary>,
+    sdk_diagnostics: Option<&DesktopRuntimeSupervisorDiagnosticsSummary>,
 ) {
     let status = sdk_diagnostics
         .map(|diagnostics| &diagnostics.status)
@@ -8280,11 +8282,11 @@ fn append_sdk_status_rows(
     ));
 
     match sdk_diagnostics.map(|diagnostics| &diagnostics.state) {
-        Some(DesktopAppSdkDiagnosticsState::Ready(ready)) => {
+        Some(DesktopRuntimeSupervisorDiagnosticsState::Ready(ready)) => {
             append_ready_sdk_rows(rows, ready);
             append_sdk_issue_rows(rows, status.last_issue.as_ref());
         }
-        Some(DesktopAppSdkDiagnosticsState::Blocked(issue)) => {
+        Some(DesktopRuntimeSupervisorDiagnosticsState::Blocked(issue)) => {
             rows.push(LabelValueRow::new(
                 app_shared_text(AppTextKey::MetadataSdkDiagnosticState),
                 app_text(AppTextKey::ValueSdkDiagnosticsBlocked),
@@ -8303,7 +8305,7 @@ fn append_sdk_status_rows(
 
 fn append_ready_sdk_rows(
     rows: &mut Vec<LabelValueRow>,
-    ready: &DesktopAppSdkReadyDiagnosticsSummary,
+    ready: &DesktopRuntimeSupervisorReadyDiagnosticsSummary,
 ) {
     rows.push(LabelValueRow::new(
         app_shared_text(AppTextKey::MetadataSdkDiagnosticState),
@@ -8339,7 +8341,10 @@ fn append_ready_sdk_rows(
     ));
 }
 
-fn append_sdk_issue_rows(rows: &mut Vec<LabelValueRow>, issue: Option<&DesktopAppSdkIssueSummary>) {
+fn append_sdk_issue_rows(
+    rows: &mut Vec<LabelValueRow>,
+    issue: Option<&DesktopRuntimeSupervisorIssueSummary>,
+) {
     rows.push(LabelValueRow::new(
         app_shared_text(AppTextKey::MetadataSdkLastIssueCode),
         issue
@@ -8593,34 +8598,36 @@ fn path_or_none(path: Option<&PathBuf>) -> String {
         .unwrap_or_else(|| app_text(AppTextKey::ValueNone))
 }
 
-fn sdk_lifecycle_state_text(state: AppSdkLifecycleState) -> String {
+fn sdk_lifecycle_state_text(state: DesktopRuntimeLifecycleState) -> String {
     app_text(match state {
-        AppSdkLifecycleState::Starting => AppTextKey::ValueSdkLifecycleStarting,
-        AppSdkLifecycleState::Ready => AppTextKey::ValueSdkLifecycleReady,
-        AppSdkLifecycleState::Degraded => AppTextKey::ValueSdkLifecycleDegraded,
-        AppSdkLifecycleState::Pausing => AppTextKey::ValueSdkLifecyclePausing,
-        AppSdkLifecycleState::Paused => AppTextKey::ValueSdkLifecyclePaused,
-        AppSdkLifecycleState::Restoring => AppTextKey::ValueSdkLifecycleRestoring,
-        AppSdkLifecycleState::RebuildingProjections => {
+        DesktopRuntimeLifecycleState::Starting => AppTextKey::ValueSdkLifecycleStarting,
+        DesktopRuntimeLifecycleState::Ready => AppTextKey::ValueSdkLifecycleReady,
+        DesktopRuntimeLifecycleState::Degraded => AppTextKey::ValueSdkLifecycleDegraded,
+        DesktopRuntimeLifecycleState::Pausing => AppTextKey::ValueSdkLifecyclePausing,
+        DesktopRuntimeLifecycleState::Paused => AppTextKey::ValueSdkLifecyclePaused,
+        DesktopRuntimeLifecycleState::Restoring => AppTextKey::ValueSdkLifecycleRestoring,
+        DesktopRuntimeLifecycleState::RebuildingProjections => {
             AppTextKey::ValueSdkLifecycleRebuildingProjections
         }
-        AppSdkLifecycleState::ShuttingDown => AppTextKey::ValueSdkLifecycleShuttingDown,
-        AppSdkLifecycleState::Stopped => AppTextKey::ValueSdkLifecycleStopped,
+        DesktopRuntimeLifecycleState::ShuttingDown => AppTextKey::ValueSdkLifecycleShuttingDown,
+        DesktopRuntimeLifecycleState::Stopped => AppTextKey::ValueSdkLifecycleStopped,
     })
 }
 
-fn sdk_projection_lifecycle_state_text(state: AppSdkProjectionLifecycleState) -> String {
+fn sdk_projection_lifecycle_state_text(state: DesktopRuntimeProjectionLifecycleState) -> String {
     app_text(match state {
-        AppSdkProjectionLifecycleState::Current => AppTextKey::ValueSdkProjectionCurrent,
-        AppSdkProjectionLifecycleState::Stale => AppTextKey::ValueSdkProjectionStale,
-        AppSdkProjectionLifecycleState::Rebuilding => AppTextKey::ValueSdkProjectionRebuilding,
+        DesktopRuntimeProjectionLifecycleState::Current => AppTextKey::ValueSdkProjectionCurrent,
+        DesktopRuntimeProjectionLifecycleState::Stale => AppTextKey::ValueSdkProjectionStale,
+        DesktopRuntimeProjectionLifecycleState::Rebuilding => {
+            AppTextKey::ValueSdkProjectionRebuilding
+        }
     })
 }
 
-fn sdk_relay_url_policy_text(policy: AppSdkRelayUrlPolicy) -> String {
+fn sdk_relay_url_policy_text(policy: DesktopRuntimeRelayUrlPolicy) -> String {
     app_text(match policy {
-        AppSdkRelayUrlPolicy::Public => AppTextKey::ValueSdkRelayPolicyPublic,
-        AppSdkRelayUrlPolicy::Localhost => AppTextKey::ValueSdkRelayPolicyLocalhost,
+        DesktopRuntimeRelayUrlPolicy::Public => AppTextKey::ValueSdkRelayPolicyPublic,
+        DesktopRuntimeRelayUrlPolicy::Localhost => AppTextKey::ValueSdkRelayPolicyLocalhost,
     })
 }
 
@@ -16271,15 +16278,16 @@ mod tests {
         trade_workflow_source_key,
     };
     use crate::runtime::{
-        DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSdkDiagnosticsState,
-        DesktopAppSdkDiagnosticsSummary, DesktopAppSdkIssueSummary,
-        DesktopAppSdkReadyDiagnosticsSummary, DesktopAppSdkStatusSummary,
-        DesktopAppSyncConflictSummary, DesktopAppSyncStatusSummary,
+        DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSyncConflictSummary,
+        DesktopAppSyncStatusSummary, DesktopRuntimeSupervisorDiagnosticsState,
+        DesktopRuntimeSupervisorDiagnosticsSummary, DesktopRuntimeSupervisorIssueSummary,
+        DesktopRuntimeSupervisorReadyDiagnosticsSummary, DesktopRuntimeSupervisorStatusSummary,
     };
     use radroots_identity::RadrootsIdentity;
     use radroots_studio_app_core::{
         AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePlatform,
-        AppSdkLifecycleState, AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy,
+        DesktopRuntimeLifecycleState, DesktopRuntimeProjectionLifecycleState,
+        DesktopRuntimeRelayUrlPolicy,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -18594,21 +18602,23 @@ mod tests {
 
     #[test]
     fn about_status_rows_surface_ready_sdk_diagnostics() {
-        let sdk_status = fixture_sdk_status(AppSdkLifecycleState::Ready);
-        let sdk_diagnostics = DesktopAppSdkDiagnosticsSummary {
+        let sdk_status = fixture_sdk_status(DesktopRuntimeLifecycleState::Ready);
+        let sdk_diagnostics = DesktopRuntimeSupervisorDiagnosticsSummary {
             status: sdk_status.clone(),
-            state: DesktopAppSdkDiagnosticsState::Ready(DesktopAppSdkReadyDiagnosticsSummary {
-                storage_kind: "directory".to_owned(),
-                event_store_total_events: 7,
-                outbox_total_events: 3,
-                outbox_pending_events: 2,
-                outbox_failed_terminal_events: 0,
-                integrity_event_store_ok: true,
-                integrity_outbox_ok: true,
-                sync_source: "sdk_canonical_stores".to_owned(),
-                sync_observed_at_ms: 42,
-                sync_relay_target_count: 2,
-            }),
+            state: DesktopRuntimeSupervisorDiagnosticsState::Ready(
+                DesktopRuntimeSupervisorReadyDiagnosticsSummary {
+                    storage_kind: "directory".to_owned(),
+                    event_store_total_events: 7,
+                    outbox_total_events: 3,
+                    outbox_pending_events: 2,
+                    outbox_failed_terminal_events: 0,
+                    integrity_event_store_ok: true,
+                    integrity_outbox_ok: true,
+                    sync_source: "sdk_canonical_stores".to_owned(),
+                    sync_observed_at_ms: 42,
+                    sync_relay_target_count: 2,
+                },
+            ),
         };
         let mut runtime = summary(
             HomeRoute::Today,
@@ -18646,17 +18656,17 @@ mod tests {
 
     #[test]
     fn about_status_rows_surface_blocked_sdk_issue_metadata() {
-        let issue = DesktopAppSdkIssueSummary {
+        let issue = DesktopRuntimeSupervisorIssueSummary {
             code: "invalid_relay_url".to_owned(),
             class: "configuration".to_owned(),
             retryable: false,
             recovery_actions: vec!["configure_transport_targets".to_owned()],
         };
-        let mut sdk_status = fixture_sdk_status(AppSdkLifecycleState::Degraded);
+        let mut sdk_status = fixture_sdk_status(DesktopRuntimeLifecycleState::Degraded);
         sdk_status.last_issue = Some(issue.clone());
-        let sdk_diagnostics = DesktopAppSdkDiagnosticsSummary {
+        let sdk_diagnostics = DesktopRuntimeSupervisorDiagnosticsSummary {
             status: sdk_status.clone(),
-            state: DesktopAppSdkDiagnosticsState::Blocked(issue),
+            state: DesktopRuntimeSupervisorDiagnosticsState::Blocked(issue),
         };
         let mut runtime = summary(
             HomeRoute::Today,
@@ -18708,7 +18718,7 @@ mod tests {
             database_schema_version: Some(7),
             ..DesktopAppRuntimeMetadataSummary::default()
         };
-        runtime.sdk_status = Some(fixture_sdk_status(AppSdkLifecycleState::Ready));
+        runtime.sdk_status = Some(fixture_sdk_status(DesktopRuntimeLifecycleState::Ready));
 
         let rows = about_runtime_rows(&runtime);
 
@@ -18780,18 +18790,20 @@ mod tests {
         }
     }
 
-    fn fixture_sdk_status(lifecycle_state: AppSdkLifecycleState) -> DesktopAppSdkStatusSummary {
+    fn fixture_sdk_status(
+        lifecycle_state: DesktopRuntimeLifecycleState,
+    ) -> DesktopRuntimeSupervisorStatusSummary {
         let storage_root = PathBuf::from("/tmp/radroots/data/apps/app/sdk");
-        DesktopAppSdkStatusSummary {
+        DesktopRuntimeSupervisorStatusSummary {
             lifecycle_state,
-            projection_lifecycle_state: AppSdkProjectionLifecycleState::Current,
+            projection_lifecycle_state: DesktopRuntimeProjectionLifecycleState::Current,
             projection_lifecycle_reason: None,
             storage_root: storage_root.clone(),
             runtime_path: Some(storage_root.join("runtime.sqlite")),
             private_path: Some(storage_root.join("private.sqlite")),
             studio_path: Some(storage_root.join("studio.sqlite")),
             relay_target_count: 2,
-            relay_url_policy: AppSdkRelayUrlPolicy::Localhost,
+            relay_url_policy: DesktopRuntimeRelayUrlPolicy::Localhost,
             last_issue: None,
         }
     }

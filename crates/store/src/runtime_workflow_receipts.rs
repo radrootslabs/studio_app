@@ -7,25 +7,25 @@ use uuid::Uuid;
 use crate::AppSqliteError;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AppSdkWorkflowReceiptSourceKind {
-    LocalOutbox,
+pub enum DesktopRuntimeWorkflowReceiptSourceKind {
+    AppWorkflow,
     SharedRuntimeStore,
 }
 
-impl AppSdkWorkflowReceiptSourceKind {
+impl DesktopRuntimeWorkflowReceiptSourceKind {
     pub const fn storage_key(self) -> &'static str {
         match self {
-            Self::LocalOutbox => "local_outbox",
+            Self::AppWorkflow => "app_workflow",
             Self::SharedRuntimeStore => "shared_runtime_store",
         }
     }
 
     pub fn parse(value: &str) -> Result<Self, AppSqliteError> {
         match value {
-            "local_outbox" => Ok(Self::LocalOutbox),
+            "app_workflow" => Ok(Self::AppWorkflow),
             "shared_runtime_store" => Ok(Self::SharedRuntimeStore),
             _ => Err(AppSqliteError::DecodeEnum {
-                field: "app_sdk_workflow_receipts.source_kind",
+                field: "desktop_runtime_workflow_receipts.source_kind",
                 value: value.to_owned(),
             }),
         }
@@ -33,7 +33,7 @@ impl AppSdkWorkflowReceiptSourceKind {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AppSdkWorkflowReceiptState {
+pub enum DesktopRuntimeWorkflowReceiptState {
     Pending,
     Prepared,
     Enqueued,
@@ -46,7 +46,7 @@ pub enum AppSdkWorkflowReceiptState {
     Unknown,
 }
 
-impl AppSdkWorkflowReceiptState {
+impl DesktopRuntimeWorkflowReceiptState {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -75,7 +75,7 @@ impl AppSdkWorkflowReceiptState {
             "manual_review" => Ok(Self::ManualReview),
             "unknown" => Ok(Self::Unknown),
             _ => Err(AppSqliteError::DecodeEnum {
-                field: "app_sdk_workflow_receipts.workflow_state",
+                field: "desktop_runtime_workflow_receipts.workflow_state",
                 value: value.to_owned(),
             }),
         }
@@ -83,71 +83,71 @@ impl AppSdkWorkflowReceiptState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AppSdkWorkflowReceiptInput {
-    pub source_kind: AppSdkWorkflowReceiptSourceKind,
+pub struct DesktopRuntimeWorkflowReceiptInput {
+    pub source_kind: DesktopRuntimeWorkflowReceiptSourceKind,
     pub source_record_id: String,
     pub sdk_operation_kind: String,
-    pub sdk_outbox_event_ids: Vec<String>,
+    pub runtime_effect_ids: Vec<String>,
     pub expected_event_id: Option<String>,
     pub actor_pubkey: Option<String>,
     pub idempotency_digest_prefix: Option<String>,
-    pub workflow_state: AppSdkWorkflowReceiptState,
+    pub workflow_state: DesktopRuntimeWorkflowReceiptState,
     pub recorded_at: String,
     pub detail_json: Value,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AppSdkStoredWorkflowReceipt {
+pub struct DesktopRuntimeStoredWorkflowReceipt {
     pub id: String,
-    pub source_kind: AppSdkWorkflowReceiptSourceKind,
+    pub source_kind: DesktopRuntimeWorkflowReceiptSourceKind,
     pub source_record_id: String,
     pub sdk_operation_kind: String,
-    pub sdk_outbox_event_ids: Vec<String>,
+    pub runtime_effect_ids: Vec<String>,
     pub expected_event_id: Option<String>,
     pub actor_pubkey: Option<String>,
     pub idempotency_digest_prefix: Option<String>,
-    pub workflow_state: AppSdkWorkflowReceiptState,
+    pub workflow_state: DesktopRuntimeWorkflowReceiptState,
     pub created_at: String,
     pub updated_at: String,
     pub detail_json: Value,
 }
 
-pub struct AppSdkWorkflowReceiptRepository<'a> {
+pub struct DesktopRuntimeWorkflowReceiptRepository<'a> {
     connection: &'a AppSqliteDatabase,
 }
 
-impl<'a> AppSdkWorkflowReceiptRepository<'a> {
+impl<'a> DesktopRuntimeWorkflowReceiptRepository<'a> {
     pub(crate) const fn new(connection: &'a AppSqliteDatabase) -> Self {
         Self { connection }
     }
 
     pub fn record_receipt(
         &self,
-        input: &AppSdkWorkflowReceiptInput,
-    ) -> Result<AppSdkStoredWorkflowReceipt, AppSqliteError> {
+        input: &DesktopRuntimeWorkflowReceiptInput,
+    ) -> Result<DesktopRuntimeStoredWorkflowReceipt, AppSqliteError> {
         let receipt_id = Uuid::now_v7().to_string();
-        let outbox_ids_json =
-            serde_json::to_string(&input.sdk_outbox_event_ids).map_err(|source| {
+        let effect_ids_json =
+            serde_json::to_string(&input.runtime_effect_ids).map_err(|source| {
                 AppSqliteError::EncodeJson {
-                    field: "app_sdk_workflow_receipts.sdk_outbox_event_ids_json",
+                    field: "desktop_runtime_workflow_receipts.runtime_effect_ids_json",
                     source,
                 }
             })?;
         let detail_json = serde_json::to_string(&input.detail_json).map_err(|source| {
             AppSqliteError::EncodeJson {
-                field: "app_sdk_workflow_receipts.detail_json",
+                field: "desktop_runtime_workflow_receipts.detail_json",
                 source,
             }
         })?;
 
         self.connection
             .execute(
-                "INSERT INTO app_sdk_workflow_receipts (
+                "INSERT INTO desktop_runtime_workflow_receipts (
                     id,
                     source_kind,
                     source_record_id,
                     sdk_operation_kind,
-                    sdk_outbox_event_ids_json,
+                    runtime_effect_ids_json,
                     expected_event_id,
                     actor_pubkey,
                     idempotency_digest_prefix,
@@ -159,7 +159,7 @@ impl<'a> AppSdkWorkflowReceiptRepository<'a> {
                  ON CONFLICT(source_kind, source_record_id)
                  DO UPDATE SET
                     sdk_operation_kind = excluded.sdk_operation_kind,
-                    sdk_outbox_event_ids_json = excluded.sdk_outbox_event_ids_json,
+                    runtime_effect_ids_json = excluded.runtime_effect_ids_json,
                     expected_event_id = excluded.expected_event_id,
                     actor_pubkey = excluded.actor_pubkey,
                     idempotency_digest_prefix = excluded.idempotency_digest_prefix,
@@ -171,7 +171,7 @@ impl<'a> AppSdkWorkflowReceiptRepository<'a> {
                     input.source_kind.storage_key(),
                     input.source_record_id.as_str(),
                     input.sdk_operation_kind.as_str(),
-                    outbox_ids_json.as_str(),
+                    effect_ids_json.as_str(),
                     input.expected_event_id.as_deref(),
                     input.actor_pubkey.as_deref(),
                     input.idempotency_digest_prefix.as_deref(),
@@ -181,21 +181,21 @@ impl<'a> AppSdkWorkflowReceiptRepository<'a> {
                 ],
             )
             .map_err(|source| AppSqliteError::Query {
-                operation: "record app SDK workflow receipt",
+                operation: "record desktop runtime workflow receipt",
                 source,
             })?;
 
         self.load_receipt(input.source_kind, input.source_record_id.as_str())?
             .ok_or(AppSqliteError::MissingColumn {
-                field: "app_sdk_workflow_receipts.id",
+                field: "desktop_runtime_workflow_receipts.id",
             })
     }
 
     pub fn load_receipt(
         &self,
-        source_kind: AppSdkWorkflowReceiptSourceKind,
+        source_kind: DesktopRuntimeWorkflowReceiptSourceKind,
         source_record_id: &str,
-    ) -> Result<Option<AppSdkStoredWorkflowReceipt>, AppSqliteError> {
+    ) -> Result<Option<DesktopRuntimeStoredWorkflowReceipt>, AppSqliteError> {
         self.connection
             .query_row(
                 "SELECT
@@ -203,7 +203,7 @@ impl<'a> AppSdkWorkflowReceiptRepository<'a> {
                     source_kind,
                     source_record_id,
                     sdk_operation_kind,
-                    sdk_outbox_event_ids_json,
+                    runtime_effect_ids_json,
                     expected_event_id,
                     actor_pubkey,
                     idempotency_digest_prefix,
@@ -211,7 +211,7 @@ impl<'a> AppSdkWorkflowReceiptRepository<'a> {
                     created_at,
                     updated_at,
                     detail_json
-                 FROM app_sdk_workflow_receipts
+                 FROM desktop_runtime_workflow_receipts
                  WHERE source_kind = ?1
                     AND source_record_id = ?2
                  LIMIT 1",
@@ -220,7 +220,7 @@ impl<'a> AppSdkWorkflowReceiptRepository<'a> {
             )
             .optional()
             .map_err(|source| AppSqliteError::Query {
-                operation: "load app SDK workflow receipt",
+                operation: "load desktop runtime workflow receipt",
                 source,
             })
     }
@@ -228,33 +228,33 @@ impl<'a> AppSdkWorkflowReceiptRepository<'a> {
 
 fn decode_receipt_row(
     row: &sqlx::sqlite::SqliteRow,
-) -> Result<AppSdkStoredWorkflowReceipt, sqlx::Error> {
+) -> Result<DesktopRuntimeStoredWorkflowReceipt, sqlx::Error> {
     let source_kind: String = row.try_get(1)?;
-    let outbox_ids_json: String = row.try_get(4)?;
+    let effect_ids_json: String = row.try_get(4)?;
     let workflow_state: String = row.try_get(8)?;
     let detail_json: String = row.try_get(11)?;
-    Ok(AppSdkStoredWorkflowReceipt {
+    Ok(DesktopRuntimeStoredWorkflowReceipt {
         id: row.try_get(0)?,
-        source_kind: AppSdkWorkflowReceiptSourceKind::parse(source_kind.as_str())
+        source_kind: DesktopRuntimeWorkflowReceiptSourceKind::parse(source_kind.as_str())
             .map_err(decode_app_error)?,
         source_record_id: row.try_get(2)?,
         sdk_operation_kind: row.try_get(3)?,
-        sdk_outbox_event_ids: serde_json::from_str(outbox_ids_json.as_str()).map_err(|source| {
+        runtime_effect_ids: serde_json::from_str(effect_ids_json.as_str()).map_err(|source| {
             decode_app_error(AppSqliteError::DecodeJson {
-                field: "app_sdk_workflow_receipts.sdk_outbox_event_ids_json",
+                field: "desktop_runtime_workflow_receipts.runtime_effect_ids_json",
                 source,
             })
         })?,
         expected_event_id: row.try_get(5)?,
         actor_pubkey: row.try_get(6)?,
         idempotency_digest_prefix: row.try_get(7)?,
-        workflow_state: AppSdkWorkflowReceiptState::parse(workflow_state.as_str())
+        workflow_state: DesktopRuntimeWorkflowReceiptState::parse(workflow_state.as_str())
             .map_err(decode_app_error)?,
         created_at: row.try_get(9)?,
         updated_at: row.try_get(10)?,
         detail_json: serde_json::from_str(detail_json.as_str()).map_err(|source| {
             decode_app_error(AppSqliteError::DecodeJson {
-                field: "app_sdk_workflow_receipts.detail_json",
+                field: "desktop_runtime_workflow_receipts.detail_json",
                 source,
             })
         })?,
@@ -270,39 +270,39 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        AppSdkWorkflowReceiptInput, AppSdkWorkflowReceiptSourceKind, AppSdkWorkflowReceiptState,
-        AppSqliteStore, DatabaseTarget,
+        AppSqliteStore, DatabaseTarget, DesktopRuntimeWorkflowReceiptInput,
+        DesktopRuntimeWorkflowReceiptSourceKind, DesktopRuntimeWorkflowReceiptState,
     };
 
     #[test]
     fn workflow_receipts_are_idempotent_by_source_record() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app store");
         let first = store
-            .sdk_workflow_receipt_repository()
-            .record_receipt(&AppSdkWorkflowReceiptInput {
-                source_kind: AppSdkWorkflowReceiptSourceKind::LocalOutbox,
+            .runtime_workflow_receipt_repository()
+            .record_receipt(&DesktopRuntimeWorkflowReceiptInput {
+                source_kind: DesktopRuntimeWorkflowReceiptSourceKind::AppWorkflow,
                 source_record_id: "source-record-a".to_owned(),
                 sdk_operation_kind: "farm.publish".to_owned(),
-                sdk_outbox_event_ids: vec!["outbox-a".to_owned()],
+                runtime_effect_ids: vec!["effect-a".to_owned()],
                 expected_event_id: Some("expected-a".to_owned()),
                 actor_pubkey: Some("actor-a".to_owned()),
                 idempotency_digest_prefix: Some("digest-a".to_owned()),
-                workflow_state: AppSdkWorkflowReceiptState::Enqueued,
+                workflow_state: DesktopRuntimeWorkflowReceiptState::Enqueued,
                 recorded_at: "2026-06-18T12:00:00Z".to_owned(),
                 detail_json: json!({"attempt": 1}),
             })
             .expect("record first receipt");
         let second = store
-            .sdk_workflow_receipt_repository()
-            .record_receipt(&AppSdkWorkflowReceiptInput {
-                source_kind: AppSdkWorkflowReceiptSourceKind::LocalOutbox,
+            .runtime_workflow_receipt_repository()
+            .record_receipt(&DesktopRuntimeWorkflowReceiptInput {
+                source_kind: DesktopRuntimeWorkflowReceiptSourceKind::AppWorkflow,
                 source_record_id: "source-record-a".to_owned(),
                 sdk_operation_kind: "farm.publish".to_owned(),
-                sdk_outbox_event_ids: vec!["outbox-b".to_owned()],
+                runtime_effect_ids: vec!["effect-b".to_owned()],
                 expected_event_id: Some("expected-b".to_owned()),
                 actor_pubkey: Some("actor-b".to_owned()),
                 idempotency_digest_prefix: Some("digest-b".to_owned()),
-                workflow_state: AppSdkWorkflowReceiptState::Pushed,
+                workflow_state: DesktopRuntimeWorkflowReceiptState::Pushed,
                 recorded_at: "2026-06-18T12:05:00Z".to_owned(),
                 detail_json: json!({"attempt": 2}),
             })
@@ -311,10 +311,13 @@ mod tests {
         assert_eq!(first.id, second.id);
         assert_eq!(second.created_at, "2026-06-18T12:00:00Z");
         assert_eq!(second.updated_at, "2026-06-18T12:05:00Z");
-        assert_eq!(second.sdk_outbox_event_ids, vec!["outbox-b".to_owned()]);
+        assert_eq!(second.runtime_effect_ids, vec!["effect-b".to_owned()]);
         assert_eq!(second.expected_event_id.as_deref(), Some("expected-b"));
         assert_eq!(second.actor_pubkey.as_deref(), Some("actor-b"));
-        assert_eq!(second.workflow_state, AppSdkWorkflowReceiptState::Pushed);
+        assert_eq!(
+            second.workflow_state,
+            DesktopRuntimeWorkflowReceiptState::Pushed
+        );
         assert_eq!(second.detail_json, json!({"attempt": 2}));
     }
 }

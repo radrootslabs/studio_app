@@ -5,7 +5,7 @@ mod error;
 mod interop;
 mod migrations;
 mod repo;
-mod sdk_workflow_receipts;
+mod runtime_workflow_receipts;
 #[cfg(test)]
 mod source_guards;
 mod sync;
@@ -47,9 +47,10 @@ pub use repo::{
     SellerOrderDecisionExport, SellerOrderDecisionLineExport, TODAY_AGENDA_LIST_LIMIT,
     TODAY_AGENDA_LOW_STOCK_THRESHOLD, derive_farm_rules_readiness,
 };
-pub use sdk_workflow_receipts::{
-    AppSdkStoredWorkflowReceipt, AppSdkWorkflowReceiptInput, AppSdkWorkflowReceiptRepository,
-    AppSdkWorkflowReceiptSourceKind, AppSdkWorkflowReceiptState,
+pub use runtime_workflow_receipts::{
+    DesktopRuntimeStoredWorkflowReceipt, DesktopRuntimeWorkflowReceiptInput,
+    DesktopRuntimeWorkflowReceiptRepository, DesktopRuntimeWorkflowReceiptSourceKind,
+    DesktopRuntimeWorkflowReceiptState,
 };
 pub use sync::{
     AppRelayIngestFailureInput, AppRelayIngestSuccessInput, AppSyncRepository,
@@ -162,8 +163,10 @@ impl AppSqliteStore {
         AppSyncRepository::new(&self.connection)
     }
 
-    pub fn sdk_workflow_receipt_repository(&self) -> AppSdkWorkflowReceiptRepository<'_> {
-        AppSdkWorkflowReceiptRepository::new(&self.connection)
+    pub fn runtime_workflow_receipt_repository(
+        &self,
+    ) -> DesktopRuntimeWorkflowReceiptRepository<'_> {
+        DesktopRuntimeWorkflowReceiptRepository::new(&self.connection)
     }
 
     pub fn reminders_repository(&self) -> AppRemindersRepository<'_> {
@@ -852,7 +855,10 @@ mod tests {
         assert!(table_exists(connection, "reminder_log_entries"));
         assert!(table_exists(connection, "buyer_order_coordination_records"));
         assert!(table_exists(connection, "order_validation_receipts"));
-        assert!(table_exists(connection, "app_sdk_workflow_receipts"));
+        assert!(table_exists(
+            connection,
+            "desktop_runtime_workflow_receipts"
+        ));
         assert!(column_exists(connection, "farms", "timezone"));
         assert!(column_exists(connection, "farms", "currency_code"));
         assert!(column_exists(connection, "local_outbox", "account_id"));
@@ -1030,47 +1036,47 @@ mod tests {
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_workflow_receipts",
+            "desktop_runtime_workflow_receipts",
             "source_record_id"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_workflow_receipts",
+            "desktop_runtime_workflow_receipts",
             "source_kind"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_workflow_receipts",
+            "desktop_runtime_workflow_receipts",
             "sdk_operation_kind"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_workflow_receipts",
-            "sdk_outbox_event_ids_json"
+            "desktop_runtime_workflow_receipts",
+            "runtime_effect_ids_json"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_workflow_receipts",
+            "desktop_runtime_workflow_receipts",
             "expected_event_id"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_workflow_receipts",
+            "desktop_runtime_workflow_receipts",
             "actor_pubkey"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_workflow_receipts",
+            "desktop_runtime_workflow_receipts",
             "idempotency_digest_prefix"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_workflow_receipts",
+            "desktop_runtime_workflow_receipts",
             "workflow_state"
         ));
         assert!(column_exists(
             connection,
-            "app_sdk_workflow_receipts",
+            "desktop_runtime_workflow_receipts",
             "detail_json"
         ));
         connection
