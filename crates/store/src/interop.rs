@@ -1,7 +1,7 @@
 use std::{fs, path::Path};
 
 use radroots_event::{
-    RadrootsEventEnvelope,
+    RadrootsEventEnvelope, RadrootsEventEnvelopeParts,
     ids::{RadrootsEventId, RadrootsOrderId, RadrootsPublicKey},
     kinds::{
         KIND_FARM as RADROOTS_KIND_FARM, KIND_LISTING as RADROOTS_KIND_LISTING,
@@ -1141,7 +1141,7 @@ impl<'a> AppLocalInteropRepository<'a> {
         self.upsert_validation_receipt_projection(&event, &verified.receipt, &verified.tags)?;
         Ok(Some(ProjectionRecord {
             kind: "validation_receipt",
-            projected_id: Some(event.id),
+            projected_id: Some(event.id_str().to_owned()),
         }))
     }
 
@@ -1350,6 +1350,11 @@ impl<'a> AppLocalInteropRepository<'a> {
         let proof_system = TradeValidationReceiptProofSystem::from_validation_receipt_proof_system(
             receipt.proof.system,
         );
+        let event_created_at = i64::try_from(event.created_at_u64()).map_err(|_| {
+            AppSqliteError::InvalidProjection {
+                reason: "validation receipt event timestamp must fit i64",
+            }
+        })?;
 
         self.connection
             .execute(
@@ -1382,7 +1387,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     public_values_hash = excluded.public_values_hash,
                     event_created_at = excluded.event_created_at",
                 params![
-                    event.id.as_str(),
+                    event.id_str(),
                     order_id.map(|order_id| order_id.to_string()),
                     tags.order_id.as_str(),
                     tags.root_event_id.as_str(),
@@ -1394,7 +1399,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     tags.event_set_root.as_str(),
                     tags.reducer_output_root.as_str(),
                     tags.public_values_hash.as_str(),
-                    i64::from(event.created_at),
+                    event_created_at,
                 ],
             )
             .map_err(|source| AppSqliteError::Query {
@@ -3033,15 +3038,15 @@ fn active_order_event_kind(kind: i64) -> bool {
 }
 
 fn active_event_id(event: &RadrootsEventEnvelope) -> Option<RadrootsEventId> {
-    event.id.parse().ok()
+    Some(event.id().clone())
 }
 
 fn active_author_pubkey(event: &RadrootsEventEnvelope) -> Option<RadrootsPublicKey> {
-    event.author.parse().ok()
+    Some(event.author().clone())
 }
 
 fn active_order_evidence_from_event(event: &RadrootsEventEnvelope) -> Option<ActiveOrderEvidence> {
-    match i64::from(event.kind) {
+    match i64::from(event.kind_u32()) {
         KIND_ORDER_REQUEST => {
             let envelope = order_request_from_event(event).ok()?;
             Some(ActiveOrderEvidence::Request(RadrootsOrderRequestRecord {
@@ -3052,7 +3057,8 @@ fn active_order_evidence_from_event(event: &RadrootsEventEnvelope) -> Option<Act
         }
         KIND_ORDER_DECISION => {
             let envelope = order_decision_from_event(event).ok()?;
-            let context = order_event_context_from_tags(envelope.message_type, &event.tags).ok()?;
+            let tags = event.tags_as_vec();
+            let context = order_event_context_from_tags(envelope.message_type, &tags).ok()?;
             Some(ActiveOrderEvidence::Decision(RadrootsOrderDecisionRecord {
                 event_id: active_event_id(event)?,
                 author_pubkey: active_author_pubkey(event)?,
@@ -3064,7 +3070,8 @@ fn active_order_evidence_from_event(event: &RadrootsEventEnvelope) -> Option<Act
         }
         KIND_ORDER_REVISION => {
             let envelope = order_revision_proposal_from_event(event).ok()?;
-            let context = order_event_context_from_tags(envelope.message_type, &event.tags).ok()?;
+            let tags = event.tags_as_vec();
+            let context = order_event_context_from_tags(envelope.message_type, &tags).ok()?;
             Some(ActiveOrderEvidence::RevisionProposal(
                 RadrootsOrderRevisionProposalRecord {
                     event_id: active_event_id(event)?,
@@ -3078,7 +3085,8 @@ fn active_order_evidence_from_event(event: &RadrootsEventEnvelope) -> Option<Act
         }
         KIND_ORDER_REVISION_DECISION => {
             let envelope = order_revision_decision_from_event(event).ok()?;
-            let context = order_event_context_from_tags(envelope.message_type, &event.tags).ok()?;
+            let tags = event.tags_as_vec();
+            let context = order_event_context_from_tags(envelope.message_type, &tags).ok()?;
             Some(ActiveOrderEvidence::RevisionDecision(
                 RadrootsOrderRevisionDecisionRecord {
                     event_id: active_event_id(event)?,
@@ -3092,7 +3100,8 @@ fn active_order_evidence_from_event(event: &RadrootsEventEnvelope) -> Option<Act
         }
         KIND_ORDER_CANCEL => {
             let envelope = order_cancellation_from_event(event).ok()?;
-            let context = order_event_context_from_tags(envelope.message_type, &event.tags).ok()?;
+            let tags = event.tags_as_vec();
+            let context = order_event_context_from_tags(envelope.message_type, &tags).ok()?;
             Some(ActiveOrderEvidence::Cancellation(
                 RadrootsOrderCancellationRecord {
                     event_id: active_event_id(event)?,
@@ -3144,7 +3153,7 @@ fn signed_event_from_record(
     };
     let Some(created_at) = record
         .event_created_at
-        .and_then(|created_at| u32::try_from(created_at).ok())
+        .and_then(|created_at| u64::try_from(created_at).ok())
     else {
         return Ok(None);
     };
@@ -3159,7 +3168,7 @@ fn signed_event_from_record(
     let Some(tags) = record.event_tags_json.as_ref().and_then(tags_from_json) else {
         return Ok(None);
     };
-    Ok(Some(RadrootsEventEnvelope {
+    Ok(RadrootsEventEnvelope::new(RadrootsEventEnvelopeParts {
         id: id.to_owned(),
         author: author.to_owned(),
         created_at,
@@ -3167,7 +3176,8 @@ fn signed_event_from_record(
         tags,
         content: record.event_content.clone().unwrap_or_default(),
         sig: sig.to_owned(),
-    }))
+    })
+    .ok())
 }
 
 fn signed_event_record_is_usable(record: &RuntimeStoreRecord) -> bool {
@@ -3241,7 +3251,7 @@ fn signed_event_from_local_interop_evidence(
     };
     let Some(created_at) = evidence
         .event_created_at
-        .and_then(|created_at| u32::try_from(created_at).ok())
+        .and_then(|created_at| u64::try_from(created_at).ok())
     else {
         return Ok(None);
     };
@@ -3262,7 +3272,7 @@ fn signed_event_from_local_interop_evidence(
     let Some(tags) = tags_from_json(&tags_value) else {
         return Ok(None);
     };
-    Ok(Some(RadrootsEventEnvelope {
+    Ok(RadrootsEventEnvelope::new(RadrootsEventEnvelopeParts {
         id: id.to_owned(),
         author: author.to_owned(),
         created_at,
@@ -3270,7 +3280,8 @@ fn signed_event_from_local_interop_evidence(
         tags,
         content: evidence.event_content.clone().unwrap_or_default(),
         sig: sig.to_owned(),
-    }))
+    })
+    .ok())
 }
 
 fn tags_from_json(value: &Value) -> Option<Vec<Vec<String>>> {
@@ -3860,7 +3871,7 @@ mod tests {
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
     };
     use radroots_event::{
-        RadrootsEventEnvelope, RadrootsEventPtr,
+        RadrootsEventEnvelope, RadrootsEventEnvelopeParts, RadrootsEventPtr,
         ids::{
             RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress, RadrootsOrderId,
             RadrootsOrderQuoteId, RadrootsOrderRevisionId, RadrootsPublicKey,
@@ -3872,13 +3883,11 @@ mod tests {
             RadrootsOrderRequest, RadrootsOrderRevisionDecision, RadrootsOrderRevisionOutcome,
             RadrootsOrderRevisionProposal,
         },
+        wire::RadrootsNip01EventWireParts as WireEventParts,
     };
-    use radroots_event_codec::{
-        order::{
-            order_cancellation_event_build, order_decision_event_build, order_request_event_build,
-            order_revision_decision_event_build, order_revision_proposal_event_build,
-        },
-        wire::WireEventParts,
+    use radroots_event_codec::order::{
+        order_cancellation_event_build, order_decision_event_build, order_request_event_build,
+        order_revision_decision_event_build, order_revision_proposal_event_build,
     };
     use radroots_runtime_store::{
         PublishOutboxStatus, RelayDeliveryEvidence, RuntimeStore, RuntimeStoreRecordFamily,
@@ -4691,19 +4700,7 @@ mod tests {
         author: &str,
         parts: WireEventParts,
     ) -> RadrootsEventEnvelope {
-        let event_id = event_id
-            .parse::<RadrootsEventId>()
-            .map(|event_id| event_id.to_string())
-            .unwrap_or_else(|_| test_event_id_seed(event_id));
-        RadrootsEventEnvelope {
-            sig: format!("sig-{event_id}"),
-            id: event_id,
-            author: author.to_owned(),
-            created_at: 1_777_665_600,
-            kind: parts.kind,
-            tags: parts.tags,
-            content: parts.content,
-        }
+        event_from_parts_at(event_id, author, parts, 1_777_665_600)
     }
 
     fn event_from_parts_at(
@@ -4712,13 +4709,58 @@ mod tests {
         parts: WireEventParts,
         created_at: u32,
     ) -> RadrootsEventEnvelope {
-        let mut event = event_from_parts(event_id, author, parts);
-        event.created_at = created_at;
-        event
+        let event_id = event_id
+            .parse::<RadrootsEventId>()
+            .map(|event_id| event_id.to_string())
+            .unwrap_or_else(|_| test_event_id_seed(event_id));
+        RadrootsEventEnvelope::new(RadrootsEventEnvelopeParts {
+            sig: test_event_signature_seed(event_id.as_str()),
+            id: event_id,
+            author: author.to_owned(),
+            created_at: u64::from(created_at),
+            kind: parts.kind,
+            tags: parts.tags,
+            content: parts.content,
+        })
+        .expect("test event envelope")
+    }
+
+    fn event_with_tags(
+        event: &RadrootsEventEnvelope,
+        tags: Vec<Vec<String>>,
+    ) -> RadrootsEventEnvelope {
+        RadrootsEventEnvelope::new(RadrootsEventEnvelopeParts {
+            sig: event.sig_str().to_owned(),
+            id: event.id_str().to_owned(),
+            author: event.author_str().to_owned(),
+            created_at: event.created_at_u64(),
+            kind: event.kind_u32(),
+            tags,
+            content: event.content().to_owned(),
+        })
+        .expect("test event envelope with tags")
+    }
+
+    fn event_with_kind(event: &RadrootsEventEnvelope, kind: u32) -> RadrootsEventEnvelope {
+        RadrootsEventEnvelope::new(RadrootsEventEnvelopeParts {
+            sig: event.sig_str().to_owned(),
+            id: event.id_str().to_owned(),
+            author: event.author_str().to_owned(),
+            created_at: event.created_at_u64(),
+            kind,
+            tags: event.tags_as_vec(),
+            content: event.content().to_owned(),
+        })
+        .expect("test event envelope with kind")
     }
 
     fn hex_event_id(seed: u8) -> String {
         format!("{seed:064x}")
+    }
+
+    fn test_event_signature_seed(seed: &str) -> String {
+        let base = test_event_id_seed(seed);
+        format!("{base}{base}")
     }
 
     fn hash32(seed: u8) -> String {
@@ -4790,6 +4832,8 @@ mod tests {
         source_runtime: SourceRuntime,
         owner_account_id: Option<&str>,
     ) -> RuntimeStoreRecordInput {
+        let event_created_at = i64::try_from(event.created_at_u64()).expect("event timestamp");
+        let event_tags = event.tags_as_vec();
         let relay_delivery_json = RelayDeliveryEvidence::acknowledged(
             ["ws://127.0.0.1:1234"],
             ["ws://127.0.0.1:1234"],
@@ -4804,28 +4848,28 @@ mod tests {
             family: RuntimeStoreRecordFamily::SignedEvent,
             status: RuntimeStoreRecordStatus::Published,
             source_runtime,
-            created_at_ms: i64::from(event.created_at) * 1_000,
-            inserted_at_ms: i64::from(event.created_at) * 1_000 + 1,
+            created_at_ms: event_created_at * 1_000,
+            inserted_at_ms: event_created_at * 1_000 + 1,
             owner_account_id: owner_account_id.map(str::to_owned),
-            owner_pubkey: Some(event.author.clone()),
+            owner_pubkey: Some(event.author_str().to_owned()),
             farm_id: None,
             listing_addr: Some(listing_addr.to_owned()),
             local_work_json: None,
-            event_id: Some(event.id.clone()),
-            event_kind: Some(i64::from(event.kind)),
-            event_pubkey: Some(event.author.clone()),
-            event_created_at: Some(i64::from(event.created_at)),
-            event_tags_json: Some(json!(event.tags)),
-            event_content: Some(event.content.clone()),
-            event_sig: Some(event.sig.clone()),
+            event_id: Some(event.id_str().to_owned()),
+            event_kind: Some(i64::from(event.kind_u32())),
+            event_pubkey: Some(event.author_str().to_owned()),
+            event_created_at: Some(event_created_at),
+            event_tags_json: Some(json!(event_tags)),
+            event_content: Some(event.content().to_owned()),
+            event_sig: Some(event.sig_str().to_owned()),
             raw_event_json: Some(json!({
-                "id": event.id,
-                "kind": event.kind,
-                "pubkey": event.author,
-                "created_at": event.created_at,
-                "tags": event.tags,
-                "content": event.content,
-                "sig": event.sig,
+                "id": event.id_str(),
+                "kind": event.kind_u32(),
+                "pubkey": event.author_str(),
+                "created_at": event.created_at_u64(),
+                "tags": event.tags_as_vec(),
+                "content": event.content(),
+                "sig": event.sig_str(),
             })),
             outbox_status: PublishOutboxStatus::Acknowledged,
             relay_set_fingerprint: Some("relay-set".to_owned()),
@@ -4889,7 +4933,7 @@ mod tests {
             .import_shared_runtime_store_from_store(&events)
             .expect("import signed order request");
         let farm_id = deterministic_farm_id(Some(seller_pubkey), farm_key);
-        let order_id = projected_order_id(order_id_raw, buyer_pubkey, event.id.as_str());
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey, event.id_str());
         let orders = app_store
             .load_orders_list(
                 farm_id,
@@ -4924,7 +4968,7 @@ mod tests {
                 .iter()
                 .any(|record| record.projected_kind == "signed_event"
                     && record.event_kind == Some(KIND_ORDER_REQUEST)
-                    && record.event_id.as_deref() == Some(event.id.as_str()))
+                    && record.event_id.as_deref() == Some(event.id_str()))
         );
         assert_eq!(signed_evidence, vec![event.clone()]);
         assert_eq!(orders.rows.len(), 1);
@@ -5154,7 +5198,7 @@ mod tests {
             .import_shared_runtime_store_from_store(&events)
             .expect("import app order request");
         let buyer_context = BuyerContext::account("acct_buyer");
-        let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id_str());
         let farm_id = deterministic_farm_id(Some(seller_pubkey), farm_key);
         let buyer_orders = app_store
             .load_buyer_orders(&buyer_context)
@@ -5172,8 +5216,8 @@ mod tests {
             seller_pubkey,
         );
         let decision_parts = order_decision_event_build(
-            &typed_event_id(request_event.id.as_str()),
-            &typed_event_id(request_event.id.as_str()),
+            &typed_event_id(request_event.id_str()),
+            &typed_event_id(request_event.id_str()),
             &decision_payload,
         )
         .expect("build order decision event");
@@ -5237,7 +5281,7 @@ mod tests {
                 .provenance
                 .last_event_id
                 .as_deref(),
-            Some(decision_event.id.as_str())
+            Some(decision_event.id_str())
         );
         assert_eq!(
             buyer_orders.rows[0].workflow.economics.total_minor_units,
@@ -5330,9 +5374,9 @@ mod tests {
             .expect("import duplicate-root requests");
 
         let first_order_id =
-            projected_order_id(order_id_raw, buyer_pubkey, first_request_event.id.as_str());
+            projected_order_id(order_id_raw, buyer_pubkey, first_request_event.id_str());
         let second_order_id =
-            projected_order_id(order_id_raw, buyer_pubkey, second_request_event.id.as_str());
+            projected_order_id(order_id_raw, buyer_pubkey, second_request_event.id_str());
         let buyer_context = BuyerContext::account("acct_duplicate_root");
         let buyer_orders = app_store
             .load_buyer_orders(&buyer_context)
@@ -5412,7 +5456,7 @@ mod tests {
             .import_shared_runtime_store_from_store(&events)
             .expect("import app order request");
         let buyer_context = BuyerContext::account("acct_buyer");
-        let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id_str());
         let buyer_orders = app_store
             .load_buyer_orders(&buyer_context)
             .expect("load buyer orders after request");
@@ -5429,8 +5473,8 @@ mod tests {
             seller_pubkey,
         );
         let decision_parts = order_decision_event_build(
-            &typed_event_id(request_event.id.as_str()),
-            &typed_event_id(request_event.id.as_str()),
+            &typed_event_id(request_event.id_str()),
+            &typed_event_id(request_event.id_str()),
             &decision_payload,
         )
         .expect("build declined order decision event");
@@ -5551,8 +5595,8 @@ mod tests {
             seller_pubkey,
         );
         let decision_parts = order_decision_event_build(
-            &typed_event_id(request_event.id.as_str()),
-            &typed_event_id(request_event.id.as_str()),
+            &typed_event_id(request_event.id_str()),
+            &typed_event_id(request_event.id_str()),
             &decision_payload,
         )
         .expect("build lifecycle order decision");
@@ -5758,7 +5802,7 @@ mod tests {
         );
         assert_eq!(
             buyer_detail.validation_receipts[0].event_id,
-            invalid_event.id
+            invalid_event.id_str()
         );
         assert_eq!(
             buyer_detail.validation_receipts[0].result,
@@ -5792,7 +5836,10 @@ mod tests {
             buyer_detail.validation_receipts[0].recorded_at,
             1_777_665_604
         );
-        assert_eq!(buyer_detail.validation_receipts[1].event_id, valid_event.id);
+        assert_eq!(
+            buyer_detail.validation_receipts[1].event_id,
+            valid_event.id_str()
+        );
         assert_eq!(
             buyer_detail.validation_receipts[1].result,
             TradeValidationReceiptResult::Valid
@@ -5802,7 +5849,7 @@ mod tests {
                 .iter()
                 .any(|record| record.projected_kind == "validation_receipt"
                     && record.event_kind == Some(KIND_VALIDATION_RECEIPT)
-                    && record.event_id.as_deref() == Some(invalid_event.id.as_str()))
+                    && record.event_id.as_deref() == Some(invalid_event.id_str()))
         );
     }
 
@@ -5906,7 +5953,7 @@ mod tests {
             .import_shared_runtime_store_from_store(&events)
             .expect("import request after receipt");
 
-        let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id_str());
         let buyer_context = BuyerContext::account("acct_validation_out_of_order");
         let buyer_detail = app_store
             .load_buyer_order_detail(&buyer_context, order_id)
@@ -5927,7 +5974,7 @@ mod tests {
         );
         assert_eq!(
             buyer_detail.validation_receipts[0].event_id,
-            receipt_event.id
+            receipt_event.id_str()
         );
         assert_eq!(buyer_detail.status, BuyerOrderStatus::Placed);
         assert_eq!(seller_detail.status, OrderStatus::NeedsAction);
@@ -5936,7 +5983,7 @@ mod tests {
     #[test]
     fn validation_receipt_invalid_candidates_do_not_surface_as_order_evidence() {
         let fixture = validation_receipt_order_fixture("validation-receipt-invalid-candidates");
-        let mut mismatched_tag_event = validation_receipt_event(
+        let mismatched_tag_event = validation_receipt_event(
             hex_event_id(61).as_str(),
             fixture.seller_pubkey.as_str(),
             fixture.order_id_raw.as_str(),
@@ -5946,13 +5993,14 @@ mod tests {
             RadrootsValidationReceiptResult::Valid,
             1_777_665_603,
         );
-        if let Some(tag) = mismatched_tag_event
-            .tags
+        let mut mismatched_tags = mismatched_tag_event.tags_as_vec();
+        if let Some(tag) = mismatched_tags
             .iter_mut()
             .find(|tag| tag.first().map(String::as_str) == Some("event_set_root"))
         {
             tag[1] = hash32(99);
         }
+        let mismatched_tag_event = event_with_tags(&mismatched_tag_event, mismatched_tags);
         let wrong_order_event = validation_receipt_event(
             hex_event_id(62).as_str(),
             fixture.seller_pubkey.as_str(),
@@ -5963,7 +6011,7 @@ mod tests {
             RadrootsValidationReceiptResult::Valid,
             1_777_665_604,
         );
-        let mut buyer_kind_candidate = validation_receipt_event(
+        let buyer_kind_candidate = validation_receipt_event(
             hex_event_id(63).as_str(),
             fixture.buyer_pubkey.as_str(),
             fixture.order_id_raw.as_str(),
@@ -5973,7 +6021,8 @@ mod tests {
             RadrootsValidationReceiptResult::Valid,
             1_777_665_605,
         );
-        buyer_kind_candidate.kind = KIND_ORDER_REQUEST as u32;
+        let buyer_kind_candidate =
+            event_with_kind(&buyer_kind_candidate, KIND_ORDER_REQUEST as u32);
 
         for (record_id, event) in [
             (
@@ -6093,12 +6142,12 @@ mod tests {
             listing_addr.as_str(),
             buyer_pubkey,
             seller_pubkey,
-            request_event.id.as_str(),
-            request_event.id.as_str(),
+            request_event.id_str(),
+            request_event.id_str(),
         );
         let proposal_parts = order_revision_proposal_event_build(
-            &typed_event_id(request_event.id.as_str()),
-            &typed_event_id(request_event.id.as_str()),
+            &typed_event_id(request_event.id_str()),
+            &typed_event_id(request_event.id_str()),
             &proposal_payload,
         )
         .expect("build revision proposal");
@@ -6121,7 +6170,7 @@ mod tests {
             .expect("import revision proposal");
 
         let seller_farm_id = deterministic_farm_id(Some(seller_pubkey), farm_key);
-        let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id_str());
         let buyer_context = BuyerContext::account("acct_revision");
         let seller_orders = app_store
             .load_orders_list(
@@ -6153,13 +6202,13 @@ mod tests {
             listing_addr.as_str(),
             buyer_pubkey,
             seller_pubkey,
-            request_event.id.as_str(),
-            proposal_event.id.as_str(),
+            request_event.id_str(),
+            proposal_event.id_str(),
             RadrootsOrderRevisionOutcome::Accepted,
         );
         let revision_decision_parts = order_revision_decision_event_build(
-            &typed_event_id(request_event.id.as_str()),
-            &typed_event_id(proposal_event.id.as_str()),
+            &typed_event_id(request_event.id_str()),
+            &typed_event_id(proposal_event.id_str()),
             &revision_decision_payload,
         )
         .expect("build revision decision");
@@ -6282,8 +6331,8 @@ mod tests {
             seller_pubkey,
         );
         let cancel_parts = order_cancellation_event_build(
-            &typed_event_id(request_event.id.as_str()),
-            &typed_event_id(request_event.id.as_str()),
+            &typed_event_id(request_event.id_str()),
+            &typed_event_id(request_event.id_str()),
             &cancel_payload,
         )
         .expect("build cancellation");
@@ -6302,7 +6351,7 @@ mod tests {
             .expect("import cancellation");
 
         let seller_farm_id = deterministic_farm_id(Some(seller_pubkey), farm_key);
-        let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id_str());
         let buyer_context = BuyerContext::account("acct_cancel");
         let buyer_detail = app_store
             .load_buyer_order_detail(&buyer_context, order_id)
@@ -6396,8 +6445,8 @@ mod tests {
                 seller_pubkey,
             );
             let accepted_parts = order_decision_event_build(
-                &typed_event_id(request_event.id.as_str()),
-                &typed_event_id(request_event.id.as_str()),
+                &typed_event_id(request_event.id_str()),
+                &typed_event_id(request_event.id_str()),
                 &accepted_payload,
             )
             .expect("build accepted conflict decision");
@@ -6413,8 +6462,8 @@ mod tests {
                 seller_pubkey,
             );
             let declined_parts = order_decision_event_build(
-                &typed_event_id(request_event.id.as_str()),
-                &typed_event_id(request_event.id.as_str()),
+                &typed_event_id(request_event.id_str()),
+                &typed_event_id(request_event.id_str()),
                 &declined_payload,
             )
             .expect("build declined conflict decision");
@@ -6443,8 +6492,7 @@ mod tests {
             app_store
                 .import_shared_runtime_store_from_store(&events)
                 .expect("import conflicting decisions");
-            let order_id =
-                projected_order_id(order_id_raw, buyer_pubkey, request_event.id.as_str());
+            let order_id = projected_order_id(order_id_raw, buyer_pubkey, request_event.id_str());
             let detail = app_store
                 .load_order_detail(
                     deterministic_farm_id(Some(seller_pubkey), farm_key),
@@ -8296,7 +8344,7 @@ mod tests {
             .expect("load imported records");
         let stored = imported
             .iter()
-            .find(|record| record.event_id.as_deref() == Some(event.id.as_str()))
+            .find(|record| record.event_id.as_deref() == Some(event.id_str()))
             .expect("app order request evidence");
 
         assert_eq!(report.imported_records, 2);
@@ -8304,7 +8352,7 @@ mod tests {
         assert_eq!(
             imported
                 .iter()
-                .filter(|record| record.event_id.as_deref() == Some(event.id.as_str()))
+                .filter(|record| record.event_id.as_deref() == Some(event.id_str()))
                 .count(),
             1
         );
@@ -8346,8 +8394,8 @@ mod tests {
             seller_pubkey,
         );
         let decision_parts = order_decision_event_build(
-            &typed_event_id(request_event.id.as_str()),
-            &typed_event_id(request_event.id.as_str()),
+            &typed_event_id(request_event.id_str()),
+            &typed_event_id(request_event.id_str()),
             &decision_payload,
         )
         .expect("build order decision event");
@@ -8386,7 +8434,7 @@ mod tests {
             .expect("load imported records");
         let stored = imported
             .iter()
-            .find(|record| record.event_id.as_deref() == Some(decision_event.id.as_str()))
+            .find(|record| record.event_id.as_deref() == Some(decision_event.id_str()))
             .expect("app order decision evidence");
 
         assert_eq!(report.imported_records, 1);
@@ -8394,7 +8442,7 @@ mod tests {
         assert_eq!(
             imported
                 .iter()
-                .filter(|record| record.event_id.as_deref() == Some(decision_event.id.as_str()))
+                .filter(|record| record.event_id.as_deref() == Some(decision_event.id_str()))
                 .count(),
             1
         );

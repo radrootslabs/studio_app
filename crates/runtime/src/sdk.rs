@@ -14,6 +14,7 @@ use radroots_authority::{RadrootsActorContext, RadrootsLocalEventSigner};
 use radroots_event::{
     RadrootsEventEnvelope, RadrootsEventPtr,
     contract::RadrootsActorRole,
+    draft::{RadrootsSignedEvent, RadrootsSignedEventParts},
     farm::RadrootsFarm,
     ids::{
         RadrootsAddressableCoordinate, RadrootsListingAddress, RadrootsOrderId,
@@ -1699,6 +1700,12 @@ fn trade_revision_decide_with_sdk(
         RadrootsActorRole::Buyer,
     )?;
     let sdk = runtime.block_on(build_sdk_runtime_with_signer(config, request.signer_keys))?;
+    let evidence = request
+        .evidence
+        .into_iter()
+        .map(signed_trade_evidence_from_envelope)
+        .map(|event| event.map(TradeEvidenceIngestRequest::new))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut sdk_request = TradeRevisionDecisionRequest::new(
         actor,
         request.locator,
@@ -1707,12 +1714,7 @@ fn trade_revision_decide_with_sdk(
         app_trade_target_policy(),
         app_trade_publish_mode(),
         app_trade_satisfaction_policy(),
-        TradeEvidenceMode::require_explicit_evidence(
-            request
-                .evidence
-                .into_iter()
-                .map(TradeEvidenceIngestRequest::new),
-        ),
+        TradeEvidenceMode::require_explicit_evidence(evidence),
     )
     .with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note));
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
@@ -1729,6 +1731,36 @@ fn trade_revision_decide_with_sdk(
             .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?,
     };
     app_sdk_trade_revision_decision_receipt(outcome, request.actor_pubkey)
+}
+
+fn signed_trade_evidence_from_envelope(
+    event: RadrootsEventEnvelope,
+) -> Result<RadrootsSignedEvent, AppSdkRuntimeIssue> {
+    let raw_json = json!({
+        "id": event.id_str(),
+        "pubkey": event.author_str(),
+        "created_at": event.created_at_u64(),
+        "kind": event.kind_u32(),
+        "tags": event.tags_as_vec(),
+        "content": event.content(),
+        "sig": event.sig_str(),
+    })
+    .to_string();
+    RadrootsSignedEvent::new(RadrootsSignedEventParts {
+        id: event.id_str().to_owned(),
+        pubkey: event.author_str().to_owned(),
+        created_at: event.created_at_u64(),
+        kind: event.kind_u32(),
+        tags: event.tags_as_vec(),
+        content: event.content().to_owned(),
+        sig: event.sig_str().to_owned(),
+        raw_json,
+    })
+    .map_err(|error| {
+        AppSdkRuntimeIssue::from_sdk_error(&RadrootsSdkError::InvalidRequest {
+            message: format!("trade revision evidence signed event is invalid: {error}"),
+        })
+    })
 }
 
 fn trade_cancel_with_sdk(

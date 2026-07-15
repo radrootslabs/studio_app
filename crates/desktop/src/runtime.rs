@@ -11,7 +11,7 @@ use radroots_core::{
     RadrootsCoreQuantityPrice, RadrootsCoreUnit,
 };
 use radroots_event::{
-    RadrootsEventEnvelope, RadrootsEventPtr,
+    RadrootsEventEnvelope, RadrootsEventEnvelopeParts, RadrootsEventPtr,
     farm::{RadrootsFarm, RadrootsFarmPublicLocation, RadrootsFarmRef},
     ids::{
         RadrootsDTag, RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress,
@@ -5648,9 +5648,9 @@ impl DesktopAppRuntimeState {
     ) -> Result<ResolvedAppOrderLifecycleEvidence, AppSqliteError> {
         let mut events = self.collect_order_lifecycle_signed_events()?;
         events.sort_by(|left, right| {
-            left.created_at
-                .cmp(&right.created_at)
-                .then_with(|| left.id.cmp(&right.id))
+            left.created_at_u64()
+                .cmp(&right.created_at_u64())
+                .then_with(|| left.id_str().cmp(right.id_str()))
         });
 
         let mut buckets = AppActiveOrderEvidenceBuckets::default();
@@ -5672,10 +5672,10 @@ impl DesktopAppRuntimeState {
             {
                 continue;
             }
-            let event_id = active_order_event_id(event.id.as_str(), "event_id")?;
-            let author_pubkey = active_order_pubkey(event.author.as_str(), "author_pubkey")?;
+            let event_id = active_order_event_id(event.id_str(), "event_id")?;
+            let author_pubkey = active_order_pubkey(event.author_str(), "author_pubkey")?;
             signed_events_by_id.insert(event_id.to_string(), event.clone());
-            match event.kind {
+            match event.kind_u32() {
                 KIND_ORDER_DECISION => {
                     let envelope = order_decision_from_event(&event).map_err(|_| {
                         AppSqliteError::InvalidProjection {
@@ -5845,7 +5845,7 @@ impl DesktopAppRuntimeState {
                 for event in
                     sqlite_store.load_local_interop_signed_events_by_kind(i64::from(kind))?
                 {
-                    if seen_event_ids.insert(event.id.clone()) {
+                    if seen_event_ids.insert(event.id_str().to_owned()) {
                         events.push(event);
                     }
                 }
@@ -5895,7 +5895,7 @@ impl DesktopAppRuntimeState {
                 let Some(event) = signed_event_from_local_record(&record)? else {
                     continue;
                 };
-                if seen_event_ids.insert(event.id.clone()) {
+                if seen_event_ids.insert(event.id_str().to_owned()) {
                     events.push(event);
                 }
             }
@@ -9438,14 +9438,14 @@ fn signed_event_from_local_record(
         return Ok(None);
     };
     let created_at = record.event_created_at.unwrap_or_default();
-    let created_at = u32::try_from(created_at).map_err(|_| AppSqliteError::InvalidProjection {
-        reason: "signed local event created_at must fit u32",
+    let created_at = u64::try_from(created_at).map_err(|_| AppSqliteError::InvalidProjection {
+        reason: "signed local event created_at must be non-negative",
     })?;
     let kind = u32::try_from(kind).map_err(|_| AppSqliteError::InvalidProjection {
         reason: "signed local event kind must fit u32",
     })?;
 
-    Ok(Some(RadrootsEventEnvelope {
+    Ok(RadrootsEventEnvelope::new(RadrootsEventEnvelopeParts {
         id: id.to_owned(),
         author: author.to_owned(),
         created_at,
@@ -9453,7 +9453,8 @@ fn signed_event_from_local_record(
         tags: event_tags_from_value(record.event_tags_json.as_ref())?,
         content: content.clone(),
         sig: sig.to_owned(),
-    }))
+    })
+    .ok())
 }
 
 fn event_tags_from_value(
@@ -9491,7 +9492,7 @@ fn event_tags_from_value(
 }
 
 fn trade_chain_tag_value(event: &RadrootsEventEnvelope, key: &str) -> Option<String> {
-    event.tags.iter().find_map(|tag| {
+    event.tags_as_vec().iter().find_map(|tag| {
         if tag.first().map(String::as_str) == Some(key) {
             tag.get(1)
                 .map(String::as_str)
@@ -9528,7 +9529,8 @@ fn active_order_event_record_context(
     event: &RadrootsEventEnvelope,
     message_type: RadrootsOrderEventType,
 ) -> Result<(RadrootsPublicKey, RadrootsEventId, RadrootsEventId), AppSqliteError> {
-    let context = order_event_context_from_tags(message_type, &event.tags).map_err(|_| {
+    let tags = event.tags_as_vec();
+    let context = order_event_context_from_tags(message_type, &tags).map_err(|_| {
         AppSqliteError::InvalidProjection {
             reason: "order lifecycle evidence is invalid",
         }
@@ -9587,18 +9589,18 @@ fn insert_seller_order_request_evidence(
     let app_order_id = projected_order_id_from_trade_request(
         payload.order_id.as_str(),
         payload.buyer_pubkey.as_str(),
-        event.id.as_str(),
+        event.id_str(),
     );
     if app_order_id != *order_id {
         return;
     }
     matched_requests
-        .entry(event.id.clone())
+        .entry(event.id_str().to_owned())
         .or_insert_with(|| ResolvedAppSellerOrderRequest {
             request_event: event.clone(),
-            request_event_id: event.id.clone(),
-            request_author_pubkey: event.author.clone(),
-            listing_event_id: listing_event_id_from_tags(&event.tags),
+            request_event_id: event.id_str().to_owned(),
+            request_author_pubkey: event.author_str().to_owned(),
+            listing_event_id: listing_event_id_from_tags(&event.tags_as_vec()),
             payload,
         });
 }
@@ -9850,13 +9852,13 @@ mod tests {
         RadrootsOrderItem, RadrootsOrderPricingBasis, RadrootsOrderRequest,
         RadrootsOrderRevisionOutcome, RadrootsOrderRevisionProposal,
     };
-    use radroots_event::{RadrootsEventEnvelope, RadrootsEventPtr};
-    use radroots_event_codec::{
-        order::{
-            order_cancellation_event_build, order_decision_event_build, order_request_event_build,
-            order_revision_proposal_event_build,
-        },
-        wire::WireEventParts,
+    use radroots_event::{
+        RadrootsEventEnvelope, RadrootsEventEnvelopeParts, RadrootsEventPtr,
+        wire::RadrootsNip01EventWireParts as WireEventParts,
+    };
+    use radroots_event_codec::order::{
+        order_cancellation_event_build, order_decision_event_build, order_request_event_build,
+        order_revision_proposal_event_build,
     };
     use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
     use radroots_nostr::prelude::{
@@ -10221,13 +10223,13 @@ mod tests {
 
     fn seed_relay_with_sdk_event(relay: &ThreadedAckRelay, event: &RadrootsEventEnvelope) {
         relay.seed_event(json!({
-            "id": event.id,
-            "pubkey": event.author,
-            "created_at": event.created_at,
-            "kind": event.kind,
-            "tags": event.tags,
-            "content": event.content,
-            "sig": event.sig,
+            "id": event.id_str(),
+            "pubkey": event.author_str(),
+            "created_at": event.created_at_u64(),
+            "kind": event.kind_u32(),
+            "tags": event.tags_as_vec(),
+            "content": event.content(),
+            "sig": event.sig_str(),
         }));
     }
 
@@ -10354,15 +10356,16 @@ mod tests {
         parts: WireEventParts,
     ) -> RadrootsEventEnvelope {
         signed_test_event_for_pubkey(event_pubkey, created_at, parts.clone()).unwrap_or_else(|| {
-            RadrootsEventEnvelope {
+            RadrootsEventEnvelope::new(RadrootsEventEnvelopeParts {
                 id: event_id,
                 author: event_pubkey.to_owned(),
-                created_at,
+                created_at: u64::from(created_at),
                 kind: parts.kind,
                 tags: parts.tags,
                 content: parts.content,
                 sig: test_event_signature_seed(record_id),
-            }
+            })
+            .expect("test event envelope")
         })
     }
 
@@ -20107,7 +20110,8 @@ mod tests {
             .resolve_seller_order_request_evidence(order_id)
             .expect("seller request evidence should resolve")
             .request_event
-            .id;
+            .id_str()
+            .to_owned();
         let payload = AppPublishPayload::OrderDecision(AppOrderDecisionPublishPayload {
             context: AppPublishContext::new(account_id.clone(), "seller_order_decision"),
             app_order_id: order_id,
@@ -20305,7 +20309,9 @@ mod tests {
             1_774_000_010,
             parts,
         );
-        let stored_event_id = event.id.clone();
+        let stored_event_id = event.id_str().to_owned();
+        let event_created_at = i64::try_from(event.created_at_u64()).expect("event timestamp");
+        let event_tags = event.tags_as_vec();
         let relay_delivery_json = RelayDeliveryEvidence::acknowledged(
             ["wss://relay.example"],
             ["wss://relay.example"],
@@ -20324,24 +20330,25 @@ mod tests {
                 created_at_ms: 1_774_000_010_000,
                 inserted_at_ms: 1_774_000_010_001,
                 owner_account_id: None,
-                owner_pubkey: Some(event.author.clone()),
+                owner_pubkey: Some(event.author_str().to_owned()),
                 farm_id: None,
                 listing_addr: Some(listing_addr.to_owned()),
                 local_work_json: None,
-                event_id: Some(event.id.clone()),
-                event_kind: Some(i64::from(event.kind)),
-                event_pubkey: Some(event.author.clone()),
-                event_created_at: Some(i64::from(event.created_at)),
-                event_tags_json: Some(json!(event.tags.clone())),
-                event_content: Some(event.content.clone()),
-                event_sig: Some(event.sig.clone()),
+                event_id: Some(event.id_str().to_owned()),
+                event_kind: Some(i64::from(event.kind_u32())),
+                event_pubkey: Some(event.author_str().to_owned()),
+                event_created_at: Some(event_created_at),
+                event_tags_json: Some(json!(event_tags)),
+                event_content: Some(event.content().to_owned()),
+                event_sig: Some(event.sig_str().to_owned()),
                 raw_event_json: Some(json!({
-                    "id": event.id.clone(),
-                    "kind": event.kind,
-                    "pubkey": event.author.clone(),
-                    "tags": event.tags.clone(),
-                    "content": event.content.clone(),
-                    "sig": event.sig.clone()
+                    "id": event.id_str(),
+                    "kind": event.kind_u32(),
+                    "pubkey": event.author_str(),
+                    "created_at": event.created_at_u64(),
+                    "tags": event.tags_as_vec(),
+                    "content": event.content(),
+                    "sig": event.sig_str()
                 })),
                 outbox_status: PublishOutboxStatus::Acknowledged,
                 relay_set_fingerprint: Some("relay-set".to_owned()),
@@ -20399,7 +20406,9 @@ mod tests {
             .sign_with_keys(&keys)
             .expect("order request event should sign");
         let event = radroots_event_from_nostr(&signed_event);
-        let stored_event_id = event.id.clone();
+        let stored_event_id = event.id_str().to_owned();
+        let event_created_at = i64::try_from(event.created_at_u64()).expect("event timestamp");
+        let event_tags = event.tags_as_vec();
         let record_id = format!("app:signed_event:order-request:{trade_order_id}");
         let relay_delivery_json = RelayDeliveryEvidence::acknowledged(
             ["wss://relay.example"],
@@ -20419,20 +20428,26 @@ mod tests {
                 created_at_ms: 1_774_000_010_000,
                 inserted_at_ms: 1_774_000_010_001,
                 owner_account_id: None,
-                owner_pubkey: Some(event.author.clone()),
+                owner_pubkey: Some(event.author_str().to_owned()),
                 farm_id: None,
                 listing_addr: Some(listing_addr.to_owned()),
                 local_work_json: None,
-                event_id: Some(event.id.clone()),
-                event_kind: Some(i64::from(event.kind)),
-                event_pubkey: Some(event.author.clone()),
-                event_created_at: Some(i64::from(event.created_at)),
-                event_tags_json: Some(json!(event.tags.clone())),
-                event_content: Some(event.content.clone()),
-                event_sig: Some(event.sig.clone()),
-                raw_event_json: Some(
-                    serde_json::to_value(&event).expect("SDK test event should serialize"),
-                ),
+                event_id: Some(event.id_str().to_owned()),
+                event_kind: Some(i64::from(event.kind_u32())),
+                event_pubkey: Some(event.author_str().to_owned()),
+                event_created_at: Some(event_created_at),
+                event_tags_json: Some(json!(event_tags)),
+                event_content: Some(event.content().to_owned()),
+                event_sig: Some(event.sig_str().to_owned()),
+                raw_event_json: Some(json!({
+                    "id": event.id_str(),
+                    "kind": event.kind_u32(),
+                    "pubkey": event.author_str(),
+                    "created_at": event.created_at_u64(),
+                    "tags": event.tags_as_vec(),
+                    "content": event.content(),
+                    "sig": event.sig_str()
+                })),
                 outbox_status: PublishOutboxStatus::Acknowledged,
                 relay_set_fingerprint: Some("relay-set".to_owned()),
                 relay_delivery_json: Some(relay_delivery_json),
@@ -20657,7 +20672,9 @@ mod tests {
             created_at,
             parts,
         );
-        let stored_event_id = event.id.clone();
+        let stored_event_id = event.id_str().to_owned();
+        let event_created_at = i64::try_from(event.created_at_u64()).expect("event timestamp");
+        let event_tags = event.tags_as_vec();
         let relay_delivery_json = RelayDeliveryEvidence::acknowledged(
             ["wss://relay.example"],
             ["wss://relay.example"],
@@ -20676,24 +20693,25 @@ mod tests {
                 created_at_ms: i64::from(created_at) * 1000,
                 inserted_at_ms: i64::from(created_at) * 1000 + 1,
                 owner_account_id: None,
-                owner_pubkey: Some(event.author.clone()),
+                owner_pubkey: Some(event.author_str().to_owned()),
                 farm_id: None,
                 listing_addr: Some(listing_addr.to_owned()),
                 local_work_json: None,
-                event_id: Some(event.id.clone()),
-                event_kind: Some(i64::from(event.kind)),
-                event_pubkey: Some(event.author.clone()),
-                event_created_at: Some(i64::from(event.created_at)),
-                event_tags_json: Some(json!(event.tags.clone())),
-                event_content: Some(event.content.clone()),
-                event_sig: Some(event.sig.clone()),
+                event_id: Some(event.id_str().to_owned()),
+                event_kind: Some(i64::from(event.kind_u32())),
+                event_pubkey: Some(event.author_str().to_owned()),
+                event_created_at: Some(event_created_at),
+                event_tags_json: Some(json!(event_tags)),
+                event_content: Some(event.content().to_owned()),
+                event_sig: Some(event.sig_str().to_owned()),
                 raw_event_json: Some(json!({
-                    "id": event.id.clone(),
-                    "kind": event.kind,
-                    "pubkey": event.author.clone(),
-                    "tags": event.tags.clone(),
-                    "content": event.content.clone(),
-                    "sig": event.sig.clone()
+                    "id": event.id_str(),
+                    "kind": event.kind_u32(),
+                    "pubkey": event.author_str(),
+                    "created_at": event.created_at_u64(),
+                    "tags": event.tags_as_vec(),
+                    "content": event.content(),
+                    "sig": event.sig_str()
                 })),
                 outbox_status: PublishOutboxStatus::Acknowledged,
                 relay_set_fingerprint: Some("relay-set".to_owned()),

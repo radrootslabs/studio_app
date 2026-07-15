@@ -5110,6 +5110,7 @@ version = "0.1.0-alpha.2"
 dependencies = [
  "hex",
  "radroots_core",
+ "secp256k1",
  "serde",
  "serde_json",
  "sha2",
@@ -5267,6 +5268,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "radroots_protocol_contract_v1"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "radroots_runtime"
 version = "0.1.0-alpha.2"
 dependencies = [
@@ -5286,6 +5294,14 @@ dependencies = [
  "toml 0.8.23",
  "tracing",
  "zeroize",
+]
+
+[[package]]
+name = "radroots_runtime_contract_v1"
+version = "0.1.0"
+dependencies = [
+ "radroots_protocol_contract_v1",
+ "serde",
 ]
 
 [[package]]
@@ -5322,6 +5338,7 @@ dependencies = [
  "radroots_nostr_connect",
  "radroots_nostr_signer",
  "radroots_outbox",
+ "radroots_runtime_contract_v1",
  "radroots_runtime_paths",
  "radroots_trade",
  "radroots_transport",
