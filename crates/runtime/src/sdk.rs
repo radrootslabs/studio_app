@@ -1387,7 +1387,10 @@ async fn build_sdk_runtime_with_signer(
     config: &AppSdkConfig,
     keys: RadrootsNostrKeys,
 ) -> Result<RadrootsClient, AppSdkRuntimeIssue> {
-    let signer = RadrootsSdkLocalKeySigner::new(keys)
+    let local_signer = RadrootsLocalEventSigner::new(keys).map_err(|error| {
+        AppSdkRuntimeIssue::runtime_error("sdk_signer_init_failed", error.to_string())
+    })?;
+    let signer = RadrootsSdkLocalKeySigner::from_event_signer(local_signer)
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     let transport_profile = app_transport_profile(config)
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;

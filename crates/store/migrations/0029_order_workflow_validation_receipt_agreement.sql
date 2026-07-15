@@ -30,7 +30,7 @@ CREATE TABLE orders (
         workflow_revision IN ('none', 'change_proposed', 'updated', 'kept_as_placed')
     ),
     workflow_agreement TEXT NOT NULL DEFAULT 'requested' CHECK (
-        workflow_agreement IN ('requested', 'revision_proposed', 'agreed_pending_rhi', 'committed', 'declined', 'cancelled', 'invalid')
+        workflow_agreement IN ('requested', 'agreed_pending_validation', 'committed', 'declined', 'cancelled', 'validation_expired', 'invalid')
     ),
     workflow_inventory TEXT NOT NULL DEFAULT 'needs_review' CHECK (
         workflow_inventory IN ('available', 'reserved', 'sold_out', 'needs_review')
@@ -72,13 +72,7 @@ SELECT
     buyer_phone,
     buyer_order_note,
     workflow_revision,
-    CASE workflow_agreement
-        WHEN 'ordered' THEN 'requested'
-        WHEN 'pending_rhi' THEN 'agreed_pending_rhi'
-        WHEN 'confirmed' THEN 'committed'
-        WHEN 'needs_review' THEN 'invalid'
-        ELSE workflow_agreement
-    END,
+    workflow_agreement,
     workflow_inventory,
     workflow_provenance_source,
     workflow_provenance_last_event_id

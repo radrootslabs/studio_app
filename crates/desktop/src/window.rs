@@ -11668,15 +11668,15 @@ fn trade_workflow_value_badge(value_key: AppTextKey) -> AnyElement {
 fn trade_agreement_status_key(status: TradeAgreementStatus) -> AppTextKey {
     match status {
         TradeAgreementStatus::Requested => AppTextKey::TradeWorkflowAgreementRequested,
-        TradeAgreementStatus::RevisionProposed => {
-            AppTextKey::TradeWorkflowAgreementRevisionProposed
-        }
-        TradeAgreementStatus::AgreedPendingRhi => {
-            AppTextKey::TradeWorkflowAgreementAgreedPendingRhi
+        TradeAgreementStatus::AgreedPendingValidation => {
+            AppTextKey::TradeWorkflowAgreementAgreedPendingValidation
         }
         TradeAgreementStatus::Committed => AppTextKey::TradeWorkflowAgreementCommitted,
         TradeAgreementStatus::Declined => AppTextKey::TradeWorkflowAgreementDeclined,
         TradeAgreementStatus::Cancelled => AppTextKey::TradeWorkflowAgreementCancelled,
+        TradeAgreementStatus::ValidationExpired => {
+            AppTextKey::TradeWorkflowAgreementValidationExpired
+        }
         TradeAgreementStatus::Invalid => AppTextKey::TradeWorkflowAgreementInvalid,
     }
 }
@@ -16789,12 +16789,8 @@ mod tests {
                 AppTextKey::TradeWorkflowAgreementRequested,
             ),
             (
-                TradeAgreementStatus::RevisionProposed,
-                AppTextKey::TradeWorkflowAgreementRevisionProposed,
-            ),
-            (
-                TradeAgreementStatus::AgreedPendingRhi,
-                AppTextKey::TradeWorkflowAgreementAgreedPendingRhi,
+                TradeAgreementStatus::AgreedPendingValidation,
+                AppTextKey::TradeWorkflowAgreementAgreedPendingValidation,
             ),
             (
                 TradeAgreementStatus::Committed,
@@ -16807,6 +16803,10 @@ mod tests {
             (
                 TradeAgreementStatus::Cancelled,
                 AppTextKey::TradeWorkflowAgreementCancelled,
+            ),
+            (
+                TradeAgreementStatus::ValidationExpired,
+                AppTextKey::TradeWorkflowAgreementValidationExpired,
             ),
             (
                 TradeAgreementStatus::Invalid,

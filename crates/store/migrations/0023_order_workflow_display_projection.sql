@@ -1,6 +1,6 @@
 ALTER TABLE orders
     ADD COLUMN workflow_agreement TEXT NOT NULL DEFAULT 'requested' CHECK (
-        workflow_agreement IN ('requested', 'revision_proposed', 'agreed_pending_rhi', 'committed', 'declined', 'cancelled', 'invalid')
+        workflow_agreement IN ('requested', 'agreed_pending_validation', 'committed', 'declined', 'cancelled', 'validation_expired', 'invalid')
     );
 
 ALTER TABLE orders

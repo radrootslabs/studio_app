@@ -1193,18 +1193,18 @@ mod tests {
                     workflow_agreement,
                     workflow_inventory
                  ) VALUES (
-                    'order_agreed_pending_rhi',
+                    'order_agreed_pending_validation',
                     'farm_schema',
-                    'agreed pending rhi',
+                    'agreed pending validation',
                     'Buyer',
                     'needs_action',
                     '2026-01-01T00:00:00Z',
-                    'agreed_pending_rhi',
+                    'agreed_pending_validation',
                     'reserved'
                  )",
                 crate::empty_params(),
             )
-            .expect("pending rhi workflow projection should insert");
+            .expect("pending validation workflow projection should insert");
 
         let invalid_result = connection.execute(
             "INSERT INTO orders (
@@ -1354,10 +1354,10 @@ mod tests {
         assert_eq!(status, "needs_review");
         connection
             .execute(
-                "UPDATE orders SET workflow_agreement = 'agreed_pending_rhi' WHERE id = 'order_status'",
+                "UPDATE orders SET workflow_agreement = 'agreed_pending_validation' WHERE id = 'order_status'",
                 crate::empty_params(),
             )
-            .expect("agreed pending rhi agreement should satisfy current check");
+            .expect("agreed pending validation agreement should satisfy current check");
     }
 
     fn table_exists(connection: &AppSqliteDatabase, table_name: &str) -> bool {

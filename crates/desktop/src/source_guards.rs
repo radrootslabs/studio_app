@@ -717,11 +717,11 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::TradeWorkflowAxisInventory",
     "AppTextKey::TradeWorkflowAxisSource",
     "AppTextKey::TradeWorkflowAgreementRequested",
-    "AppTextKey::TradeWorkflowAgreementRevisionProposed",
-    "AppTextKey::TradeWorkflowAgreementAgreedPendingRhi",
+    "AppTextKey::TradeWorkflowAgreementAgreedPendingValidation",
     "AppTextKey::TradeWorkflowAgreementCommitted",
     "AppTextKey::TradeWorkflowAgreementDeclined",
     "AppTextKey::TradeWorkflowAgreementCancelled",
+    "AppTextKey::TradeWorkflowAgreementValidationExpired",
     "AppTextKey::TradeWorkflowAgreementInvalid",
     "AppTextKey::TradeWorkflowRevisionNone",
     "AppTextKey::TradeWorkflowRevisionChangeProposed",
@@ -1544,7 +1544,7 @@ fn app_store_validation_receipts_do_not_commit_without_trust_policy() {
     let branch = &source[start..end];
 
     assert!(branch.contains("OrderStatus::NeedsAction.storage_key()"));
-    assert!(branch.contains("TradeAgreementStatus::AgreedPendingRhi.storage_key()"));
+    assert!(branch.contains("TradeAgreementStatus::AgreedPendingValidation.storage_key()"));
     assert!(branch.contains("TradeInventoryStatus::Reserved.storage_key()"));
     assert!(!branch.contains("OrderStatus::Scheduled.storage_key()"));
     assert!(!branch.contains("TradeAgreementStatus::Committed.storage_key()"));

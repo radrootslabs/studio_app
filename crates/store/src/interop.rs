@@ -1489,7 +1489,7 @@ impl<'a> AppLocalInteropRepository<'a> {
         };
         if !matches!(
             agreement.as_str(),
-            value if value == TradeAgreementStatus::AgreedPendingRhi.storage_key()
+            value if value == TradeAgreementStatus::AgreedPendingValidation.storage_key()
                 || value == TradeAgreementStatus::Committed.storage_key()
                 || value == TradeAgreementStatus::Invalid.storage_key()
         ) {
@@ -1527,7 +1527,7 @@ impl<'a> AppLocalInteropRepository<'a> {
         let (status, agreement, inventory) = match result.as_str() {
             "valid" => (
                 OrderStatus::NeedsAction.storage_key(),
-                TradeAgreementStatus::AgreedPendingRhi.storage_key(),
+                TradeAgreementStatus::AgreedPendingValidation.storage_key(),
                 TradeInventoryStatus::Reserved.storage_key(),
             ),
             "needs_review" => (
@@ -5278,7 +5278,7 @@ mod tests {
         );
         assert_eq!(
             buyer_orders.rows[0].workflow.agreement,
-            TradeAgreementStatus::AgreedPendingRhi
+            TradeAgreementStatus::AgreedPendingValidation
         );
         assert_eq!(
             buyer_orders.rows[0].workflow.inventory,
@@ -5642,7 +5642,7 @@ mod tests {
         assert_eq!(seller_orders.rows[0].status, OrderStatus::NeedsAction);
         assert_eq!(
             seller_orders.rows[0].workflow.agreement,
-            TradeAgreementStatus::AgreedPendingRhi
+            TradeAgreementStatus::AgreedPendingValidation
         );
         assert_eq!(
             seller_orders.rows[0].workflow.inventory,
@@ -5652,8 +5652,9 @@ mod tests {
     }
 
     #[test]
-    fn valid_validation_receipt_keeps_buyer_and_seller_order_pending_rhi() {
-        let fixture = validation_receipt_order_fixture("validation-receipt-valid-pending-rhi");
+    fn valid_validation_receipt_keeps_buyer_and_seller_order_pending_validation() {
+        let fixture =
+            validation_receipt_order_fixture("validation-receipt-valid-pending-validation");
         let valid_event = validation_receipt_event(
             hex_event_id(29).as_str(),
             fixture.seller_pubkey.as_str(),
@@ -5667,7 +5668,7 @@ mod tests {
         fixture
             .events
             .append_record(&signed_order_event_record(
-                "cli:signed_event:validation-receipt:valid-pending-rhi",
+                "cli:signed_event:validation-receipt:valid-pending-validation",
                 &valid_event,
                 fixture.listing_addr.as_str(),
                 SourceRuntime::Cli,
@@ -5682,23 +5683,23 @@ mod tests {
         let buyer_detail = fixture
             .app_store
             .load_buyer_order_detail(&fixture.buyer_context, fixture.order_id)
-            .expect("load buyer pending-rhi validation receipt detail")
-            .expect("buyer pending-rhi validation receipt detail");
+            .expect("load buyer pending-validation validation receipt detail")
+            .expect("buyer pending-validation validation receipt detail");
         let seller_detail = fixture
             .app_store
             .load_order_detail(fixture.seller_farm_id, fixture.order_id)
-            .expect("load seller pending-rhi validation receipt detail")
-            .expect("seller pending-rhi validation receipt detail");
+            .expect("load seller pending-validation validation receipt detail")
+            .expect("seller pending-validation validation receipt detail");
 
         assert_eq!(buyer_detail.status, BuyerOrderStatus::Placed);
         assert_eq!(seller_detail.status, OrderStatus::NeedsAction);
         assert_eq!(
             buyer_detail.workflow.agreement,
-            TradeAgreementStatus::AgreedPendingRhi
+            TradeAgreementStatus::AgreedPendingValidation
         );
         assert_eq!(
             seller_detail.workflow.agreement,
-            TradeAgreementStatus::AgreedPendingRhi
+            TradeAgreementStatus::AgreedPendingValidation
         );
         assert_eq!(
             buyer_detail.workflow.inventory,
@@ -6084,7 +6085,7 @@ mod tests {
         assert_eq!(seller_detail.status, OrderStatus::NeedsAction);
         assert_eq!(
             buyer_detail.workflow.agreement,
-            TradeAgreementStatus::AgreedPendingRhi
+            TradeAgreementStatus::AgreedPendingValidation
         );
         assert_eq!(seller_detail.primary_action, None);
     }
@@ -6254,7 +6255,7 @@ mod tests {
         assert_eq!(seller_orders.rows[0].status, OrderStatus::NeedsAction);
         assert_eq!(
             seller_orders.rows[0].workflow.agreement,
-            TradeAgreementStatus::AgreedPendingRhi
+            TradeAgreementStatus::AgreedPendingValidation
         );
         assert_eq!(
             seller_orders.rows[0].workflow.revision,

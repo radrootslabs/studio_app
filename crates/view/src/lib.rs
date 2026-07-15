@@ -1076,11 +1076,11 @@ pub struct BuyerOrderReviewProjection {
 pub enum TradeAgreementStatus {
     #[default]
     Requested,
-    RevisionProposed,
-    AgreedPendingRhi,
+    AgreedPendingValidation,
     Committed,
     Declined,
     Cancelled,
+    ValidationExpired,
     Invalid,
 }
 
@@ -1088,11 +1088,11 @@ impl TradeAgreementStatus {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::Requested => "requested",
-            Self::RevisionProposed => "revision_proposed",
-            Self::AgreedPendingRhi => "agreed_pending_rhi",
+            Self::AgreedPendingValidation => "agreed_pending_validation",
             Self::Committed => "committed",
             Self::Declined => "declined",
             Self::Cancelled => "cancelled",
+            Self::ValidationExpired => "validation_expired",
             Self::Invalid => "invalid",
         }
     }
@@ -1100,11 +1100,13 @@ impl TradeAgreementStatus {
     pub const fn label_key_id(self) -> &'static str {
         match self {
             Self::Requested => "messages.trade.workflow.agreement.requested",
-            Self::RevisionProposed => "messages.trade.workflow.agreement.revision_proposed",
-            Self::AgreedPendingRhi => "messages.trade.workflow.agreement.agreed_pending_rhi",
+            Self::AgreedPendingValidation => {
+                "messages.trade.workflow.agreement.agreed_pending_validation"
+            }
             Self::Committed => "messages.trade.workflow.agreement.committed",
             Self::Declined => "messages.trade.workflow.agreement.declined",
             Self::Cancelled => "messages.trade.workflow.agreement.cancelled",
+            Self::ValidationExpired => "messages.trade.workflow.agreement.validation_expired",
             Self::Invalid => "messages.trade.workflow.agreement.invalid",
         }
     }
@@ -1113,11 +1115,11 @@ impl TradeAgreementStatus {
         match status {
             RadrootsTradeWorkflowState::Missing => Self::Invalid,
             RadrootsTradeWorkflowState::Requested => Self::Requested,
-            RadrootsTradeWorkflowState::RevisionProposed => Self::RevisionProposed,
-            RadrootsTradeWorkflowState::AgreedPendingRhi => Self::AgreedPendingRhi,
+            RadrootsTradeWorkflowState::AgreedPendingValidation => Self::AgreedPendingValidation,
             RadrootsTradeWorkflowState::Committed => Self::Committed,
             RadrootsTradeWorkflowState::Declined => Self::Declined,
             RadrootsTradeWorkflowState::Cancelled => Self::Cancelled,
+            RadrootsTradeWorkflowState::ValidationExpired => Self::ValidationExpired,
             RadrootsTradeWorkflowState::Invalid => Self::Invalid,
         }
     }
@@ -1221,16 +1223,15 @@ impl TradeInventoryStatus {
 
     pub fn from_active_order_projection(projection: &RadrootsOrderProjection) -> Self {
         match projection.status {
-            RadrootsTradeWorkflowState::Requested
-            | RadrootsTradeWorkflowState::RevisionProposed => Self::NeedsReview,
-            RadrootsTradeWorkflowState::AgreedPendingRhi
+            RadrootsTradeWorkflowState::Requested => Self::NeedsReview,
+            RadrootsTradeWorkflowState::AgreedPendingValidation
             | RadrootsTradeWorkflowState::Committed => Self::Reserved,
             RadrootsTradeWorkflowState::Declined | RadrootsTradeWorkflowState::Cancelled => {
                 Self::Available
             }
-            RadrootsTradeWorkflowState::Missing | RadrootsTradeWorkflowState::Invalid => {
-                Self::NeedsReview
-            }
+            RadrootsTradeWorkflowState::Missing
+            | RadrootsTradeWorkflowState::ValidationExpired
+            | RadrootsTradeWorkflowState::Invalid => Self::NeedsReview,
         }
     }
 }
@@ -1585,8 +1586,8 @@ pub fn order_status_from_active_order_projection(
     match projection.status {
         RadrootsTradeWorkflowState::Missing => None,
         RadrootsTradeWorkflowState::Requested
-        | RadrootsTradeWorkflowState::RevisionProposed
-        | RadrootsTradeWorkflowState::AgreedPendingRhi => Some(OrderStatus::NeedsAction),
+        | RadrootsTradeWorkflowState::AgreedPendingValidation
+        | RadrootsTradeWorkflowState::ValidationExpired => Some(OrderStatus::NeedsAction),
         RadrootsTradeWorkflowState::Committed => Some(OrderStatus::Scheduled),
         RadrootsTradeWorkflowState::Declined | RadrootsTradeWorkflowState::Cancelled => {
             Some(OrderStatus::Declined)
@@ -2889,19 +2890,19 @@ mod tests {
         );
         assert_eq!(
             TradeAgreementStatus::from_active_order_status(
-                &RadrootsTradeWorkflowState::RevisionProposed
+                &RadrootsTradeWorkflowState::AgreedPendingValidation
             ),
-            TradeAgreementStatus::RevisionProposed
-        );
-        assert_eq!(
-            TradeAgreementStatus::from_active_order_status(
-                &RadrootsTradeWorkflowState::AgreedPendingRhi
-            ),
-            TradeAgreementStatus::AgreedPendingRhi
+            TradeAgreementStatus::AgreedPendingValidation
         );
         assert_eq!(
             TradeAgreementStatus::from_active_order_status(&RadrootsTradeWorkflowState::Committed),
             TradeAgreementStatus::Committed
+        );
+        assert_eq!(
+            TradeAgreementStatus::from_active_order_status(
+                &RadrootsTradeWorkflowState::ValidationExpired
+            ),
+            TradeAgreementStatus::ValidationExpired
         );
         assert_eq!(
             TradeAgreementStatus::from_active_order_status(&RadrootsTradeWorkflowState::Invalid),
@@ -2960,24 +2961,24 @@ mod tests {
             Some(OrderStatus::Scheduled)
         );
 
-        let pending_rhi_order =
-            test_active_order_projection(RadrootsTradeWorkflowState::AgreedPendingRhi);
-        let pending_rhi_projection = TradeWorkflowProjection::from_active_order_projection(
+        let pending_validation_order =
+            test_active_order_projection(RadrootsTradeWorkflowState::AgreedPendingValidation);
+        let pending_validation_projection = TradeWorkflowProjection::from_active_order_projection(
             order_id,
-            &pending_rhi_order,
+            &pending_validation_order,
             TradeRevisionStatus::None,
             TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::RuntimeStore),
         );
         assert_eq!(
-            pending_rhi_projection.agreement,
-            TradeAgreementStatus::AgreedPendingRhi
+            pending_validation_projection.agreement,
+            TradeAgreementStatus::AgreedPendingValidation
         );
         assert_eq!(
-            pending_rhi_projection.inventory,
+            pending_validation_projection.inventory,
             TradeInventoryStatus::Reserved
         );
         assert_eq!(
-            order_status_from_active_order_projection(&pending_rhi_order),
+            order_status_from_active_order_projection(&pending_validation_order),
             Some(OrderStatus::NeedsAction)
         );
 
@@ -3060,14 +3061,14 @@ mod tests {
         );
         assert_eq!(TradeAgreementStatus::Requested.storage_key(), "requested");
         assert_eq!(
-            TradeAgreementStatus::RevisionProposed.storage_key(),
-            "revision_proposed"
-        );
-        assert_eq!(
-            TradeAgreementStatus::AgreedPendingRhi.storage_key(),
-            "agreed_pending_rhi"
+            TradeAgreementStatus::AgreedPendingValidation.storage_key(),
+            "agreed_pending_validation"
         );
         assert_eq!(TradeAgreementStatus::Committed.storage_key(), "committed");
+        assert_eq!(
+            TradeAgreementStatus::ValidationExpired.storage_key(),
+            "validation_expired"
+        );
         assert_eq!(TradeAgreementStatus::Invalid.storage_key(), "invalid");
         assert_eq!(
             TradeRevisionStatus::KeptAsPlaced.storage_key(),
@@ -3084,12 +3085,12 @@ mod tests {
             "messages.trade.workflow.agreement.requested"
         );
         assert_eq!(
-            TradeAgreementStatus::RevisionProposed.label_key_id(),
-            "messages.trade.workflow.agreement.revision_proposed"
+            TradeAgreementStatus::AgreedPendingValidation.label_key_id(),
+            "messages.trade.workflow.agreement.agreed_pending_validation"
         );
         assert_eq!(
-            TradeAgreementStatus::AgreedPendingRhi.label_key_id(),
-            "messages.trade.workflow.agreement.agreed_pending_rhi"
+            TradeAgreementStatus::ValidationExpired.label_key_id(),
+            "messages.trade.workflow.agreement.validation_expired"
         );
         assert_eq!(
             TradeAgreementStatus::Invalid.label_key_id(),

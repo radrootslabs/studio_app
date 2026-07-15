@@ -1181,7 +1181,7 @@ fn primary_action_for_order(
 ) -> Option<OrderPrimaryAction> {
     match status {
         OrderStatus::NeedsAction
-            if workflow.agreement == TradeAgreementStatus::AgreedPendingRhi =>
+            if workflow.agreement == TradeAgreementStatus::AgreedPendingValidation =>
         {
             None
         }

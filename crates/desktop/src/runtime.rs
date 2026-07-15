@@ -2921,11 +2921,7 @@ impl DesktopAppRuntimeState {
         }
         let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
         if lifecycle.decision.is_some()
-            || !matches!(
-                lifecycle.status,
-                RadrootsTradeWorkflowState::Requested
-                    | RadrootsTradeWorkflowState::RevisionProposed
-            )
+            || !matches!(lifecycle.status, RadrootsTradeWorkflowState::Requested)
         {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "buyer order revision requires active pre-agreement negotiation",
@@ -3075,8 +3071,7 @@ impl DesktopAppRuntimeState {
         }
         match lifecycle.status {
             RadrootsTradeWorkflowState::Requested => {}
-            RadrootsTradeWorkflowState::RevisionProposed
-            | RadrootsTradeWorkflowState::AgreedPendingRhi
+            RadrootsTradeWorkflowState::AgreedPendingValidation
             | RadrootsTradeWorkflowState::Committed => {
                 return Err(AppSqliteError::InvalidProjection {
                     reason: "buyer order cancellation requires an open pre-agreement order",
@@ -3085,6 +3080,7 @@ impl DesktopAppRuntimeState {
             RadrootsTradeWorkflowState::Missing
             | RadrootsTradeWorkflowState::Declined
             | RadrootsTradeWorkflowState::Cancelled
+            | RadrootsTradeWorkflowState::ValidationExpired
             | RadrootsTradeWorkflowState::Invalid => {
                 return Err(AppSqliteError::InvalidProjection {
                     reason: "buyer order cancellation requires an open pre-agreement order",
@@ -15556,7 +15552,7 @@ mod tests {
         assert_eq!(persisted_order_status(&runtime, order_id), "needs_action");
         assert_eq!(
             persisted_order_workflow_agreement(&runtime, order_id),
-            "agreed_pending_rhi"
+            "agreed_pending_validation"
         );
         assert_eq!(relay.event_count(), 1);
 
@@ -16294,7 +16290,7 @@ mod tests {
         assert_eq!(detail.status, BuyerOrderStatus::Placed);
         assert_eq!(
             detail.workflow.agreement,
-            TradeAgreementStatus::AgreedPendingRhi
+            TradeAgreementStatus::AgreedPendingValidation
         );
         assert_eq!(
             detail.workflow.provenance.last_event_id.as_deref(),

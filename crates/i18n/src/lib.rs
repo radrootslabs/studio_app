@@ -639,16 +639,16 @@ mod tests {
             "Requested"
         );
         assert_eq!(
-            app_text(AppTextKey::TradeWorkflowAgreementRevisionProposed),
-            "Revision proposed"
-        );
-        assert_eq!(
-            app_text(AppTextKey::TradeWorkflowAgreementAgreedPendingRhi),
+            app_text(AppTextKey::TradeWorkflowAgreementAgreedPendingValidation),
             "Pending validation"
         );
         assert_eq!(
             app_text(AppTextKey::TradeWorkflowAgreementCommitted),
             "Committed"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowAgreementValidationExpired),
+            "Validation expired"
         );
         assert_eq!(
             app_text(AppTextKey::TradeWorkflowAgreementInvalid),
