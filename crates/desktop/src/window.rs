@@ -82,7 +82,8 @@ use radroots_studio_app_view::{
     ReminderDeliveryState, ReminderId, ReminderLogEntryProjection, ReminderLogProjection,
     ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
     SettingsAccountProjection, ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
-    TradeAgreementStatus, TradeEconomicsProjection, TradeInventoryStatus, TradeRevisionStatus,
+    TradeAgreementStatus, TradeAttestationStatus, TradeConflictStatus, TradeEconomicsProjection,
+    TradeEvidenceStatus, TradeInventoryStatus, TradePrivateTermsStatus, TradeRevisionStatus,
     TradeValidationReceiptProjection, TradeValidationReceiptResult, TradeValidationReceiptType,
     TradeWorkflowProjection, TradeWorkflowSource,
 };
@@ -11588,6 +11589,22 @@ fn trade_workflow_detail_badge_strip(workflow: &TradeWorkflowProjection) -> AnyE
         AppTextKey::TradeWorkflowAxisInventory,
         trade_inventory_status_key(workflow.inventory),
     ));
+    badges.push(trade_workflow_labeled_key_badge(
+        AppTextKey::TradeWorkflowAxisEvidence,
+        trade_evidence_status_key(workflow.evidence),
+    ));
+    badges.push(trade_workflow_labeled_key_badge(
+        AppTextKey::TradeWorkflowAxisConflict,
+        trade_conflict_status_key(workflow.conflict),
+    ));
+    badges.push(trade_workflow_labeled_key_badge(
+        AppTextKey::TradeWorkflowAxisPrivateTerms,
+        trade_private_terms_status_key(workflow.private_terms),
+    ));
+    badges.push(trade_workflow_labeled_key_badge(
+        AppTextKey::TradeWorkflowAxisAttestation,
+        trade_attestation_status_key(workflow.attestation),
+    ));
     if workflow.provenance.primary_source != TradeWorkflowSource::Unknown {
         badges.push(trade_workflow_labeled_key_badge(
             AppTextKey::TradeWorkflowAxisSource,
@@ -11615,6 +11632,26 @@ fn trade_workflow_list_badge_strip(workflow: &TradeWorkflowProjection) -> AnyEle
     badges.push(trade_workflow_value_badge(trade_inventory_status_key(
         workflow.inventory,
     )));
+    if workflow.evidence != TradeEvidenceStatus::Complete {
+        badges.push(trade_workflow_value_badge(trade_evidence_status_key(
+            workflow.evidence,
+        )));
+    }
+    if workflow.conflict != TradeConflictStatus::None {
+        badges.push(trade_workflow_value_badge(trade_conflict_status_key(
+            workflow.conflict,
+        )));
+    }
+    if workflow.private_terms != TradePrivateTermsStatus::NotRequired {
+        badges.push(trade_workflow_value_badge(trade_private_terms_status_key(
+            workflow.private_terms,
+        )));
+    }
+    if workflow.attestation != TradeAttestationStatus::None {
+        badges.push(trade_workflow_value_badge(trade_attestation_status_key(
+            workflow.attestation,
+        )));
+    }
 
     app_cluster(APP_UI_THEME.foundation.spacing.tight_px)
         .w_full()
@@ -11631,6 +11668,12 @@ fn trade_workflow_status_stack(workflow: &TradeWorkflowProjection) -> AnyElement
         .child(trade_workflow_value_badge(trade_inventory_status_key(
             workflow.inventory,
         )))
+        .child(trade_workflow_value_badge(trade_evidence_status_key(
+            workflow.evidence,
+        )))
+        .child(trade_workflow_value_badge(trade_conflict_status_key(
+            workflow.conflict,
+        )))
         .into_any_element()
 }
 
@@ -11646,15 +11689,10 @@ fn trade_workflow_value_badge(value_key: AppTextKey) -> AnyElement {
 fn trade_agreement_status_key(status: TradeAgreementStatus) -> AppTextKey {
     match status {
         TradeAgreementStatus::Requested => AppTextKey::TradeWorkflowAgreementRequested,
-        TradeAgreementStatus::AgreedPendingValidation => {
-            AppTextKey::TradeWorkflowAgreementAgreedPendingValidation
-        }
         TradeAgreementStatus::Committed => AppTextKey::TradeWorkflowAgreementCommitted,
+        TradeAgreementStatus::Contested => AppTextKey::TradeWorkflowAgreementContested,
         TradeAgreementStatus::Declined => AppTextKey::TradeWorkflowAgreementDeclined,
         TradeAgreementStatus::Cancelled => AppTextKey::TradeWorkflowAgreementCancelled,
-        TradeAgreementStatus::ValidationExpired => {
-            AppTextKey::TradeWorkflowAgreementValidationExpired
-        }
         TradeAgreementStatus::Invalid => AppTextKey::TradeWorkflowAgreementInvalid,
     }
 }
@@ -11674,6 +11712,64 @@ fn trade_inventory_status_key(status: TradeInventoryStatus) -> AppTextKey {
         TradeInventoryStatus::Reserved => AppTextKey::TradeWorkflowInventoryReserved,
         TradeInventoryStatus::SoldOut => AppTextKey::TradeWorkflowInventorySoldOut,
         TradeInventoryStatus::NeedsReview => AppTextKey::TradeWorkflowInventoryNeedsReview,
+    }
+}
+
+fn trade_evidence_status_key(status: TradeEvidenceStatus) -> AppTextKey {
+    match status {
+        TradeEvidenceStatus::Complete => AppTextKey::TradeWorkflowEvidenceComplete,
+        TradeEvidenceStatus::Missing => AppTextKey::TradeWorkflowEvidenceMissing,
+        TradeEvidenceStatus::QueryPartial => AppTextKey::TradeWorkflowEvidenceQueryPartial,
+        TradeEvidenceStatus::UnsupportedVersion => {
+            AppTextKey::TradeWorkflowEvidenceUnsupportedVersion
+        }
+    }
+}
+
+fn trade_conflict_status_key(status: TradeConflictStatus) -> AppTextKey {
+    match status {
+        TradeConflictStatus::None => AppTextKey::TradeWorkflowConflictNone,
+        TradeConflictStatus::ConcurrentCandidates => {
+            AppTextKey::TradeWorkflowConflictConcurrentCandidates
+        }
+        TradeConflictStatus::DoubleAcceptance => AppTextKey::TradeWorkflowConflictDoubleAcceptance,
+        TradeConflictStatus::DecisionConflict => AppTextKey::TradeWorkflowConflictDecisionConflict,
+        TradeConflictStatus::CancellationConflict => {
+            AppTextKey::TradeWorkflowConflictCancellationConflict
+        }
+        TradeConflictStatus::InvalidCausalChain => {
+            AppTextKey::TradeWorkflowConflictInvalidCausalChain
+        }
+        TradeConflictStatus::InventoryAuthorityConflict => {
+            AppTextKey::TradeWorkflowConflictInventoryAuthorityConflict
+        }
+    }
+}
+
+fn trade_private_terms_status_key(status: TradePrivateTermsStatus) -> AppTextKey {
+    match status {
+        TradePrivateTermsStatus::NotRequired => AppTextKey::TradeWorkflowPrivateTermsNotRequired,
+        TradePrivateTermsStatus::AvailableVerified => {
+            AppTextKey::TradeWorkflowPrivateTermsAvailableVerified
+        }
+        TradePrivateTermsStatus::Missing => AppTextKey::TradeWorkflowPrivateTermsMissing,
+        TradePrivateTermsStatus::Undecryptable => {
+            AppTextKey::TradeWorkflowPrivateTermsUndecryptable
+        }
+        TradePrivateTermsStatus::CommitmentMismatch => {
+            AppTextKey::TradeWorkflowPrivateTermsCommitmentMismatch
+        }
+    }
+}
+
+fn trade_attestation_status_key(status: TradeAttestationStatus) -> AppTextKey {
+    match status {
+        TradeAttestationStatus::None => AppTextKey::TradeWorkflowAttestationNone,
+        TradeAttestationStatus::PresentValid => AppTextKey::TradeWorkflowAttestationPresentValid,
+        TradeAttestationStatus::PresentInvalid => {
+            AppTextKey::TradeWorkflowAttestationPresentInvalid
+        }
+        TradeAttestationStatus::Conflicting => AppTextKey::TradeWorkflowAttestationConflicting,
     }
 }
 
@@ -16279,8 +16375,9 @@ mod tests {
         startup_issue_summary_text, startup_notice_text, startup_signer_preview_summary,
         startup_signer_preview_summary_for_connect_state, startup_signer_source_input_is_editable,
         startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
-        trade_agreement_status_key, trade_inventory_status_key, trade_revision_status_key,
-        trade_workflow_source_key,
+        trade_agreement_status_key, trade_attestation_status_key, trade_conflict_status_key,
+        trade_evidence_status_key, trade_inventory_status_key, trade_private_terms_status_key,
+        trade_revision_status_key, trade_workflow_source_key,
     };
     use crate::runtime::{
         DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSyncConflictSummary,
@@ -16322,7 +16419,8 @@ mod tests {
         ReminderDeliveryState, ReminderId, ReminderKind, ReminderSurface, ReminderUrgency,
         RepeatDemandEligibility, RepeatDemandHandoffProjection, ShellSection,
         TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TradeAgreementStatus,
-        TradeEconomicsProjection, TradeInventoryStatus, TradeRevisionStatus,
+        TradeAttestationStatus, TradeConflictStatus, TradeEconomicsProjection, TradeEvidenceStatus,
+        TradeInventoryStatus, TradePrivateTermsStatus, TradeRevisionStatus,
         TradeWorkflowProjection, TradeWorkflowSource,
     };
     use std::{
@@ -16739,12 +16837,12 @@ mod tests {
                 AppTextKey::TradeWorkflowAgreementRequested,
             ),
             (
-                TradeAgreementStatus::AgreedPendingValidation,
-                AppTextKey::TradeWorkflowAgreementAgreedPendingValidation,
-            ),
-            (
                 TradeAgreementStatus::Committed,
                 AppTextKey::TradeWorkflowAgreementCommitted,
+            ),
+            (
+                TradeAgreementStatus::Contested,
+                AppTextKey::TradeWorkflowAgreementContested,
             ),
             (
                 TradeAgreementStatus::Declined,
@@ -16753,10 +16851,6 @@ mod tests {
             (
                 TradeAgreementStatus::Cancelled,
                 AppTextKey::TradeWorkflowAgreementCancelled,
-            ),
-            (
-                TradeAgreementStatus::ValidationExpired,
-                AppTextKey::TradeWorkflowAgreementValidationExpired,
             ),
             (
                 TradeAgreementStatus::Invalid,
@@ -16808,6 +16902,110 @@ mod tests {
             ),
         ] {
             assert_eq!(trade_inventory_status_key(status), key);
+            assert!(!app_text(key).is_empty());
+        }
+
+        for (status, key) in [
+            (
+                TradeEvidenceStatus::Complete,
+                AppTextKey::TradeWorkflowEvidenceComplete,
+            ),
+            (
+                TradeEvidenceStatus::Missing,
+                AppTextKey::TradeWorkflowEvidenceMissing,
+            ),
+            (
+                TradeEvidenceStatus::QueryPartial,
+                AppTextKey::TradeWorkflowEvidenceQueryPartial,
+            ),
+            (
+                TradeEvidenceStatus::UnsupportedVersion,
+                AppTextKey::TradeWorkflowEvidenceUnsupportedVersion,
+            ),
+        ] {
+            assert_eq!(trade_evidence_status_key(status), key);
+            assert!(!app_text(key).is_empty());
+        }
+
+        for (status, key) in [
+            (
+                TradeConflictStatus::None,
+                AppTextKey::TradeWorkflowConflictNone,
+            ),
+            (
+                TradeConflictStatus::ConcurrentCandidates,
+                AppTextKey::TradeWorkflowConflictConcurrentCandidates,
+            ),
+            (
+                TradeConflictStatus::DoubleAcceptance,
+                AppTextKey::TradeWorkflowConflictDoubleAcceptance,
+            ),
+            (
+                TradeConflictStatus::DecisionConflict,
+                AppTextKey::TradeWorkflowConflictDecisionConflict,
+            ),
+            (
+                TradeConflictStatus::CancellationConflict,
+                AppTextKey::TradeWorkflowConflictCancellationConflict,
+            ),
+            (
+                TradeConflictStatus::InvalidCausalChain,
+                AppTextKey::TradeWorkflowConflictInvalidCausalChain,
+            ),
+            (
+                TradeConflictStatus::InventoryAuthorityConflict,
+                AppTextKey::TradeWorkflowConflictInventoryAuthorityConflict,
+            ),
+        ] {
+            assert_eq!(trade_conflict_status_key(status), key);
+            assert!(!app_text(key).is_empty());
+        }
+
+        for (status, key) in [
+            (
+                TradePrivateTermsStatus::NotRequired,
+                AppTextKey::TradeWorkflowPrivateTermsNotRequired,
+            ),
+            (
+                TradePrivateTermsStatus::AvailableVerified,
+                AppTextKey::TradeWorkflowPrivateTermsAvailableVerified,
+            ),
+            (
+                TradePrivateTermsStatus::Missing,
+                AppTextKey::TradeWorkflowPrivateTermsMissing,
+            ),
+            (
+                TradePrivateTermsStatus::Undecryptable,
+                AppTextKey::TradeWorkflowPrivateTermsUndecryptable,
+            ),
+            (
+                TradePrivateTermsStatus::CommitmentMismatch,
+                AppTextKey::TradeWorkflowPrivateTermsCommitmentMismatch,
+            ),
+        ] {
+            assert_eq!(trade_private_terms_status_key(status), key);
+            assert!(!app_text(key).is_empty());
+        }
+
+        for (status, key) in [
+            (
+                TradeAttestationStatus::None,
+                AppTextKey::TradeWorkflowAttestationNone,
+            ),
+            (
+                TradeAttestationStatus::PresentValid,
+                AppTextKey::TradeWorkflowAttestationPresentValid,
+            ),
+            (
+                TradeAttestationStatus::PresentInvalid,
+                AppTextKey::TradeWorkflowAttestationPresentInvalid,
+            ),
+            (
+                TradeAttestationStatus::Conflicting,
+                AppTextKey::TradeWorkflowAttestationConflicting,
+            ),
+        ] {
+            assert_eq!(trade_attestation_status_key(status), key);
             assert!(!app_text(key).is_empty());
         }
 

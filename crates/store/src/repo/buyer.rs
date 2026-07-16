@@ -90,10 +90,6 @@ pub struct BuyerOrderRuntimeStoreExport {
     pub status: String,
     pub buyer_context_key: String,
     pub buyer_name: String,
-    pub buyer_email: String,
-    pub buyer_phone: String,
-    pub buyer_order_note: String,
-    pub buyer_order_note_public_confirmed: bool,
     pub updated_at: String,
     pub fulfillment_window_id: Option<FulfillmentWindowId>,
     pub fulfillment_window_label: Option<String>,
@@ -310,7 +306,6 @@ impl<'a> AppBuyerRepository<'a> {
                 "update buyer_carts
                  set
                     farm_id = null,
-                    buyer_order_note = '',
                     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  where buyer_context_key = ?1",
                 crate::app_sqlite_params![context_key.as_str()],
@@ -382,20 +377,9 @@ impl<'a> AppBuyerRepository<'a> {
                 "update buyer_carts
                  set
                     buyer_name = ?2,
-                    buyer_email = ?3,
-                    buyer_phone = ?4,
-                    buyer_order_note = ?5,
-                    buyer_order_note_public_confirmed = ?6,
                     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  where buyer_context_key = ?1",
-                crate::app_sqlite_params![
-                    context_key.as_str(),
-                    draft.name.trim(),
-                    draft.email.trim(),
-                    draft.phone.trim(),
-                    draft.order_note.trim(),
-                    draft.confirm_public_note,
-                ],
+                crate::app_sqlite_params![context_key.as_str(), draft.name.trim()],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "save buyer order review draft",
@@ -447,11 +431,7 @@ impl<'a> AppBuyerRepository<'a> {
                         customer_display_name,
                         status,
                         updated_at,
-                        buyer_context_key,
-                        buyer_email,
-                        buyer_phone,
-                        buyer_order_note,
-                        buyer_order_note_public_confirmed
+                        buyer_context_key
                      ) values (
                         ?1,
                         ?2,
@@ -460,11 +440,7 @@ impl<'a> AppBuyerRepository<'a> {
                         ?5,
                         'needs_action',
                         strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-                        ?6,
-                        ?7,
-                        ?8,
-                        ?9,
-                        ?10
+                        ?6
                      )",
                     crate::app_sqlite_params![
                         order_id.to_string(),
@@ -473,10 +449,6 @@ impl<'a> AppBuyerRepository<'a> {
                         order_number,
                         order_review.draft.name.trim(),
                         context_key.as_str(),
-                        order_review.draft.email.trim(),
-                        order_review.draft.phone.trim(),
-                        order_review.draft.order_note.trim(),
-                        order_review.draft.confirm_public_note,
                     ],
                 )
                 .map_err(|source| AppSqliteError::Query {
@@ -543,8 +515,6 @@ impl<'a> AppBuyerRepository<'a> {
                     "update buyer_carts
                      set
                         farm_id = null,
-                        buyer_order_note = '',
-                        buyer_order_note_public_confirmed = 0,
                         updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                      where buyer_context_key = ?1",
                     crate::app_sqlite_params![context_key.as_str()],
@@ -954,7 +924,6 @@ impl<'a> AppBuyerRepository<'a> {
                 o.farm_id,
                 o.order_number,
                 o.status,
-                o.buyer_order_note,
                 o.workflow_revision,
                 o.workflow_agreement,
                 o.workflow_inventory,
@@ -984,12 +953,11 @@ impl<'a> AppBuyerRepository<'a> {
                     row.try_get::<String, _>(5)?,
                     row.try_get::<String, _>(6)?,
                     row.try_get::<String, _>(7)?,
-                    row.try_get::<String, _>(8)?,
-                    row.try_get::<Option<String>, _>(9)?,
-                    row.try_get::<String, _>(10)?,
+                    row.try_get::<Option<String>, _>(8)?,
+                    row.try_get::<String, _>(9)?,
+                    row.try_get::<Option<String>, _>(10)?,
                     row.try_get::<Option<String>, _>(11)?,
                     row.try_get::<Option<String>, _>(12)?,
-                    row.try_get::<Option<String>, _>(13)?,
                 ))
             })
             .optional()
@@ -1005,7 +973,6 @@ impl<'a> AppBuyerRepository<'a> {
                     farm_id,
                     order_number,
                     status,
-                    order_note,
                     workflow_revision,
                     workflow_agreement,
                     workflow_inventory,
@@ -1050,7 +1017,7 @@ impl<'a> AppBuyerRepository<'a> {
                         economics,
                         workflow,
                         validation_receipts,
-                        order_note: empty_string_to_none(order_note),
+                        order_note: None,
                         repeat_demand: self.build_repeat_demand_handoff(
                             order_id,
                             farm_id,
@@ -1079,10 +1046,6 @@ impl<'a> AppBuyerRepository<'a> {
                     o.status,
                     o.buyer_context_key,
                     o.customer_display_name,
-                    o.buyer_email,
-                    o.buyer_phone,
-                    o.buyer_order_note,
-                    o.buyer_order_note_public_confirmed,
                     o.updated_at,
                     f.display_name,
                     fw.id,
@@ -1105,14 +1068,10 @@ impl<'a> AppBuyerRepository<'a> {
                         row.try_get::<String, _>(5)?,
                         row.try_get::<String, _>(6)?,
                         row.try_get::<String, _>(7)?,
-                        row.try_get::<String, _>(8)?,
-                        row.try_get::<bool, _>(9)?,
-                        row.try_get::<String, _>(10)?,
-                        row.try_get::<String, _>(11)?,
-                        row.try_get::<Option<String>, _>(12)?,
-                        row.try_get::<Option<String>, _>(13)?,
-                        row.try_get::<Option<String>, _>(14)?,
-                        row.try_get::<Option<String>, _>(15)?,
+                        row.try_get::<Option<String>, _>(8)?,
+                        row.try_get::<Option<String>, _>(9)?,
+                        row.try_get::<Option<String>, _>(10)?,
+                        row.try_get::<Option<String>, _>(11)?,
                     ))
                 },
             )
@@ -1131,10 +1090,6 @@ impl<'a> AppBuyerRepository<'a> {
             status,
             buyer_context_key,
             buyer_name,
-            buyer_email,
-            buyer_phone,
-            buyer_order_note,
-            buyer_order_note_public_confirmed,
             updated_at,
             farm_display_name,
             fulfillment_window_id,
@@ -1154,10 +1109,6 @@ impl<'a> AppBuyerRepository<'a> {
             status,
             buyer_context_key: buyer_context_key.unwrap_or_else(|| context_key.clone()),
             buyer_name,
-            buyer_email,
-            buyer_phone,
-            buyer_order_note,
-            buyer_order_note_public_confirmed,
             updated_at,
             fulfillment_window_id: parse_optional_typed_id(
                 "orders.fulfillment_window_id",
@@ -1582,11 +1533,7 @@ impl<'a> AppBuyerRepository<'a> {
             .query_row(
                 "select
                     farm_id,
-                    buyer_name,
-                    buyer_email,
-                    buyer_phone,
-                    buyer_order_note,
-                    buyer_order_note_public_confirmed
+                    buyer_name
                  from buyer_carts
                  where buyer_context_key = ?1
                  limit 1",
@@ -1595,10 +1542,6 @@ impl<'a> AppBuyerRepository<'a> {
                     Ok((
                         row.try_get::<Option<String>, _>(0)?,
                         row.try_get::<String, _>(1)?,
-                        row.try_get::<String, _>(2)?,
-                        row.try_get::<String, _>(3)?,
-                        row.try_get::<String, _>(4)?,
-                        row.try_get::<bool, _>(5)?,
                     ))
                 },
             )
@@ -1607,25 +1550,12 @@ impl<'a> AppBuyerRepository<'a> {
                 operation: "load buyer cart header",
                 source,
             })?
-            .map(
-                |(
-                    farm_id,
+            .map(|(farm_id, buyer_name)| {
+                Ok(BuyerCartHeader {
+                    farm_id: parse_optional_typed_id("buyer_carts.farm_id", farm_id)?,
                     buyer_name,
-                    buyer_email,
-                    buyer_phone,
-                    buyer_order_note,
-                    buyer_order_note_public_confirmed,
-                )| {
-                    Ok(BuyerCartHeader {
-                        farm_id: parse_optional_typed_id("buyer_carts.farm_id", farm_id)?,
-                        buyer_name,
-                        buyer_email,
-                        buyer_phone,
-                        buyer_order_note,
-                        buyer_order_note_public_confirmed,
-                    })
-                },
-            )
+                })
+            })
             .transpose()
     }
 
@@ -2230,20 +2160,16 @@ impl<'a> AppBuyerRepository<'a> {
 struct BuyerCartHeader {
     farm_id: Option<FarmId>,
     buyer_name: String,
-    buyer_email: String,
-    buyer_phone: String,
-    buyer_order_note: String,
-    buyer_order_note_public_confirmed: bool,
 }
 
 impl BuyerCartHeader {
     fn into_order_review_draft(self) -> BuyerOrderReviewDraft {
         BuyerOrderReviewDraft {
             name: self.buyer_name,
-            email: self.buyer_email,
-            phone: self.buyer_phone,
-            order_note: self.buyer_order_note,
-            confirm_public_note: self.buyer_order_note_public_confirmed,
+            email: String::new(),
+            phone: String::new(),
+            order_note: String::new(),
+            confirm_public_note: false,
         }
     }
 }
@@ -2678,12 +2604,6 @@ fn buyer_order_review_disabled_reason(
     if draft.name.trim().is_empty() {
         return Some(BuyerOrderReviewDisabledReason::MissingName);
     }
-    if draft.email.trim().is_empty() {
-        return Some(BuyerOrderReviewDisabledReason::MissingEmail);
-    }
-    if !draft.order_note.trim().is_empty() && !draft.confirm_public_note {
-        return Some(BuyerOrderReviewDisabledReason::PublicNoteConfirmationRequired);
-    }
     if matches!(context, BuyerContext::Guest) {
         return Some(BuyerOrderReviewDisabledReason::AccountRequired);
     }
@@ -3002,7 +2922,7 @@ mod tests {
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     #[test]
-    fn buyer_order_review_requires_public_note_confirmation() {
+    fn buyer_order_review_does_not_require_private_note_confirmation_in_default_store() {
         let cart = BuyerCartProjection {
             farm_id: Some(FarmId::generate()),
             farm_display_name: Some("Willow Farm".to_owned()),
@@ -3039,7 +2959,7 @@ mod tests {
                 Some(&"Friday pickup".to_owned()),
                 &draft,
             ),
-            Some(BuyerOrderReviewDisabledReason::PublicNoteConfirmationRequired)
+            None
         );
         assert_eq!(
             super::buyer_order_review_disabled_reason(
@@ -4235,9 +4155,9 @@ mod tests {
         order_number: &str,
         status: &str,
         buyer_context_key: Option<&str>,
-        buyer_email: &str,
-        buyer_phone: &str,
-        buyer_order_note: &str,
+        _buyer_email: &str,
+        _buyer_phone: &str,
+        _buyer_order_note: &str,
     ) {
         connection
             .execute(
@@ -4249,20 +4169,14 @@ mod tests {
                     customer_display_name,
                     status,
                     updated_at,
-                    buyer_context_key,
-                    buyer_email,
-                    buyer_phone,
-                    buyer_order_note
-                 ) values (?1, ?2, null, ?3, 'Casey', ?4, '2026-04-20T10:00:00Z', ?5, ?6, ?7, ?8)",
+                    buyer_context_key
+                 ) values (?1, ?2, null, ?3, 'Casey', ?4, '2026-04-20T10:00:00Z', ?5)",
                 crate::app_sqlite_params![
                     order_id.to_string(),
                     farm_id.to_string(),
                     order_number,
                     status,
                     buyer_context_key,
-                    buyer_email,
-                    buyer_phone,
-                    buyer_order_note,
                 ],
             )
             .expect("order insert should succeed");

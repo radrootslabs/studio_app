@@ -14,36 +14,27 @@ use std::{
 
 use radroots_authority::{RadrootsActorContext, RadrootsLocalEventSigner};
 use radroots_event::{
-    RadrootsEventPtr,
     contract::RadrootsActorRole,
     farm::{RadrootsFarm, RadrootsFarmPublicLocation},
-    ids::{
-        RadrootsAddressableCoordinate, RadrootsListingAddress, RadrootsOrderId, RadrootsPublicKey,
-    },
+    ids::{RadrootsAddressableCoordinate, RadrootsPublicKey},
     kinds::KIND_FARM,
     listing::{RadrootsListing, RadrootsListingPublicLocation},
-    order::{
-        RadrootsOrderEconomics, RadrootsOrderInventoryCommitment, RadrootsOrderItem,
-        RadrootsOrderRequest,
-    },
+    trade::{RadrootsTradeMutationBodyV1, RadrootsTradeMutationEnvelopeV1},
 };
 use radroots_nostr::prelude::RadrootsNostrKeys;
 use radroots_sdk::SdkMutationState;
 use radroots_sdk::{
-    FARM_PUBLISH_OPERATION_KIND, FarmEnqueuePublishRequest, FarmEnqueueReceipt, IntegrityReceipt,
-    IntegrityRequest, LISTING_PUBLISH_OPERATION_KIND, ListingEnqueuePublishRequest,
-    ListingEnqueueReceipt, NostrProfile, NostrRelayUrlPolicy, PrivacyPreflightConfirmation,
-    ProductSensitivityField, PublishMode, RadrootsClient, RadrootsSdkError,
-    RadrootsSdkLocalKeySigner, RadrootsSdkSignerProvider, RadrootsSdkStoragePaths, RestoreReceipt,
-    RestoreRequest, SatisfactionPolicy, SdkBackupVerification, SdkPublicLocality,
-    StorageStatusReceipt, StorageStatusRequest, SyncStatusReceipt, SyncStatusRequest,
-    TRADE_CANCELLATION_OPERATION_KIND, TRADE_DECISION_OPERATION_KIND, TRADE_SUBMIT_OPERATION_KIND,
-    TargetPolicy, TradeAcceptRequest, TradeCancelRequest, TradeCancellationPlan,
-    TradeCancellationReceipt, TradeDecisionPlan, TradeDecisionReceipt, TradeDeclineRequest,
-    TradeEvidenceMode, TradeMutationOutcome, TradeProposeRequest, TradeSubmitPlan,
-    TradeSubmitReceipt, TransportProfile,
+    CancelTradeRequest, DecideCandidateRequest, FARM_PUBLISH_OPERATION_KIND,
+    FarmEnqueuePublishRequest, FarmEnqueueReceipt, IntegrityReceipt, IntegrityRequest,
+    LISTING_PUBLISH_OPERATION_KIND, ListingEnqueuePublishRequest, ListingEnqueueReceipt,
+    NostrProfile, NostrRelayUrlPolicy, ProposeRevisionRequest, RadrootsClient, RadrootsSdkError,
+    RadrootsSdkStoragePaths, RestoreReceipt, RestoreRequest, SatisfactionPolicy,
+    SdkBackupVerification, SdkIdempotencyKey, SdkPublicLocality, StorageStatusReceipt,
+    StorageStatusRequest, SubmitProposalRequest, SyncStatusReceipt, SyncStatusRequest,
+    TRADE_CANCEL_OPERATION_KIND, TRADE_DECIDE_CANDIDATE_OPERATION_KIND,
+    TRADE_PROPOSE_REVISION_OPERATION_KIND, TRADE_SUBMIT_PROPOSAL_OPERATION_KIND, TargetPolicy,
+    TradeCommandReceipt, TransportProfile,
 };
-use radroots_trade::identity::RadrootsTradeLocator;
 use serde::Serialize;
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -276,47 +267,36 @@ pub struct DesktopRuntimeListingPublishRequest {
     pub idempotency_key: Option<String>,
 }
 
-pub struct DesktopRuntimeTradeProposeRequest {
+pub struct DesktopRuntimeTradeSubmitProposalRequest {
     pub actor_account_id: String,
     pub actor_pubkey: String,
     pub signer: DesktopRuntimeLocalSigner,
-    pub listing_event: RadrootsEventPtr,
-    pub order_id: RadrootsOrderId,
-    pub listing_addr: RadrootsListingAddress,
-    pub seller_pubkey: RadrootsPublicKey,
-    pub items: Vec<RadrootsOrderItem>,
-    pub economics: RadrootsOrderEconomics,
-    pub public_note: Option<String>,
-    pub confirm_public_note: bool,
+    pub envelope: RadrootsTradeMutationEnvelopeV1,
     pub idempotency_key: Option<String>,
 }
 
-pub enum DesktopRuntimeTradeDecision {
-    Accept {
-        inventory_commitments: Vec<RadrootsOrderInventoryCommitment>,
-    },
-    Decline {
-        reason: String,
-    },
-}
-
-pub struct DesktopRuntimeTradeDecisionRequest {
+pub struct DesktopRuntimeTradeProposeRevisionRequest {
     pub actor_account_id: String,
     pub actor_pubkey: String,
     pub signer: DesktopRuntimeLocalSigner,
-    pub locator: RadrootsTradeLocator,
-    pub decision: DesktopRuntimeTradeDecision,
-    pub confirm_public_note: bool,
+    pub envelope: RadrootsTradeMutationEnvelopeV1,
     pub idempotency_key: Option<String>,
 }
 
-pub struct DesktopRuntimeTradeCancellationRequest {
+pub struct DesktopRuntimeTradeDecideCandidateRequest {
     pub actor_account_id: String,
     pub actor_pubkey: String,
     pub signer: DesktopRuntimeLocalSigner,
-    pub locator: RadrootsTradeLocator,
-    pub reason: String,
-    pub confirm_public_note: bool,
+    pub envelope: RadrootsTradeMutationEnvelopeV1,
+    pub acknowledge_private_terms: bool,
+    pub idempotency_key: Option<String>,
+}
+
+pub struct DesktopRuntimeTradeCancelRequest {
+    pub actor_account_id: String,
+    pub actor_pubkey: String,
+    pub signer: DesktopRuntimeLocalSigner,
+    pub envelope: RadrootsTradeMutationEnvelopeV1,
     pub idempotency_key: Option<String>,
 }
 
@@ -376,9 +356,10 @@ pub enum DesktopRuntimeEffectKind {
     RestorePreflight,
     FarmPublish,
     ListingPublish,
-    TradePropose,
-    TradeDecision,
-    TradeCancellation,
+    TradeSubmitProposal,
+    TradeProposeRevision,
+    TradeDecideCandidate,
+    TradeCancel,
     BeginProjectionRebuild,
     CompleteProjectionRebuild,
 }
@@ -448,17 +429,21 @@ enum DesktopRuntimeEffect {
         DesktopRuntimeEffectReceipt,
         Box<DesktopRuntimeListingPublishRequest>,
     ),
-    TradePropose(
+    TradeSubmitProposal(
         DesktopRuntimeEffectReceipt,
-        Box<DesktopRuntimeTradeProposeRequest>,
+        Box<DesktopRuntimeTradeSubmitProposalRequest>,
     ),
-    TradeDecision(
+    TradeProposeRevision(
         DesktopRuntimeEffectReceipt,
-        Box<DesktopRuntimeTradeDecisionRequest>,
+        Box<DesktopRuntimeTradeProposeRevisionRequest>,
     ),
-    TradeCancellation(
+    TradeDecideCandidate(
         DesktopRuntimeEffectReceipt,
-        Box<DesktopRuntimeTradeCancellationRequest>,
+        Box<DesktopRuntimeTradeDecideCandidateRequest>,
+    ),
+    TradeCancel(
+        DesktopRuntimeEffectReceipt,
+        Box<DesktopRuntimeTradeCancelRequest>,
     ),
     BeginProjectionRebuild(DesktopRuntimeEffectReceipt),
     CompleteProjectionRebuild(DesktopRuntimeEffectReceipt),
@@ -471,9 +456,10 @@ impl fmt::Debug for DesktopRuntimeEffect {
             Self::RestorePreflight(_, _) => formatter.write_str("RestorePreflight"),
             Self::EnqueueFarmPublish(_, _) => formatter.write_str("EnqueueFarmPublish"),
             Self::EnqueueListingPublish(_, _) => formatter.write_str("EnqueueListingPublish"),
-            Self::TradePropose(_, _) => formatter.write_str("TradePropose"),
-            Self::TradeDecision(_, _) => formatter.write_str("TradeDecision"),
-            Self::TradeCancellation(_, _) => formatter.write_str("TradeCancellation"),
+            Self::TradeSubmitProposal(_, _) => formatter.write_str("TradeSubmitProposal"),
+            Self::TradeProposeRevision(_, _) => formatter.write_str("TradeProposeRevision"),
+            Self::TradeDecideCandidate(_, _) => formatter.write_str("TradeDecideCandidate"),
+            Self::TradeCancel(_, _) => formatter.write_str("TradeCancel"),
             Self::BeginProjectionRebuild(_) => formatter.write_str("BeginProjectionRebuild"),
             Self::CompleteProjectionRebuild(_) => formatter.write_str("CompleteProjectionRebuild"),
         }
@@ -625,42 +611,55 @@ impl DesktopRuntimeSupervisor {
         )
     }
 
-    pub fn trade_propose(
+    pub fn trade_submit_proposal(
         &self,
-        request: DesktopRuntimeTradeProposeRequest,
+        request: DesktopRuntimeTradeSubmitProposalRequest,
     ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
         let actor_pubkey = Some(request.actor_pubkey.clone());
         self.submit_effect(
-            DesktopRuntimeEffectKind::TradePropose,
-            Some(TRADE_SUBMIT_OPERATION_KIND.to_owned()),
+            DesktopRuntimeEffectKind::TradeSubmitProposal,
+            Some(TRADE_SUBMIT_PROPOSAL_OPERATION_KIND.to_owned()),
             actor_pubkey,
-            |receipt| DesktopRuntimeEffect::TradePropose(receipt, Box::new(request)),
+            |receipt| DesktopRuntimeEffect::TradeSubmitProposal(receipt, Box::new(request)),
         )
     }
 
-    pub fn trade_decide(
+    pub fn trade_propose_revision(
         &self,
-        request: DesktopRuntimeTradeDecisionRequest,
+        request: DesktopRuntimeTradeProposeRevisionRequest,
     ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
         let actor_pubkey = Some(request.actor_pubkey.clone());
         self.submit_effect(
-            DesktopRuntimeEffectKind::TradeDecision,
-            Some(TRADE_DECISION_OPERATION_KIND.to_owned()),
+            DesktopRuntimeEffectKind::TradeProposeRevision,
+            Some(TRADE_PROPOSE_REVISION_OPERATION_KIND.to_owned()),
             actor_pubkey,
-            |receipt| DesktopRuntimeEffect::TradeDecision(receipt, Box::new(request)),
+            |receipt| DesktopRuntimeEffect::TradeProposeRevision(receipt, Box::new(request)),
+        )
+    }
+
+    pub fn trade_decide_candidate(
+        &self,
+        request: DesktopRuntimeTradeDecideCandidateRequest,
+    ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
+        let actor_pubkey = Some(request.actor_pubkey.clone());
+        self.submit_effect(
+            DesktopRuntimeEffectKind::TradeDecideCandidate,
+            Some(TRADE_DECIDE_CANDIDATE_OPERATION_KIND.to_owned()),
+            actor_pubkey,
+            |receipt| DesktopRuntimeEffect::TradeDecideCandidate(receipt, Box::new(request)),
         )
     }
 
     pub fn trade_cancel(
         &self,
-        request: DesktopRuntimeTradeCancellationRequest,
+        request: DesktopRuntimeTradeCancelRequest,
     ) -> Result<DesktopRuntimeEffectReceipt, DesktopRuntimeSupervisorError> {
         let actor_pubkey = Some(request.actor_pubkey.clone());
         self.submit_effect(
-            DesktopRuntimeEffectKind::TradeCancellation,
-            Some(TRADE_CANCELLATION_OPERATION_KIND.to_owned()),
+            DesktopRuntimeEffectKind::TradeCancel,
+            Some(TRADE_CANCEL_OPERATION_KIND.to_owned()),
             actor_pubkey,
-            |receipt| DesktopRuntimeEffect::TradeCancellation(receipt, Box::new(request)),
+            |receipt| DesktopRuntimeEffect::TradeCancel(receipt, Box::new(request)),
         )
     }
 
@@ -1189,29 +1188,40 @@ fn run_desktop_runtime_worker(
                 };
                 finish_workflow_result(&shared, receipt, result);
             }
-            DesktopRuntimeEffect::TradePropose(receipt, request) => {
+            DesktopRuntimeEffect::TradeSubmitProposal(receipt, request) => {
                 let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
                     Err(issue)
                 } else {
                     match sdk.as_ref() {
-                        Some(_) => trade_propose_with_sdk(&runtime, &config, *request),
+                        Some(_) => trade_submit_proposal_with_sdk(&runtime, &config, *request),
                         None => Err(runtime_unavailable_issue(&shared)),
                     }
                 };
                 finish_workflow_result(&shared, receipt, result);
             }
-            DesktopRuntimeEffect::TradeDecision(receipt, request) => {
+            DesktopRuntimeEffect::TradeProposeRevision(receipt, request) => {
                 let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
                     Err(issue)
                 } else {
                     match sdk.as_ref() {
-                        Some(_) => trade_decision_with_sdk(&runtime, &config, *request),
+                        Some(_) => trade_propose_revision_with_sdk(&runtime, &config, *request),
                         None => Err(runtime_unavailable_issue(&shared)),
                     }
                 };
                 finish_workflow_result(&shared, receipt, result);
             }
-            DesktopRuntimeEffect::TradeCancellation(receipt, request) => {
+            DesktopRuntimeEffect::TradeDecideCandidate(receipt, request) => {
+                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
+                    Err(issue)
+                } else {
+                    match sdk.as_ref() {
+                        Some(_) => trade_decide_candidate_with_sdk(&runtime, &config, *request),
+                        None => Err(runtime_unavailable_issue(&shared)),
+                    }
+                };
+                finish_workflow_result(&shared, receipt, result);
+            }
+            DesktopRuntimeEffect::TradeCancel(receipt, request) => {
                 let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
                     Err(issue)
                 } else {
@@ -1291,26 +1301,6 @@ async fn build_sdk_runtime(
         .await
 }
 
-async fn build_sdk_runtime_with_signer(
-    config: &DesktopRuntimeSupervisorConfig,
-    signer: DesktopRuntimeLocalSigner,
-) -> Result<RadrootsClient, DesktopRuntimeIssue> {
-    let local_signer = RadrootsLocalEventSigner::new(signer.into_keys()).map_err(|error| {
-        DesktopRuntimeIssue::runtime_error("sdk_signer_init_failed", error.to_string())
-    })?;
-    let signer = RadrootsSdkLocalKeySigner::from_event_signer(local_signer)
-        .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?;
-    let transport_profile = app_transport_profile(config)
-        .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?;
-    RadrootsClient::builder()
-        .directory_storage(config.storage_root.clone())
-        .transport_profile(transport_profile)
-        .signer_provider(RadrootsSdkSignerProvider::LocalKey(signer))
-        .build()
-        .await
-        .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))
-}
-
 fn app_transport_profile(
     config: &DesktopRuntimeSupervisorConfig,
 ) -> Result<TransportProfile, RadrootsSdkError> {
@@ -1323,25 +1313,12 @@ fn app_transport_profile(
     )?))
 }
 
-fn app_trade_publish_mode() -> PublishMode {
-    PublishMode::EnqueueOnly
-}
-
 fn app_trade_satisfaction_policy() -> SatisfactionPolicy {
     SatisfactionPolicy::NoWait
 }
 
 fn app_trade_target_policy() -> TargetPolicy {
     TargetPolicy::default_profile()
-}
-
-fn app_trade_privacy_confirmation(confirm_public_note: bool) -> PrivacyPreflightConfirmation {
-    if confirm_public_note {
-        PrivacyPreflightConfirmation::new()
-            .confirm(ProductSensitivityField::PublicButSensitiveNotes)
-    } else {
-        PrivacyPreflightConfirmation::new()
-    }
 }
 
 fn block_on_sdk_result<T>(
@@ -1358,23 +1335,6 @@ fn block_on_sdk_result<T>(
     }) {
         Ok(Ok(value)) => Ok(value),
         Ok(Err(error)) => Err(DesktopRuntimeIssue::from_sdk_error(&error)),
-        Err(_) => Err(sdk_effect_timeout_issue(operation)),
-    }
-}
-
-fn block_on_desktop_result<T>(
-    runtime: &tokio::runtime::Runtime,
-    operation: &'static str,
-    future: impl Future<Output = Result<T, DesktopRuntimeIssue>>,
-) -> Result<T, DesktopRuntimeIssue> {
-    match runtime.block_on(async {
-        tokio::time::timeout(
-            Duration::from_millis(DESKTOP_RUNTIME_SDK_EFFECT_TIMEOUT_MS),
-            future,
-        )
-        .await
-    }) {
-        Ok(result) => result,
         Err(_) => Err(sdk_effect_timeout_issue(operation)),
     }
 }
@@ -1544,162 +1504,162 @@ fn enqueue_listing_publish_with_sdk(
     ))
 }
 
-fn trade_propose_with_sdk(
+fn trade_submit_proposal_with_sdk(
     runtime: &tokio::runtime::Runtime,
     config: &DesktopRuntimeSupervisorConfig,
-    request: DesktopRuntimeTradeProposeRequest,
+    request: DesktopRuntimeTradeSubmitProposalRequest,
 ) -> Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue> {
-    let actor = sdk_actor_context(
+    validate_trade_envelope_body(&request.envelope, "proposal", |body| {
+        matches!(body, RadrootsTradeMutationBodyV1::Proposal { .. })
+    })?;
+    let actor = sdk_trade_actor_context(
         request.actor_pubkey.as_str(),
         request.actor_account_id.as_str(),
-        RadrootsActorRole::Buyer,
+        &request.envelope,
     )?;
-    let sdk = block_on_desktop_result(
+    let signer = sdk_local_signer(request.signer)?;
+    let sdk = block_on_sdk_result(
         runtime,
-        "desktop_runtime_trade_propose_build",
-        build_sdk_runtime_with_signer(config, request.signer),
+        "desktop_runtime_trade_submit_build",
+        build_sdk_runtime(config),
     )?;
-    let buyer_pubkey =
-        RadrootsPublicKey::parse(request.actor_pubkey.as_str()).map_err(|error| {
-            DesktopRuntimeIssue::from_sdk_error(&RadrootsSdkError::InvalidRequest {
-                message: format!("trade proposal buyer public key is invalid: {error}"),
-            })
-        })?;
-    let order = RadrootsOrderRequest {
-        order_id: request.order_id,
-        listing_addr: request.listing_addr,
-        buyer_pubkey,
-        seller_pubkey: request.seller_pubkey,
-        items: request.items,
-        economics: request.economics,
-    };
-    let mut sdk_request = TradeProposeRequest::new(
-        actor,
-        request.listing_event,
-        order,
-        app_trade_target_policy(),
-        app_trade_publish_mode(),
-        app_trade_satisfaction_policy(),
-    )
-    .with_optional_public_note(request.public_note)
-    .with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note));
+    let mut sdk_request =
+        SubmitProposalRequest::new(actor, request.envelope, app_trade_target_policy())
+            .with_satisfaction_policy(app_trade_satisfaction_policy());
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
         sdk_request = sdk_request
             .try_with_idempotency_key(idempotency_key)
             .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?;
     }
-    let outcome = block_on_sdk_result(
+    let receipt = block_on_sdk_result(
         runtime,
-        "desktop_runtime_trade_propose",
-        sdk.trades().buyer().propose_trade(sdk_request),
+        "desktop_runtime_trade_submit_proposal",
+        sdk.trades()
+            .commands()
+            .submit_proposal_with_explicit_signer(sdk_request, &signer),
     )?;
-    desktop_runtime_trade_propose_receipt(outcome, request.actor_pubkey)
+    Ok(desktop_runtime_trade_receipt(receipt, request.actor_pubkey))
 }
 
-fn trade_decision_with_sdk(
+fn trade_propose_revision_with_sdk(
     runtime: &tokio::runtime::Runtime,
     config: &DesktopRuntimeSupervisorConfig,
-    request: DesktopRuntimeTradeDecisionRequest,
+    request: DesktopRuntimeTradeProposeRevisionRequest,
 ) -> Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue> {
-    let actor = sdk_actor_context(
+    validate_trade_envelope_body(&request.envelope, "revision proposal", |body| {
+        matches!(body, RadrootsTradeMutationBodyV1::RevisionProposal { .. })
+    })?;
+    let actor = sdk_trade_actor_context(
         request.actor_pubkey.as_str(),
         request.actor_account_id.as_str(),
-        RadrootsActorRole::Seller,
+        &request.envelope,
     )?;
-    let sdk = block_on_desktop_result(
+    let signer = sdk_local_signer(request.signer)?;
+    let sdk = block_on_sdk_result(
+        runtime,
+        "desktop_runtime_trade_revision_build",
+        build_sdk_runtime(config),
+    )?;
+    let mut sdk_request =
+        ProposeRevisionRequest::new(actor, request.envelope, app_trade_target_policy())
+            .with_satisfaction_policy(app_trade_satisfaction_policy());
+    if let Some(idempotency_key) = request.idempotency_key.as_deref() {
+        sdk_request = sdk_request.with_idempotency_key(
+            SdkIdempotencyKey::new(idempotency_key)
+                .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?,
+        );
+    }
+    let receipt = block_on_sdk_result(
+        runtime,
+        "desktop_runtime_trade_propose_revision",
+        sdk.trades()
+            .commands()
+            .propose_revision_with_explicit_signer(sdk_request, &signer),
+    )?;
+    Ok(desktop_runtime_trade_receipt(receipt, request.actor_pubkey))
+}
+
+fn trade_decide_candidate_with_sdk(
+    runtime: &tokio::runtime::Runtime,
+    config: &DesktopRuntimeSupervisorConfig,
+    request: DesktopRuntimeTradeDecideCandidateRequest,
+) -> Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue> {
+    validate_trade_envelope_body(&request.envelope, "candidate decision", |body| {
+        matches!(
+            body,
+            RadrootsTradeMutationBodyV1::Decision { .. }
+                | RadrootsTradeMutationBodyV1::RevisionDecision { .. }
+        )
+    })?;
+    let actor = sdk_trade_actor_context(
+        request.actor_pubkey.as_str(),
+        request.actor_account_id.as_str(),
+        &request.envelope,
+    )?;
+    let signer = sdk_local_signer(request.signer)?;
+    let sdk = block_on_sdk_result(
         runtime,
         "desktop_runtime_trade_decision_build",
-        build_sdk_runtime_with_signer(config, request.signer),
+        build_sdk_runtime(config),
     )?;
-    let publish_mode = app_trade_publish_mode();
-    let satisfaction_policy = app_trade_satisfaction_policy();
-    let outcome = match request.decision {
-        DesktopRuntimeTradeDecision::Accept {
-            inventory_commitments,
-        } => {
-            let mut sdk_request = TradeAcceptRequest::new(
-                actor,
-                request.locator,
-                inventory_commitments,
-                app_trade_target_policy(),
-                publish_mode,
-                satisfaction_policy,
-                TradeEvidenceMode::ResyncBeforeMutation,
-            )
-            .with_privacy_confirmation(app_trade_privacy_confirmation(false));
-            if let Some(idempotency_key) = request.idempotency_key.as_deref() {
-                sdk_request = sdk_request
-                    .try_with_idempotency_key(idempotency_key)
-                    .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?;
-            }
-            block_on_sdk_result(
-                runtime,
-                "desktop_runtime_trade_accept",
-                sdk.trades().seller().accept_trade(sdk_request),
-            )?
-        }
-        DesktopRuntimeTradeDecision::Decline { reason } => {
-            let mut sdk_request = TradeDeclineRequest::new(
-                actor,
-                request.locator,
-                reason,
-                app_trade_target_policy(),
-                publish_mode,
-                satisfaction_policy,
-                TradeEvidenceMode::ResyncBeforeMutation,
-            )
-            .with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note));
-            if let Some(idempotency_key) = request.idempotency_key.as_deref() {
-                sdk_request = sdk_request
-                    .try_with_idempotency_key(idempotency_key)
-                    .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?;
-            }
-            block_on_sdk_result(
-                runtime,
-                "desktop_runtime_trade_decline",
-                sdk.trades().seller().decline_trade(sdk_request),
-            )?
-        }
-    };
-    desktop_runtime_trade_decision_receipt(outcome, request.actor_pubkey)
+    let mut sdk_request =
+        DecideCandidateRequest::new(actor, request.envelope, app_trade_target_policy())
+            .with_satisfaction_policy(app_trade_satisfaction_policy());
+    if request.acknowledge_private_terms {
+        sdk_request = sdk_request.acknowledge_private_terms();
+    }
+    if let Some(idempotency_key) = request.idempotency_key.as_deref() {
+        sdk_request = sdk_request.with_idempotency_key(
+            SdkIdempotencyKey::new(idempotency_key)
+                .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?,
+        );
+    }
+    let receipt = block_on_sdk_result(
+        runtime,
+        "desktop_runtime_trade_decide_candidate",
+        sdk.trades()
+            .commands()
+            .decide_candidate_with_explicit_signer(sdk_request, &signer),
+    )?;
+    Ok(desktop_runtime_trade_receipt(receipt, request.actor_pubkey))
 }
 
 fn trade_cancel_with_sdk(
     runtime: &tokio::runtime::Runtime,
     config: &DesktopRuntimeSupervisorConfig,
-    request: DesktopRuntimeTradeCancellationRequest,
+    request: DesktopRuntimeTradeCancelRequest,
 ) -> Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue> {
-    let actor = sdk_actor_context(
+    validate_trade_envelope_body(&request.envelope, "cancellation", |body| {
+        matches!(body, RadrootsTradeMutationBodyV1::Cancellation { .. })
+    })?;
+    let actor = sdk_trade_actor_context(
         request.actor_pubkey.as_str(),
         request.actor_account_id.as_str(),
-        RadrootsActorRole::Buyer,
+        &request.envelope,
     )?;
-    let sdk = block_on_desktop_result(
+    let signer = sdk_local_signer(request.signer)?;
+    let sdk = block_on_sdk_result(
         runtime,
         "desktop_runtime_trade_cancel_build",
-        build_sdk_runtime_with_signer(config, request.signer),
+        build_sdk_runtime(config),
     )?;
-    let mut sdk_request = TradeCancelRequest::new(
-        actor,
-        request.locator,
-        request.reason,
-        app_trade_target_policy(),
-        app_trade_publish_mode(),
-        app_trade_satisfaction_policy(),
-        TradeEvidenceMode::ResyncBeforeMutation,
-    )
-    .with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note));
+    let mut sdk_request =
+        CancelTradeRequest::new(actor, request.envelope, app_trade_target_policy());
+    sdk_request.satisfaction_policy = app_trade_satisfaction_policy();
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
-        sdk_request = sdk_request
-            .try_with_idempotency_key(idempotency_key)
-            .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?;
+        sdk_request = sdk_request.with_idempotency_key(
+            SdkIdempotencyKey::new(idempotency_key)
+                .map_err(|error| DesktopRuntimeIssue::from_sdk_error(&error))?,
+        );
     }
-    let outcome = block_on_sdk_result(
+    let receipt = block_on_sdk_result(
         runtime,
         "desktop_runtime_trade_cancel",
-        sdk.trades().buyer().cancel_trade(sdk_request),
+        sdk.trades()
+            .commands()
+            .cancel_trade_with_explicit_signer(sdk_request, &signer),
     )?;
-    desktop_runtime_trade_cancellation_receipt(outcome, request.actor_pubkey)
+    Ok(desktop_runtime_trade_receipt(receipt, request.actor_pubkey))
 }
 
 fn sdk_actor_context(
@@ -1710,6 +1670,53 @@ fn sdk_actor_context(
     RadrootsActorContext::local_account(actor_pubkey, actor_account_id.to_owned(), [role]).map_err(
         |error| DesktopRuntimeIssue::runtime_error("sdk_actor_context_invalid", error.to_string()),
     )
+}
+
+fn sdk_trade_actor_context(
+    actor_pubkey: &str,
+    actor_account_id: &str,
+    envelope: &RadrootsTradeMutationEnvelopeV1,
+) -> Result<RadrootsActorContext, DesktopRuntimeIssue> {
+    let parsed_actor = RadrootsPublicKey::parse(actor_pubkey).map_err(|error| {
+        DesktopRuntimeIssue::from_sdk_error(&RadrootsSdkError::InvalidRequest {
+            message: format!("trade command actor public key is invalid: {error}"),
+        })
+    })?;
+    if parsed_actor != envelope.author_pubkey {
+        return Err(DesktopRuntimeIssue::from_sdk_error(
+            &RadrootsSdkError::InvalidRequest {
+                message: "trade command actor must match the mutation envelope author".to_owned(),
+            },
+        ));
+    }
+    let role = if envelope.author_pubkey == envelope.buyer_pubkey {
+        RadrootsActorRole::Buyer
+    } else if envelope.author_pubkey == envelope.seller_pubkey {
+        RadrootsActorRole::Seller
+    } else {
+        return Err(DesktopRuntimeIssue::from_sdk_error(
+            &RadrootsSdkError::InvalidRequest {
+                message: "trade command author must be the buyer or seller".to_owned(),
+            },
+        ));
+    };
+    sdk_actor_context(actor_pubkey, actor_account_id, role)
+}
+
+fn validate_trade_envelope_body(
+    envelope: &RadrootsTradeMutationEnvelopeV1,
+    expected: &'static str,
+    accepts: impl FnOnce(&RadrootsTradeMutationBodyV1) -> bool,
+) -> Result<(), DesktopRuntimeIssue> {
+    if accepts(&envelope.body) {
+        Ok(())
+    } else {
+        Err(DesktopRuntimeIssue::from_sdk_error(
+            &RadrootsSdkError::InvalidRequest {
+                message: format!("trade command requires a {expected} mutation envelope"),
+            },
+        ))
+    }
 }
 
 fn sdk_local_signer(
@@ -1784,71 +1791,20 @@ fn desktop_runtime_listing_receipt(
     }
 }
 
-fn desktop_runtime_trade_propose_receipt(
-    outcome: TradeMutationOutcome<TradeSubmitPlan, TradeSubmitReceipt>,
+fn desktop_runtime_trade_receipt(
+    receipt: TradeCommandReceipt,
     actor_pubkey: String,
-) -> Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue> {
-    match outcome {
-        TradeMutationOutcome::Enqueued { receipt }
-        | TradeMutationOutcome::Published { receipt, .. } => Ok(DesktopRuntimeWorkflowReceipt {
-            operation_kind: TRADE_SUBMIT_OPERATION_KIND.to_owned(),
-            expected_event_id: receipt.expected_event_id.as_str().to_owned(),
-            signed_event_id: receipt.signed_event_id.as_str().to_owned(),
-            outbox_operation_id: receipt.outbox_operation_id,
-            outbox_event_id: receipt.outbox_event_id,
-            state: sdk_mutation_state_key(receipt.state).to_owned(),
-            idempotency_digest_prefix: receipt.idempotency_digest_prefix,
-            actor_pubkey,
-        }),
-        TradeMutationOutcome::DryRun { .. } => Err(unexpected_trade_dry_run_issue("trade.propose")),
+) -> DesktopRuntimeWorkflowReceipt {
+    DesktopRuntimeWorkflowReceipt {
+        operation_kind: receipt.operation_kind,
+        expected_event_id: receipt.expected_event_id.as_str().to_owned(),
+        signed_event_id: receipt.signed_event_id.as_str().to_owned(),
+        outbox_operation_id: receipt.outbox_operation_id,
+        outbox_event_id: receipt.outbox_event_id,
+        state: sdk_mutation_state_key(receipt.delivery_state).to_owned(),
+        idempotency_digest_prefix: Some(receipt.idempotency_digest_prefix),
+        actor_pubkey,
     }
-}
-
-fn desktop_runtime_trade_decision_receipt(
-    outcome: TradeMutationOutcome<TradeDecisionPlan, TradeDecisionReceipt>,
-    actor_pubkey: String,
-) -> Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue> {
-    match outcome {
-        TradeMutationOutcome::Enqueued { receipt }
-        | TradeMutationOutcome::Published { receipt, .. } => Ok(DesktopRuntimeWorkflowReceipt {
-            operation_kind: TRADE_DECISION_OPERATION_KIND.to_owned(),
-            expected_event_id: receipt.expected_event_id.as_str().to_owned(),
-            signed_event_id: receipt.signed_event_id.as_str().to_owned(),
-            outbox_operation_id: receipt.outbox_operation_id,
-            outbox_event_id: receipt.outbox_event_id,
-            state: sdk_mutation_state_key(receipt.state).to_owned(),
-            idempotency_digest_prefix: receipt.idempotency_digest_prefix,
-            actor_pubkey,
-        }),
-        TradeMutationOutcome::DryRun { .. } => Err(unexpected_trade_dry_run_issue("trade.decide")),
-    }
-}
-
-fn desktop_runtime_trade_cancellation_receipt(
-    outcome: TradeMutationOutcome<TradeCancellationPlan, TradeCancellationReceipt>,
-    actor_pubkey: String,
-) -> Result<DesktopRuntimeWorkflowReceipt, DesktopRuntimeIssue> {
-    match outcome {
-        TradeMutationOutcome::Enqueued { receipt }
-        | TradeMutationOutcome::Published { receipt, .. } => Ok(DesktopRuntimeWorkflowReceipt {
-            operation_kind: TRADE_CANCELLATION_OPERATION_KIND.to_owned(),
-            expected_event_id: receipt.expected_event_id.as_str().to_owned(),
-            signed_event_id: receipt.signed_event_id.as_str().to_owned(),
-            outbox_operation_id: receipt.outbox_operation_id,
-            outbox_event_id: receipt.outbox_event_id,
-            state: sdk_mutation_state_key(receipt.state).to_owned(),
-            idempotency_digest_prefix: receipt.idempotency_digest_prefix,
-            actor_pubkey,
-        }),
-        TradeMutationOutcome::DryRun { .. } => Err(unexpected_trade_dry_run_issue("trade.cancel")),
-    }
-}
-
-fn unexpected_trade_dry_run_issue(operation: &'static str) -> DesktopRuntimeIssue {
-    DesktopRuntimeIssue::runtime_error(
-        "sdk_trade_unexpected_dry_run",
-        format!("{operation} returned a dry-run plan for an enqueue-only Studio command"),
-    )
 }
 
 fn sdk_mutation_state_key(state: SdkMutationState) -> &'static str {
@@ -2002,9 +1958,10 @@ fn effect_receipt(effect: &DesktopRuntimeEffect) -> DesktopRuntimeEffectReceipt 
         | DesktopRuntimeEffect::RestorePreflight(receipt, _)
         | DesktopRuntimeEffect::EnqueueFarmPublish(receipt, _)
         | DesktopRuntimeEffect::EnqueueListingPublish(receipt, _)
-        | DesktopRuntimeEffect::TradePropose(receipt, _)
-        | DesktopRuntimeEffect::TradeDecision(receipt, _)
-        | DesktopRuntimeEffect::TradeCancellation(receipt, _)
+        | DesktopRuntimeEffect::TradeSubmitProposal(receipt, _)
+        | DesktopRuntimeEffect::TradeProposeRevision(receipt, _)
+        | DesktopRuntimeEffect::TradeDecideCandidate(receipt, _)
+        | DesktopRuntimeEffect::TradeCancel(receipt, _)
         | DesktopRuntimeEffect::BeginProjectionRebuild(receipt)
         | DesktopRuntimeEffect::CompleteProjectionRebuild(receipt) => receipt.clone(),
     }

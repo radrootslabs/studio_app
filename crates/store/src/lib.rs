@@ -35,7 +35,6 @@ use sqlx::Row;
 pub use error::AppSqliteError;
 pub use interop::{
     AppLocalInteropImportReport, AppLocalInteropRepository, StoredLocalInteropRecord,
-    projected_order_id_from_trade_request,
 };
 pub use migrations::latest_schema_version;
 pub use repo::{
@@ -926,10 +925,14 @@ mod tests {
         ));
         assert!(column_exists(connection, "products", "category"));
         assert!(column_exists(connection, "products", "listing_bin_id"));
-        assert!(column_exists(connection, "buyer_carts", "buyer_email"));
-        assert!(column_exists(connection, "buyer_carts", "buyer_phone"));
-        assert!(column_exists(connection, "buyer_carts", "buyer_order_note"));
-        assert!(column_exists(
+        assert!(!column_exists(connection, "buyer_carts", "buyer_email"));
+        assert!(!column_exists(connection, "buyer_carts", "buyer_phone"));
+        assert!(!column_exists(
+            connection,
+            "buyer_carts",
+            "buyer_order_note"
+        ));
+        assert!(!column_exists(
             connection,
             "buyer_carts",
             "buyer_order_note_public_confirmed"
@@ -961,10 +964,10 @@ mod tests {
             "listing_relays_json"
         ));
         assert!(column_exists(connection, "orders", "buyer_context_key"));
-        assert!(column_exists(connection, "orders", "buyer_email"));
-        assert!(column_exists(connection, "orders", "buyer_phone"));
-        assert!(column_exists(connection, "orders", "buyer_order_note"));
-        assert!(column_exists(
+        assert!(!column_exists(connection, "orders", "buyer_email"));
+        assert!(!column_exists(connection, "orders", "buyer_phone"));
+        assert!(!column_exists(connection, "orders", "buyer_order_note"));
+        assert!(!column_exists(
             connection,
             "orders",
             "buyer_order_note_public_confirmed"
@@ -1199,18 +1202,18 @@ mod tests {
                     workflow_agreement,
                     workflow_inventory
                  ) VALUES (
-                    'order_agreed_pending_validation',
+                    'order_contested',
                     'farm_schema',
-                    'agreed pending validation',
+                    'contested',
                     'Buyer',
                     'needs_action',
                     '2026-01-01T00:00:00Z',
-                    'agreed_pending_validation',
+                    'contested',
                     'reserved'
                  )",
                 crate::empty_params(),
             )
-            .expect("pending validation workflow projection should insert");
+            .expect("contested workflow projection should insert");
 
         let invalid_result = connection.execute(
             "INSERT INTO orders (
@@ -1271,10 +1274,7 @@ mod tests {
                     customer_display_name,
                     status,
                     updated_at,
-                    buyer_context_key,
-                    buyer_email,
-                    buyer_phone,
-                    buyer_order_note
+                    buyer_context_key
                  ) VALUES (
                     'order_status',
                     'farm_status',
@@ -1283,10 +1283,7 @@ mod tests {
                     'Schema Buyer',
                     'needs_action',
                     '2026-01-01T00:00:00Z',
-                    'account:buyer',
-                    '',
-                    '',
-                    ''
+                    'account:buyer'
                  )",
                 crate::empty_params(),
             )
@@ -1360,10 +1357,10 @@ mod tests {
         assert_eq!(status, "needs_review");
         connection
             .execute(
-                "UPDATE orders SET workflow_agreement = 'agreed_pending_validation' WHERE id = 'order_status'",
+                "UPDATE orders SET workflow_agreement = 'contested' WHERE id = 'order_status'",
                 crate::empty_params(),
             )
-            .expect("agreed pending validation agreement should satisfy current check");
+            .expect("contested agreement should satisfy current check");
     }
 
     fn table_exists(connection: &AppSqliteDatabase, table_name: &str) -> bool {

@@ -8,7 +8,11 @@ use radroots_trade::validation_receipt::{
     RadrootsValidationReceiptProofSystem, RadrootsValidationReceiptResult,
     RadrootsValidationReceiptType,
 };
-use radroots_trade::{order::RadrootsOrderProjection, workflow::RadrootsTradeWorkflowState};
+use radroots_trade::workflow::{
+    RadrootsTradeAgreementStateV1, RadrootsTradeAttestationStateV1, RadrootsTradeConflictStateV1,
+    RadrootsTradeEvidenceStateV1, RadrootsTradeNegotiationStateV1,
+    RadrootsTradePrivateTermsStateV1, RadrootsTradeProjectionV1,
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, error::Error, fmt, str::FromStr};
 use url::Url;
@@ -1076,11 +1080,10 @@ pub struct BuyerOrderReviewProjection {
 pub enum TradeAgreementStatus {
     #[default]
     Requested,
-    AgreedPendingValidation,
     Committed,
+    Contested,
     Declined,
     Cancelled,
-    ValidationExpired,
     Invalid,
 }
 
@@ -1088,11 +1091,10 @@ impl TradeAgreementStatus {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::Requested => "requested",
-            Self::AgreedPendingValidation => "agreed_pending_validation",
             Self::Committed => "committed",
+            Self::Contested => "contested",
             Self::Declined => "declined",
             Self::Cancelled => "cancelled",
-            Self::ValidationExpired => "validation_expired",
             Self::Invalid => "invalid",
         }
     }
@@ -1100,34 +1102,32 @@ impl TradeAgreementStatus {
     pub const fn label_key_id(self) -> &'static str {
         match self {
             Self::Requested => "messages.trade.workflow.agreement.requested",
-            Self::AgreedPendingValidation => {
-                "messages.trade.workflow.agreement.agreed_pending_validation"
-            }
             Self::Committed => "messages.trade.workflow.agreement.committed",
+            Self::Contested => "messages.trade.workflow.agreement.contested",
             Self::Declined => "messages.trade.workflow.agreement.declined",
             Self::Cancelled => "messages.trade.workflow.agreement.cancelled",
-            Self::ValidationExpired => "messages.trade.workflow.agreement.validation_expired",
             Self::Invalid => "messages.trade.workflow.agreement.invalid",
         }
     }
 
-    pub const fn from_active_order_status(status: &RadrootsTradeWorkflowState) -> Self {
-        match status {
-            RadrootsTradeWorkflowState::Missing => Self::Invalid,
-            RadrootsTradeWorkflowState::Requested => Self::Requested,
-            RadrootsTradeWorkflowState::AgreedPendingValidation => Self::AgreedPendingValidation,
-            RadrootsTradeWorkflowState::Committed => Self::Committed,
-            RadrootsTradeWorkflowState::Declined => Self::Declined,
-            RadrootsTradeWorkflowState::Cancelled => Self::Cancelled,
-            RadrootsTradeWorkflowState::ValidationExpired => Self::ValidationExpired,
-            RadrootsTradeWorkflowState::Invalid => Self::Invalid,
+    pub const fn from_trade_projection(projection: &RadrootsTradeProjectionV1) -> Self {
+        match projection.agreement_state {
+            RadrootsTradeAgreementStateV1::Agreed => Self::Committed,
+            RadrootsTradeAgreementStateV1::Contested => Self::Contested,
+            RadrootsTradeAgreementStateV1::Cancelled => Self::Cancelled,
+            RadrootsTradeAgreementStateV1::None => match projection.negotiation_state {
+                RadrootsTradeNegotiationStateV1::Open => Self::Requested,
+                RadrootsTradeNegotiationStateV1::ClosedDeclined => Self::Declined,
+                RadrootsTradeNegotiationStateV1::ClosedExpired => Self::Invalid,
+                RadrootsTradeNegotiationStateV1::None => Self::Invalid,
+            },
         }
     }
 }
 
-impl From<&RadrootsTradeWorkflowState> for TradeAgreementStatus {
-    fn from(status: &RadrootsTradeWorkflowState) -> Self {
-        Self::from_active_order_status(status)
+impl From<&RadrootsTradeProjectionV1> for TradeAgreementStatus {
+    fn from(projection: &RadrootsTradeProjectionV1) -> Self {
+        Self::from_trade_projection(projection)
     }
 }
 
@@ -1221,17 +1221,214 @@ impl TradeInventoryStatus {
         }
     }
 
-    pub fn from_active_order_projection(projection: &RadrootsOrderProjection) -> Self {
-        match projection.status {
-            RadrootsTradeWorkflowState::Requested => Self::NeedsReview,
-            RadrootsTradeWorkflowState::AgreedPendingValidation
-            | RadrootsTradeWorkflowState::Committed => Self::Reserved,
-            RadrootsTradeWorkflowState::Declined | RadrootsTradeWorkflowState::Cancelled => {
-                Self::Available
+    pub const fn from_trade_projection(projection: &RadrootsTradeProjectionV1) -> Self {
+        match projection.agreement_state {
+            RadrootsTradeAgreementStateV1::Agreed => match (
+                projection.evidence_state,
+                projection.conflict_state,
+                projection.private_terms_state,
+            ) {
+                (
+                    RadrootsTradeEvidenceStateV1::Complete,
+                    RadrootsTradeConflictStateV1::None,
+                    RadrootsTradePrivateTermsStateV1::NotRequired
+                    | RadrootsTradePrivateTermsStateV1::AvailableVerified,
+                ) => Self::Reserved,
+                _ => Self::NeedsReview,
+            },
+            RadrootsTradeAgreementStateV1::Cancelled => Self::Available,
+            RadrootsTradeAgreementStateV1::None => match projection.negotiation_state {
+                RadrootsTradeNegotiationStateV1::ClosedDeclined
+                | RadrootsTradeNegotiationStateV1::ClosedExpired => Self::Available,
+                RadrootsTradeNegotiationStateV1::None | RadrootsTradeNegotiationStateV1::Open => {
+                    Self::NeedsReview
+                }
+            },
+            RadrootsTradeAgreementStateV1::Contested => Self::NeedsReview,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeEvidenceStatus {
+    Complete,
+    #[default]
+    Missing,
+    QueryPartial,
+    UnsupportedVersion,
+}
+
+impl TradeEvidenceStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Missing => "missing",
+            Self::QueryPartial => "query_partial",
+            Self::UnsupportedVersion => "unsupported_version",
+        }
+    }
+
+    pub const fn label_key_id(self) -> &'static str {
+        match self {
+            Self::Complete => "messages.trade.workflow.evidence.complete",
+            Self::Missing => "messages.trade.workflow.evidence.missing",
+            Self::QueryPartial => "messages.trade.workflow.evidence.query_partial",
+            Self::UnsupportedVersion => "messages.trade.workflow.evidence.unsupported_version",
+        }
+    }
+}
+
+impl From<RadrootsTradeEvidenceStateV1> for TradeEvidenceStatus {
+    fn from(value: RadrootsTradeEvidenceStateV1) -> Self {
+        match value {
+            RadrootsTradeEvidenceStateV1::Complete => Self::Complete,
+            RadrootsTradeEvidenceStateV1::Missing => Self::Missing,
+            RadrootsTradeEvidenceStateV1::QueryPartial => Self::QueryPartial,
+            RadrootsTradeEvidenceStateV1::UnsupportedVersion => Self::UnsupportedVersion,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeConflictStatus {
+    #[default]
+    None,
+    ConcurrentCandidates,
+    DoubleAcceptance,
+    DecisionConflict,
+    CancellationConflict,
+    InvalidCausalChain,
+    InventoryAuthorityConflict,
+}
+
+impl TradeConflictStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::ConcurrentCandidates => "concurrent_candidates",
+            Self::DoubleAcceptance => "double_acceptance",
+            Self::DecisionConflict => "decision_conflict",
+            Self::CancellationConflict => "cancellation_conflict",
+            Self::InvalidCausalChain => "invalid_causal_chain",
+            Self::InventoryAuthorityConflict => "inventory_authority_conflict",
+        }
+    }
+
+    pub const fn label_key_id(self) -> &'static str {
+        match self {
+            Self::None => "messages.trade.workflow.conflict.none",
+            Self::ConcurrentCandidates => "messages.trade.workflow.conflict.concurrent_candidates",
+            Self::DoubleAcceptance => "messages.trade.workflow.conflict.double_acceptance",
+            Self::DecisionConflict => "messages.trade.workflow.conflict.decision_conflict",
+            Self::CancellationConflict => "messages.trade.workflow.conflict.cancellation_conflict",
+            Self::InvalidCausalChain => "messages.trade.workflow.conflict.invalid_causal_chain",
+            Self::InventoryAuthorityConflict => {
+                "messages.trade.workflow.conflict.inventory_authority_conflict"
             }
-            RadrootsTradeWorkflowState::Missing
-            | RadrootsTradeWorkflowState::ValidationExpired
-            | RadrootsTradeWorkflowState::Invalid => Self::NeedsReview,
+        }
+    }
+}
+
+impl From<RadrootsTradeConflictStateV1> for TradeConflictStatus {
+    fn from(value: RadrootsTradeConflictStateV1) -> Self {
+        match value {
+            RadrootsTradeConflictStateV1::None => Self::None,
+            RadrootsTradeConflictStateV1::ConcurrentCandidates => Self::ConcurrentCandidates,
+            RadrootsTradeConflictStateV1::DoubleAcceptance => Self::DoubleAcceptance,
+            RadrootsTradeConflictStateV1::DecisionConflict => Self::DecisionConflict,
+            RadrootsTradeConflictStateV1::CancellationConflict => Self::CancellationConflict,
+            RadrootsTradeConflictStateV1::InvalidCausalChain => Self::InvalidCausalChain,
+            RadrootsTradeConflictStateV1::InventoryAuthorityConflict => {
+                Self::InventoryAuthorityConflict
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradePrivateTermsStatus {
+    #[default]
+    NotRequired,
+    AvailableVerified,
+    Missing,
+    Undecryptable,
+    CommitmentMismatch,
+}
+
+impl TradePrivateTermsStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::NotRequired => "not_required",
+            Self::AvailableVerified => "available_verified",
+            Self::Missing => "missing",
+            Self::Undecryptable => "undecryptable",
+            Self::CommitmentMismatch => "commitment_mismatch",
+        }
+    }
+
+    pub const fn label_key_id(self) -> &'static str {
+        match self {
+            Self::NotRequired => "messages.trade.workflow.private_terms.not_required",
+            Self::AvailableVerified => "messages.trade.workflow.private_terms.available_verified",
+            Self::Missing => "messages.trade.workflow.private_terms.missing",
+            Self::Undecryptable => "messages.trade.workflow.private_terms.undecryptable",
+            Self::CommitmentMismatch => "messages.trade.workflow.private_terms.commitment_mismatch",
+        }
+    }
+}
+
+impl From<RadrootsTradePrivateTermsStateV1> for TradePrivateTermsStatus {
+    fn from(value: RadrootsTradePrivateTermsStateV1) -> Self {
+        match value {
+            RadrootsTradePrivateTermsStateV1::NotRequired => Self::NotRequired,
+            RadrootsTradePrivateTermsStateV1::AvailableVerified => Self::AvailableVerified,
+            RadrootsTradePrivateTermsStateV1::Missing => Self::Missing,
+            RadrootsTradePrivateTermsStateV1::Undecryptable => Self::Undecryptable,
+            RadrootsTradePrivateTermsStateV1::CommitmentMismatch => Self::CommitmentMismatch,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeAttestationStatus {
+    #[default]
+    None,
+    PresentValid,
+    PresentInvalid,
+    Conflicting,
+}
+
+impl TradeAttestationStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::PresentValid => "present_valid",
+            Self::PresentInvalid => "present_invalid",
+            Self::Conflicting => "conflicting",
+        }
+    }
+
+    pub const fn label_key_id(self) -> &'static str {
+        match self {
+            Self::None => "messages.trade.workflow.attestation.none",
+            Self::PresentValid => "messages.trade.workflow.attestation.present_valid",
+            Self::PresentInvalid => "messages.trade.workflow.attestation.present_invalid",
+            Self::Conflicting => "messages.trade.workflow.attestation.conflicting",
+        }
+    }
+}
+
+impl From<RadrootsTradeAttestationStateV1> for TradeAttestationStatus {
+    fn from(value: RadrootsTradeAttestationStateV1) -> Self {
+        match value {
+            RadrootsTradeAttestationStateV1::None => Self::None,
+            RadrootsTradeAttestationStateV1::PresentValid => Self::PresentValid,
+            RadrootsTradeAttestationStateV1::PresentInvalid => Self::PresentInvalid,
+            RadrootsTradeAttestationStateV1::Conflicting => Self::Conflicting,
         }
     }
 }
@@ -1472,6 +1669,11 @@ pub struct TradeWorkflowProjection {
     pub revision: TradeRevisionStatus,
     pub economics: TradeEconomicsProjection,
     pub inventory: TradeInventoryStatus,
+    pub evidence: TradeEvidenceStatus,
+    pub conflict: TradeConflictStatus,
+    pub private_terms: TradePrivateTermsStatus,
+    pub attestation: TradeAttestationStatus,
+    pub projection_digest: Option<String>,
     pub provenance: TradeProvenanceProjection,
 }
 
@@ -1483,29 +1685,36 @@ impl TradeWorkflowProjection {
             revision: TradeRevisionStatus::None,
             economics: TradeEconomicsProjection::default(),
             inventory: TradeInventoryStatus::NeedsReview,
+            evidence: TradeEvidenceStatus::Missing,
+            conflict: TradeConflictStatus::None,
+            private_terms: TradePrivateTermsStatus::NotRequired,
+            attestation: TradeAttestationStatus::None,
+            projection_digest: None,
             provenance: TradeProvenanceProjection::default(),
         }
     }
 
-    pub fn from_active_order_projection(
+    pub fn from_trade_projection(
         order_id: OrderId,
-        projection: &RadrootsOrderProjection,
+        projection: &RadrootsTradeProjectionV1,
+        economics: TradeEconomicsProjection,
         revision: TradeRevisionStatus,
         provenance: TradeProvenanceProjection,
     ) -> Self {
         let mut workflow = Self::new(
             order_id,
-            TradeAgreementStatus::from_active_order_status(&projection.status),
+            TradeAgreementStatus::from_trade_projection(projection),
         );
         workflow.revision = revision;
-        workflow.economics = projection
-            .economics
-            .as_ref()
-            .map(TradeEconomicsProjection::from_trade_order_economics)
-            .unwrap_or_default();
-        workflow.inventory = TradeInventoryStatus::from_active_order_projection(projection);
-        workflow.provenance = provenance
-            .with_last_event_id(projection.last_event_id.as_ref().map(ToString::to_string));
+        workflow.economics = economics;
+        workflow.inventory = TradeInventoryStatus::from_trade_projection(projection);
+        workflow.evidence = projection.evidence_state.into();
+        workflow.conflict = projection.conflict_state.into();
+        workflow.private_terms = projection.private_terms_state.into();
+        workflow.attestation = projection.attestation_state.into();
+        workflow.projection_digest = (!projection.projection_digest.is_empty())
+            .then(|| projection.projection_digest.clone());
+        workflow.provenance = provenance;
         workflow
     }
 
@@ -1580,19 +1789,19 @@ impl TradeWorkflowProjection {
     }
 }
 
-pub fn order_status_from_active_order_projection(
-    projection: &RadrootsOrderProjection,
+pub fn order_status_from_trade_projection(
+    projection: &RadrootsTradeProjectionV1,
 ) -> Option<OrderStatus> {
-    match projection.status {
-        RadrootsTradeWorkflowState::Missing => None,
-        RadrootsTradeWorkflowState::Requested
-        | RadrootsTradeWorkflowState::AgreedPendingValidation
-        | RadrootsTradeWorkflowState::ValidationExpired => Some(OrderStatus::NeedsAction),
-        RadrootsTradeWorkflowState::Committed => Some(OrderStatus::Scheduled),
-        RadrootsTradeWorkflowState::Declined | RadrootsTradeWorkflowState::Cancelled => {
-            Some(OrderStatus::Declined)
-        }
-        RadrootsTradeWorkflowState::Invalid => Some(OrderStatus::NeedsAction),
+    match projection.agreement_state {
+        RadrootsTradeAgreementStateV1::Agreed => Some(OrderStatus::Scheduled),
+        RadrootsTradeAgreementStateV1::Contested => Some(OrderStatus::NeedsAction),
+        RadrootsTradeAgreementStateV1::Cancelled => Some(OrderStatus::Declined),
+        RadrootsTradeAgreementStateV1::None => match projection.negotiation_state {
+            RadrootsTradeNegotiationStateV1::None => None,
+            RadrootsTradeNegotiationStateV1::Open => Some(OrderStatus::NeedsAction),
+            RadrootsTradeNegotiationStateV1::ClosedDeclined => Some(OrderStatus::Declined),
+            RadrootsTradeNegotiationStateV1::ClosedExpired => Some(OrderStatus::NeedsAction),
+        },
     }
 }
 
@@ -2128,8 +2337,7 @@ mod tests {
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
     };
     use radroots_event::ids::{
-        RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress, RadrootsOrderId,
-        RadrootsOrderQuoteId, RadrootsPublicKey,
+        RadrootsInventoryBinId, RadrootsOrderQuoteId, RadrootsPublicKey, RadrootsTradeId,
     };
     use radroots_event::order::{
         RadrootsOrderEconomicItem, RadrootsOrderEconomics, RadrootsOrderPricingBasis,
@@ -2138,7 +2346,13 @@ mod tests {
         RadrootsValidationReceiptProofSystem, RadrootsValidationReceiptResult,
         RadrootsValidationReceiptType,
     };
-    use radroots_trade::{order::RadrootsOrderProjection, workflow::RadrootsTradeWorkflowState};
+    use radroots_trade::workflow::{
+        RADROOTS_TRADE_REDUCER_CONTRACT_ID, RADROOTS_TRADE_REDUCER_VERSION,
+        RadrootsTradeAgreementStateV1, RadrootsTradeAttestationStateV1,
+        RadrootsTradeConflictStateV1, RadrootsTradeEvidenceStateV1,
+        RadrootsTradeFulfillmentStateV1, RadrootsTradeNegotiationStateV1,
+        RadrootsTradePaymentStateV1, RadrootsTradePrivateTermsStateV1, RadrootsTradeProjectionV1,
+    };
 
     use super::{
         AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
@@ -2173,11 +2387,12 @@ mod tests {
         RepeatDemandHandoffProjection, SelectedAccountProjection, SelectedSurfaceProjection,
         SettingsPreference, SettingsSection, ShellSection, StartupSignerEntryProjection,
         StartupSignerSource, StartupSignerSourceKind, TodayAgendaProjection, TodaySetupTask,
-        TodaySetupTaskKind, TodaySummary, TradeAgreementStatus, TradeEconomicsProjection,
-        TradeInventoryStatus, TradeProvenanceProjection, TradeRevisionStatus,
+        TodaySetupTaskKind, TodaySummary, TradeAgreementStatus, TradeAttestationStatus,
+        TradeConflictStatus, TradeEconomicsProjection, TradeEvidenceStatus, TradeInventoryStatus,
+        TradePrivateTermsStatus, TradeProvenanceProjection, TradeRevisionStatus,
         TradeValidationReceiptProofSystem, TradeValidationReceiptResult,
         TradeValidationReceiptType, TradeWorkflowProjection, TradeWorkflowSource,
-        order_status_from_active_order_projection,
+        order_status_from_trade_projection,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -2798,10 +3013,6 @@ mod tests {
         RadrootsCoreMoney::new(test_decimal(raw), RadrootsCoreCurrency::USD)
     }
 
-    fn test_order_id(raw: &str) -> RadrootsOrderId {
-        raw.parse().expect("test order id should parse")
-    }
-
     fn test_quote_id(raw: &str) -> RadrootsOrderQuoteId {
         raw.parse().expect("test quote id should parse")
     }
@@ -2810,16 +3021,12 @@ mod tests {
         raw.parse().expect("test bin id should parse")
     }
 
-    fn test_event_id(raw: &str) -> RadrootsEventId {
-        raw.parse().expect("test event id should parse")
-    }
-
     fn test_pubkey(raw: &str) -> RadrootsPublicKey {
         raw.parse().expect("test pubkey should parse")
     }
 
-    fn test_listing_addr(raw: &str) -> RadrootsListingAddress {
-        raw.parse().expect("test listing address should parse")
+    fn test_trade_id(raw: &str) -> RadrootsTradeId {
+        raw.parse().expect("test trade id should parse")
     }
 
     fn test_trade_economics() -> RadrootsOrderEconomics {
@@ -2846,68 +3053,51 @@ mod tests {
         }
     }
 
-    fn test_active_order_projection(status: RadrootsTradeWorkflowState) -> RadrootsOrderProjection {
-        RadrootsOrderProjection {
-            order_id: test_order_id("ord_AAAAAAAAAAAAAAAAAAAAAg"),
-            status,
-            request_event_id: Some(test_event_id(
-                "1111111111111111111111111111111111111111111111111111111111111111",
-            )),
-            decision_event_id: Some(test_event_id(
-                "2222222222222222222222222222222222222222222222222222222222222222",
-            )),
-            validation_receipt_event_id: None,
-            cancellation_event_id: None,
-            lifecycle_terminal: false,
-            economics: Some(test_trade_economics()),
-            agreement_event_id: Some(test_event_id(
-                "2222222222222222222222222222222222222222222222222222222222222222",
-            )),
-            pending_revision_event_id: None,
-            pending_inventory_reservations: Vec::new(),
-            committed_inventory_reservations: Vec::new(),
-            listing_addr: Some(test_listing_addr(
-                "30402:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:AAAAAAAAAAAAAAAAAAAAAg",
-            )),
+    fn test_trade_projection(
+        agreement_state: RadrootsTradeAgreementStateV1,
+        negotiation_state: RadrootsTradeNegotiationStateV1,
+        evidence_state: RadrootsTradeEvidenceStateV1,
+        conflict_state: RadrootsTradeConflictStateV1,
+        private_terms_state: RadrootsTradePrivateTermsStateV1,
+        attestation_state: RadrootsTradeAttestationStateV1,
+    ) -> RadrootsTradeProjectionV1 {
+        RadrootsTradeProjectionV1 {
+            reducer_contract_id: RADROOTS_TRADE_REDUCER_CONTRACT_ID.to_owned(),
+            reducer_version: RADROOTS_TRADE_REDUCER_VERSION,
+            trade_id: test_trade_id("11111111111111111111111111111111"),
+            root_mutation_id: None,
             buyer_pubkey: Some(test_pubkey(
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             )),
             seller_pubkey: Some(test_pubkey(
                 "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             )),
-            last_event_id: Some(test_event_id(
-                "3333333333333333333333333333333333333333333333333333333333333333",
-            )),
+            farm_id: None,
+            negotiation_state,
+            agreement_state,
+            evidence_state,
+            conflict_state,
+            private_terms_state,
+            attestation_state,
+            fulfillment_state: RadrootsTradeFulfillmentStateV1::NotStarted,
+            payment_state: RadrootsTradePaymentStateV1::NotTracked,
+            candidate_heads: Vec::new(),
+            agreement_claims: Vec::new(),
+            active_agreement_claim_ids: Vec::new(),
+            contested_claim_ids: Vec::new(),
+            cancelled_claim_ids: Vec::new(),
+            declined_candidate_ids: Vec::new(),
+            missing_parent_ids: Vec::new(),
+            missing_proposal_ids: Vec::new(),
+            unsupported_mutation_ids: Vec::new(),
             issues: Vec::new(),
+            attestations: Vec::new(),
+            projection_digest: "projection-digest-v1".to_owned(),
         }
     }
 
     #[test]
-    fn trade_workflow_projection_maps_shared_active_order_projection_to_product_axes() {
-        assert_eq!(
-            TradeAgreementStatus::from_active_order_status(&RadrootsTradeWorkflowState::Requested),
-            TradeAgreementStatus::Requested
-        );
-        assert_eq!(
-            TradeAgreementStatus::from_active_order_status(
-                &RadrootsTradeWorkflowState::AgreedPendingValidation
-            ),
-            TradeAgreementStatus::AgreedPendingValidation
-        );
-        assert_eq!(
-            TradeAgreementStatus::from_active_order_status(&RadrootsTradeWorkflowState::Committed),
-            TradeAgreementStatus::Committed
-        );
-        assert_eq!(
-            TradeAgreementStatus::from_active_order_status(
-                &RadrootsTradeWorkflowState::ValidationExpired
-            ),
-            TradeAgreementStatus::ValidationExpired
-        );
-        assert_eq!(
-            TradeAgreementStatus::from_active_order_status(&RadrootsTradeWorkflowState::Invalid),
-            TradeAgreementStatus::Invalid
-        );
+    fn trade_workflow_projection_maps_release_product_reducer_axes() {
         assert_eq!(
             TradeRevisionStatus::try_from_storage_key("none"),
             Ok(TradeRevisionStatus::None)
@@ -2936,10 +3126,20 @@ mod tests {
         );
 
         let order_id = OrderId::generate();
-        let active_order = test_active_order_projection(RadrootsTradeWorkflowState::Committed);
-        let projection = TradeWorkflowProjection::from_active_order_projection(
+        let economics =
+            TradeEconomicsProjection::from_trade_order_economics(&test_trade_economics());
+        let agreed_projection = test_trade_projection(
+            RadrootsTradeAgreementStateV1::Agreed,
+            RadrootsTradeNegotiationStateV1::Open,
+            RadrootsTradeEvidenceStateV1::Complete,
+            RadrootsTradeConflictStateV1::None,
+            RadrootsTradePrivateTermsStateV1::AvailableVerified,
+            RadrootsTradeAttestationStateV1::PresentValid,
+        );
+        let projection = TradeWorkflowProjection::from_trade_projection(
             order_id,
-            &active_order,
+            &agreed_projection,
+            economics,
             TradeRevisionStatus::Updated,
             TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::RuntimeStore),
         );
@@ -2949,53 +3149,110 @@ mod tests {
         assert_eq!(projection.inventory, TradeInventoryStatus::Reserved);
         assert_eq!(projection.economics.total_minor_units, Some(1234));
         assert_eq!(projection.economics.currency_code.as_deref(), Some("USD"));
+        assert_eq!(projection.evidence, TradeEvidenceStatus::Complete);
+        assert_eq!(projection.conflict, TradeConflictStatus::None);
+        assert_eq!(
+            projection.private_terms,
+            TradePrivateTermsStatus::AvailableVerified
+        );
+        assert_eq!(projection.attestation, TradeAttestationStatus::PresentValid);
+        assert_eq!(
+            projection.projection_digest.as_deref(),
+            Some("projection-digest-v1")
+        );
         assert_eq!(
             projection.provenance,
             TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::RuntimeStore)
-                .with_last_event_id(Some(
-                    "3333333333333333333333333333333333333333333333333333333333333333".to_owned()
-                ))
         );
         assert_eq!(
-            order_status_from_active_order_projection(&active_order),
+            order_status_from_trade_projection(&agreed_projection),
             Some(OrderStatus::Scheduled)
         );
 
-        let pending_validation_order =
-            test_active_order_projection(RadrootsTradeWorkflowState::AgreedPendingValidation);
-        let pending_validation_projection = TradeWorkflowProjection::from_active_order_projection(
+        let contested_projection = test_trade_projection(
+            RadrootsTradeAgreementStateV1::Contested,
+            RadrootsTradeNegotiationStateV1::Open,
+            RadrootsTradeEvidenceStateV1::Complete,
+            RadrootsTradeConflictStateV1::DecisionConflict,
+            RadrootsTradePrivateTermsStateV1::AvailableVerified,
+            RadrootsTradeAttestationStateV1::Conflicting,
+        );
+        let contested_workflow = TradeWorkflowProjection::from_trade_projection(
             order_id,
-            &pending_validation_order,
+            &contested_projection,
+            TradeEconomicsProjection::default(),
             TradeRevisionStatus::None,
             TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::RuntimeStore),
         );
         assert_eq!(
-            pending_validation_projection.agreement,
-            TradeAgreementStatus::AgreedPendingValidation
+            contested_workflow.agreement,
+            TradeAgreementStatus::Contested
         );
         assert_eq!(
-            pending_validation_projection.inventory,
-            TradeInventoryStatus::Reserved
+            contested_workflow.inventory,
+            TradeInventoryStatus::NeedsReview
         );
         assert_eq!(
-            order_status_from_active_order_projection(&pending_validation_order),
+            contested_workflow.conflict,
+            TradeConflictStatus::DecisionConflict
+        );
+        assert_eq!(
+            contested_workflow.attestation,
+            TradeAttestationStatus::Conflicting
+        );
+        assert_eq!(
+            order_status_from_trade_projection(&contested_projection),
             Some(OrderStatus::NeedsAction)
         );
 
-        let requested_order = test_active_order_projection(RadrootsTradeWorkflowState::Requested);
-        let requested_projection = TradeWorkflowProjection::from_active_order_projection(
+        let requested_projection = test_trade_projection(
+            RadrootsTradeAgreementStateV1::None,
+            RadrootsTradeNegotiationStateV1::Open,
+            RadrootsTradeEvidenceStateV1::Missing,
+            RadrootsTradeConflictStateV1::None,
+            RadrootsTradePrivateTermsStateV1::Missing,
+            RadrootsTradeAttestationStateV1::None,
+        );
+        let requested_workflow = TradeWorkflowProjection::from_trade_projection(
             order_id,
-            &requested_order,
+            &requested_projection,
+            TradeEconomicsProjection::default(),
             TradeRevisionStatus::None,
             TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::RuntimeStore),
         );
         assert_eq!(
-            requested_projection.agreement,
+            requested_workflow.agreement,
             TradeAgreementStatus::Requested
         );
         assert_eq!(
-            requested_projection.inventory,
+            requested_workflow.inventory,
             TradeInventoryStatus::NeedsReview
+        );
+        assert_eq!(requested_workflow.evidence, TradeEvidenceStatus::Missing);
+        assert_eq!(
+            requested_workflow.private_terms,
+            TradePrivateTermsStatus::Missing
+        );
+
+        let declined_projection = test_trade_projection(
+            RadrootsTradeAgreementStateV1::None,
+            RadrootsTradeNegotiationStateV1::ClosedDeclined,
+            RadrootsTradeEvidenceStateV1::Complete,
+            RadrootsTradeConflictStateV1::None,
+            RadrootsTradePrivateTermsStateV1::NotRequired,
+            RadrootsTradeAttestationStateV1::None,
+        );
+        let declined_workflow = TradeWorkflowProjection::from_trade_projection(
+            order_id,
+            &declined_projection,
+            TradeEconomicsProjection::default(),
+            TradeRevisionStatus::None,
+            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::RuntimeStore),
+        );
+        assert_eq!(declined_workflow.agreement, TradeAgreementStatus::Declined);
+        assert_eq!(
+            order_status_from_trade_projection(&declined_projection),
+            Some(OrderStatus::Declined)
         );
     }
 
@@ -3054,27 +3311,31 @@ mod tests {
 
     #[test]
     fn trade_workflow_projection_uses_localization_key_ids_for_visible_status_labels() {
-        assert_eq!(
-            TradeAgreementStatus::from_active_order_status(&RadrootsTradeWorkflowState::Requested)
-                .storage_key(),
-            "requested"
-        );
         assert_eq!(TradeAgreementStatus::Requested.storage_key(), "requested");
-        assert_eq!(
-            TradeAgreementStatus::AgreedPendingValidation.storage_key(),
-            "agreed_pending_validation"
-        );
         assert_eq!(TradeAgreementStatus::Committed.storage_key(), "committed");
-        assert_eq!(
-            TradeAgreementStatus::ValidationExpired.storage_key(),
-            "validation_expired"
-        );
+        assert_eq!(TradeAgreementStatus::Contested.storage_key(), "contested");
         assert_eq!(TradeAgreementStatus::Invalid.storage_key(), "invalid");
         assert_eq!(
             TradeRevisionStatus::KeptAsPlaced.storage_key(),
             "kept_as_placed"
         );
         assert_eq!(TradeInventoryStatus::Reserved.storage_key(), "reserved");
+        assert_eq!(
+            TradeEvidenceStatus::QueryPartial.storage_key(),
+            "query_partial"
+        );
+        assert_eq!(
+            TradeConflictStatus::CancellationConflict.storage_key(),
+            "cancellation_conflict"
+        );
+        assert_eq!(
+            TradePrivateTermsStatus::CommitmentMismatch.storage_key(),
+            "commitment_mismatch"
+        );
+        assert_eq!(
+            TradeAttestationStatus::PresentInvalid.storage_key(),
+            "present_invalid"
+        );
         assert_eq!(
             TradeWorkflowSource::RuntimeStore.storage_key(),
             "runtime_store"
@@ -3085,12 +3346,8 @@ mod tests {
             "messages.trade.workflow.agreement.requested"
         );
         assert_eq!(
-            TradeAgreementStatus::AgreedPendingValidation.label_key_id(),
-            "messages.trade.workflow.agreement.agreed_pending_validation"
-        );
-        assert_eq!(
-            TradeAgreementStatus::ValidationExpired.label_key_id(),
-            "messages.trade.workflow.agreement.validation_expired"
+            TradeAgreementStatus::Contested.label_key_id(),
+            "messages.trade.workflow.agreement.contested"
         );
         assert_eq!(
             TradeAgreementStatus::Invalid.label_key_id(),
@@ -3103,6 +3360,22 @@ mod tests {
         assert_eq!(
             TradeInventoryStatus::SoldOut.label_key_id(),
             "messages.trade.workflow.inventory.sold_out"
+        );
+        assert_eq!(
+            TradeEvidenceStatus::UnsupportedVersion.label_key_id(),
+            "messages.trade.workflow.evidence.unsupported_version"
+        );
+        assert_eq!(
+            TradeConflictStatus::InventoryAuthorityConflict.label_key_id(),
+            "messages.trade.workflow.conflict.inventory_authority_conflict"
+        );
+        assert_eq!(
+            TradePrivateTermsStatus::Undecryptable.label_key_id(),
+            "messages.trade.workflow.private_terms.undecryptable"
+        );
+        assert_eq!(
+            TradeAttestationStatus::Conflicting.label_key_id(),
+            "messages.trade.workflow.attestation.conflicting"
         );
         assert_eq!(
             TradeWorkflowSource::Cli.label_key_id(),

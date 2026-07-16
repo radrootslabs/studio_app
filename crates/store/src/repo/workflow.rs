@@ -1,5 +1,6 @@
 use radroots_studio_app_view::{
-    OrderId, TradeAgreementStatus, TradeEconomicsProjection, TradeInventoryStatus,
+    OrderId, TradeAgreementStatus, TradeAttestationStatus, TradeConflictStatus,
+    TradeEconomicsProjection, TradeEvidenceStatus, TradeInventoryStatus, TradePrivateTermsStatus,
     TradeProvenanceProjection, TradeRevisionStatus, TradeWorkflowProjection, TradeWorkflowSource,
 };
 
@@ -25,6 +26,11 @@ pub(super) fn trade_workflow_projection_from_storage(
         revision: snapshot.revision,
         economics: snapshot.economics,
         inventory: parse_trade_inventory_status("orders.workflow_inventory", snapshot.inventory)?,
+        evidence: TradeEvidenceStatus::Missing,
+        conflict: TradeConflictStatus::None,
+        private_terms: TradePrivateTermsStatus::NotRequired,
+        attestation: TradeAttestationStatus::None,
+        projection_digest: None,
         provenance: TradeProvenanceProjection::from_primary_source(parse_trade_workflow_source(
             "orders.workflow_provenance_source",
             snapshot.provenance_source,
@@ -39,11 +45,10 @@ fn parse_trade_agreement_status(
 ) -> Result<TradeAgreementStatus, AppSqliteError> {
     match value.as_str() {
         "requested" => Ok(TradeAgreementStatus::Requested),
-        "agreed_pending_validation" => Ok(TradeAgreementStatus::AgreedPendingValidation),
         "committed" => Ok(TradeAgreementStatus::Committed),
+        "contested" => Ok(TradeAgreementStatus::Contested),
         "declined" => Ok(TradeAgreementStatus::Declined),
         "cancelled" => Ok(TradeAgreementStatus::Cancelled),
-        "validation_expired" => Ok(TradeAgreementStatus::ValidationExpired),
         "invalid" => Ok(TradeAgreementStatus::Invalid),
         _ => Err(AppSqliteError::DecodeEnum { field, value }),
     }

@@ -51,9 +51,9 @@ pub use sdk::{
     DesktopRuntimeStorageDiagnostics, DesktopRuntimeStoragePaths, DesktopRuntimeSupervisor,
     DesktopRuntimeSupervisorConfig, DesktopRuntimeSupervisorError, DesktopRuntimeSyncDiagnostics,
     DesktopRuntimeSyncEventStoreDiagnostics, DesktopRuntimeSyncOutboxDiagnostics,
-    DesktopRuntimeSyncTransportTargetDiagnostics, DesktopRuntimeTradeCancellationRequest,
-    DesktopRuntimeTradeDecision, DesktopRuntimeTradeDecisionRequest,
-    DesktopRuntimeTradeProposeRequest, DesktopRuntimeWorkflowReceipt,
+    DesktopRuntimeSyncTransportTargetDiagnostics, DesktopRuntimeTradeCancelRequest,
+    DesktopRuntimeTradeDecideCandidateRequest, DesktopRuntimeTradeProposeRevisionRequest,
+    DesktopRuntimeTradeSubmitProposalRequest, DesktopRuntimeWorkflowReceipt,
     desktop_runtime_storage_root_from_data_root,
 };
 pub use startup::{AppStartupEvent, AppStartupEventMetadata, launch_startup_event};

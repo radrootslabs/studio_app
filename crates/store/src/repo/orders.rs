@@ -7,7 +7,7 @@ use radroots_studio_app_view::{
     PackDayOutputCustomerOrder, PackDayOutputOrderState, PackDayOutputPackListEntry,
     PackDayOutputProductTotal, PackDayOutputQuantity, PackDayOutputSource, PackDayOutputWindow,
     PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
-    PackDayScreenQueryState, ProductId, TradeAgreementStatus, TradeWorkflowProjection,
+    PackDayScreenQueryState, ProductId, TradeWorkflowProjection,
 };
 use sqlx::Row;
 
@@ -1177,14 +1177,9 @@ fn summarize_orders(records: &[OrderRecord]) -> OrdersListSummary {
 
 fn primary_action_for_order(
     status: OrderStatus,
-    workflow: &TradeWorkflowProjection,
+    _workflow: &TradeWorkflowProjection,
 ) -> Option<OrderPrimaryAction> {
     match status {
-        OrderStatus::NeedsAction
-            if workflow.agreement == TradeAgreementStatus::AgreedPendingValidation =>
-        {
-            None
-        }
         OrderStatus::NeedsAction => Some(OrderPrimaryAction::Review),
         OrderStatus::Scheduled
         | OrderStatus::Packed

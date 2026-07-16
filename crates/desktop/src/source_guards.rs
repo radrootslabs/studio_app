@@ -708,13 +708,16 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::TradeWorkflowAxisAgreement",
     "AppTextKey::TradeWorkflowAxisRevision",
     "AppTextKey::TradeWorkflowAxisInventory",
+    "AppTextKey::TradeWorkflowAxisEvidence",
+    "AppTextKey::TradeWorkflowAxisConflict",
+    "AppTextKey::TradeWorkflowAxisPrivateTerms",
+    "AppTextKey::TradeWorkflowAxisAttestation",
     "AppTextKey::TradeWorkflowAxisSource",
     "AppTextKey::TradeWorkflowAgreementRequested",
-    "AppTextKey::TradeWorkflowAgreementAgreedPendingValidation",
     "AppTextKey::TradeWorkflowAgreementCommitted",
+    "AppTextKey::TradeWorkflowAgreementContested",
     "AppTextKey::TradeWorkflowAgreementDeclined",
     "AppTextKey::TradeWorkflowAgreementCancelled",
-    "AppTextKey::TradeWorkflowAgreementValidationExpired",
     "AppTextKey::TradeWorkflowAgreementInvalid",
     "AppTextKey::TradeWorkflowRevisionNone",
     "AppTextKey::TradeWorkflowRevisionChangeProposed",
@@ -724,6 +727,26 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::TradeWorkflowInventoryReserved",
     "AppTextKey::TradeWorkflowInventorySoldOut",
     "AppTextKey::TradeWorkflowInventoryNeedsReview",
+    "AppTextKey::TradeWorkflowEvidenceComplete",
+    "AppTextKey::TradeWorkflowEvidenceMissing",
+    "AppTextKey::TradeWorkflowEvidenceQueryPartial",
+    "AppTextKey::TradeWorkflowEvidenceUnsupportedVersion",
+    "AppTextKey::TradeWorkflowConflictNone",
+    "AppTextKey::TradeWorkflowConflictConcurrentCandidates",
+    "AppTextKey::TradeWorkflowConflictDoubleAcceptance",
+    "AppTextKey::TradeWorkflowConflictDecisionConflict",
+    "AppTextKey::TradeWorkflowConflictCancellationConflict",
+    "AppTextKey::TradeWorkflowConflictInvalidCausalChain",
+    "AppTextKey::TradeWorkflowConflictInventoryAuthorityConflict",
+    "AppTextKey::TradeWorkflowPrivateTermsNotRequired",
+    "AppTextKey::TradeWorkflowPrivateTermsAvailableVerified",
+    "AppTextKey::TradeWorkflowPrivateTermsMissing",
+    "AppTextKey::TradeWorkflowPrivateTermsUndecryptable",
+    "AppTextKey::TradeWorkflowPrivateTermsCommitmentMismatch",
+    "AppTextKey::TradeWorkflowAttestationNone",
+    "AppTextKey::TradeWorkflowAttestationPresentValid",
+    "AppTextKey::TradeWorkflowAttestationPresentInvalid",
+    "AppTextKey::TradeWorkflowAttestationConflicting",
     "AppTextKey::TradeWorkflowProvenanceApp",
     "AppTextKey::TradeWorkflowProvenanceCli",
     "AppTextKey::TradeWorkflowProvenanceRelay",
@@ -1083,20 +1106,25 @@ const FORBIDDEN_PAYMENT_ACTION_COPY_TERMS: &[&str] = &[
 const FORBIDDEN_PRODUCTION_EVENT_KIND_LITERALS: &[(&str, &str)] = &[
     ("30340", "KIND_FARM"),
     ("30402", "KIND_LISTING"),
-    ("3422", "KIND_ORDER_REQUEST"),
-    ("3423", "KIND_ORDER_DECISION"),
+    ("3422", "RETIRED_COMMERCIAL_KIND_3422"),
+    ("3423", "RETIRED_COMMERCIAL_KIND_3423"),
     ("3426", "KIND_TRADE_QUESTION"),
     ("3427", "KIND_TRADE_ANSWER"),
     ("3428", "KIND_TRADE_DISCOUNT_REQUEST"),
     ("3429", "KIND_TRADE_DISCOUNT_OFFER"),
     ("3430", "KIND_TRADE_DISCOUNT_ACCEPT"),
     ("3431", "RESERVED_ORDER_KIND_3431"),
-    ("3432", "KIND_ORDER_CANCELLATION"),
+    ("3432", "RETIRED_COMMERCIAL_KIND_3432"),
     ("3433", "KIND_ORDER_FULFILLMENT_UPDATE"),
     ("3434", "KIND_ORDER_RECEIPT"),
     ("3435", "KIND_ORDER_PAYMENT_RECORD"),
     ("3436", "KIND_ORDER_SETTLEMENT_DECISION"),
     ("3440", "KIND_TRADE_VALIDATION_RECEIPT"),
+    ("3470", "KIND_TRADE_PROPOSAL"),
+    ("3471", "KIND_TRADE_DECISION"),
+    ("3472", "KIND_TRADE_REVISION_PROPOSAL"),
+    ("3473", "KIND_TRADE_REVISION_DECISION"),
+    ("3474", "KIND_TRADE_CANCELLATION"),
 ];
 
 struct SdkBoundaryForbiddenPattern {
@@ -1508,21 +1536,18 @@ fn app_production_trade_event_kinds_use_shared_constants() {
 #[test]
 fn app_store_validation_receipts_do_not_commit_without_trust_policy() {
     let source = read_source_path(app_root().join("crates/store/src/interop.rs").as_path());
-    let valid_result_branch = "\"valid\" => (";
-    let start = source
-        .find(valid_result_branch)
-        .expect("store interop should project valid validation receipt results");
-    let end = source[start..]
-        .find("\"needs_review\" => (")
-        .map(|offset| start + offset)
-        .expect("store interop should project invalid validation receipt results");
-    let branch = &source[start..end];
+    let projection = source_segment(
+        source.as_str(),
+        "fn upsert_validation_receipt_projection(",
+        "fn upsert_farm_summary(",
+    );
 
-    assert!(branch.contains("OrderStatus::NeedsAction.storage_key()"));
-    assert!(branch.contains("TradeAgreementStatus::AgreedPendingValidation.storage_key()"));
-    assert!(branch.contains("TradeInventoryStatus::Reserved.storage_key()"));
-    assert!(!branch.contains("OrderStatus::Scheduled.storage_key()"));
-    assert!(!branch.contains("TradeAgreementStatus::Committed.storage_key()"));
+    assert!(projection.contains("let order_id: Option<String> = None;"));
+    assert!(projection.contains("INSERT INTO order_validation_receipts"));
+    assert!(!projection.contains("UPDATE orders"));
+    assert!(!projection.contains("workflow_agreement"));
+    assert!(!projection.contains("OrderStatus::Scheduled"));
+    assert!(!projection.contains("TradeAgreementStatus::Committed"));
 }
 
 #[test]
@@ -1556,151 +1581,131 @@ fn app_production_sdk_boundary_usage_is_exception_scoped() {
 }
 
 #[test]
-fn desktop_runtime_trade_propose_request_stays_product_shaped() {
+fn desktop_runtime_trade_requests_stay_semantic_envelope_shaped() {
     let source = read_source_path(app_root().join("crates/runtime/src/sdk.rs").as_path());
-    let request = struct_block(source.as_str(), "DesktopRuntimeTradeProposeRequest");
 
-    assert!(
-        !request.contains("RadrootsOrderRequest"),
-        "DesktopRuntimeTradeProposeRequest must not expose protocol-shaped order requests"
-    );
-    for required_field in [
-        "pub order_id: RadrootsOrderId",
-        "pub listing_addr: RadrootsListingAddress",
-        "pub seller_pubkey: RadrootsPublicKey",
-        "pub items: Vec<RadrootsOrderItem>",
-        "pub economics: RadrootsOrderEconomics",
-        "pub public_note: Option<String>",
-        "pub confirm_public_note: bool",
+    for request_struct in [
+        "DesktopRuntimeTradeSubmitProposalRequest",
+        "DesktopRuntimeTradeProposeRevisionRequest",
+        "DesktopRuntimeTradeDecideCandidateRequest",
+        "DesktopRuntimeTradeCancelRequest",
     ] {
+        let request = struct_block(source.as_str(), request_struct);
+        for required_field in [
+            "pub actor_account_id: String",
+            "pub actor_pubkey: String",
+            "pub signer: DesktopRuntimeLocalSigner",
+            "pub envelope: RadrootsTradeMutationEnvelopeV1",
+            "pub idempotency_key: Option<String>",
+        ] {
+            assert!(
+                request.contains(required_field),
+                "{request_struct} is missing semantic SDK field `{required_field}`"
+            );
+        }
         assert!(
-            request.contains(required_field),
-            "DesktopRuntimeTradeProposeRequest is missing product field `{required_field}`"
+            !request.contains("RadrootsOrder"),
+            "{request_struct} must not expose order-era protocol types"
         );
     }
-    assert!(source.contains("fn app_trade_privacy_confirmation(confirm_public_note: bool)"));
-    assert!(source.contains("if confirm_public_note"));
-    assert!(source.contains(".with_optional_public_note(request.public_note)"));
+
+    assert!(source.contains("pub acknowledge_private_terms: bool",));
     assert!(source.contains(
-        ".with_privacy_confirmation(app_trade_privacy_confirmation(request.confirm_public_note))"
+        "sdk.trades()\n            .commands()\n            .submit_proposal_with_explicit_signer"
     ));
-    assert!(
-        !source.contains("fn app_trade_privacy_confirmation()"),
-        "public-sensitive note confirmation must not become ambient"
-    );
+    assert!(source.contains(
+        "sdk.trades()\n            .commands()\n            .propose_revision_with_explicit_signer"
+    ));
+    assert!(source.contains(
+        "sdk.trades()\n            .commands()\n            .decide_candidate_with_explicit_signer"
+    ));
+    assert!(source.contains(
+        "sdk.trades()\n            .commands()\n            .cancel_trade_with_explicit_signer"
+    ));
 }
 
 #[test]
-fn desktop_runtime_trade_mutation_requests_stay_locator_and_resync_owned() {
+fn desktop_runtime_trade_mutation_requests_validate_body_and_policy() {
     let source = read_source_path(app_root().join("crates/runtime/src/sdk.rs").as_path());
 
-    for request_struct in [
-        "DesktopRuntimeTradeProposeRequest",
-        "DesktopRuntimeTradeDecisionRequest",
-        "DesktopRuntimeTradeCancellationRequest",
-    ] {
-        let request = struct_block(source.as_str(), request_struct);
-        assert!(
-            !request.contains("evidence_events"),
-            "{request_struct} must not expose caller-owned evidence events"
-        );
-    }
-
-    for request_struct in [
-        "DesktopRuntimeTradeDecisionRequest",
-        "DesktopRuntimeTradeCancellationRequest",
-    ] {
-        let request = struct_block(source.as_str(), request_struct);
-        assert!(
-            request.contains("pub locator: RadrootsTradeLocator"),
-            "{request_struct} must require a root-capable SDK trade locator"
-        );
-    }
-
-    assert!(source.contains("sdk.trades().buyer().propose_trade(sdk_request)"));
-    for (label, start, end, required_count) in [
+    for (label, start, end, required_body) in [
         (
             "trade proposal",
-            "fn trade_propose_with_sdk(",
-            "fn trade_decision_with_sdk(",
-            0usize,
+            "fn trade_submit_proposal_with_sdk(",
+            "fn trade_propose_revision_with_sdk(",
+            "RadrootsTradeMutationBodyV1::Proposal",
         ),
         (
-            "trade decision",
-            "fn trade_decision_with_sdk(",
+            "trade revision proposal",
+            "fn trade_propose_revision_with_sdk(",
+            "fn trade_decide_candidate_with_sdk(",
+            "RadrootsTradeMutationBodyV1::RevisionProposal",
+        ),
+        (
+            "trade candidate decision",
+            "fn trade_decide_candidate_with_sdk(",
             "fn trade_cancel_with_sdk(",
-            2usize,
+            "RadrootsTradeMutationBodyV1::Decision",
         ),
         (
             "trade cancellation",
             "fn trade_cancel_with_sdk(",
             "fn sdk_actor_context(",
-            1usize,
+            "RadrootsTradeMutationBodyV1::Cancellation",
         ),
     ] {
         let segment = source_segment(source.as_str(), start, end);
+        assert!(segment.contains("validate_trade_envelope_body"));
         assert!(
-            segment
-                .matches("TradeEvidenceMode::ResyncBeforeMutation")
-                .count()
-                >= required_count,
-            "{label} must use SDK resync evidence mode before mutation"
+            segment.contains(required_body),
+            "{label} must validate semantic mutation body `{required_body}`"
+        );
+        assert!(segment.contains("app_trade_target_policy()"));
+        assert!(
+            segment.contains("app_trade_satisfaction_policy()"),
+            "{label} must use SDK satisfaction policy"
         );
         assert!(
-            !segment.contains("TradeEvidenceMode::LocalOnly"),
-            "{label} must not use local-only evidence for app mutation authority"
+            !segment.contains("TradeEvidenceMode::"),
+            "{label} must not revive caller-owned evidence mode selection"
         );
     }
 }
 
 #[test]
-fn app_store_active_order_projection_is_root_aware_and_non_authoritative() {
-    let source = read_source_path(app_root().join("crates/store/src/interop.rs").as_path());
-    let project_active_order = source_segment(
-        source.as_str(),
-        "fn project_active_order(",
-        "fn upsert_order_request(",
-    );
-    assert!(project_active_order.contains("current_evidence.root_event_id()"));
-    assert!(project_active_order.contains("root_event_id.as_str()"));
-    assert!(!project_active_order.contains("current_evidence.order_id()"));
+fn app_store_has_no_active_order_projection_authority() {
+    for relative_path in [
+        "crates/store/src/interop.rs",
+        "crates/store/src/lib.rs",
+        "crates/store/src/repo/workflow.rs",
+    ] {
+        let source = read_source_path(app_root().join(relative_path).as_path());
+        assert!(
+            !source.contains("project_active_order")
+                && !source.contains("load_active_order_evidence")
+                && !source.contains("ActiveOrderEvidenceBuckets")
+                && !source.contains("projected_order_id_from_trade_request")
+                && !source.contains("TradeEvidenceMode::"),
+            "{relative_path} must not retain old active-order projection authority"
+        );
+    }
+}
 
-    let load_active_order_evidence = source_segment(
-        source.as_str(),
-        "fn load_active_order_evidence(",
-        "fn replace_order_request_lines(",
-    );
-    assert!(load_active_order_evidence.contains("record.root_event_id() == root_event_id"));
-    assert!(!load_active_order_evidence.contains("record.order_id()"));
+#[test]
+fn app_runtime_ingests_every_canonical_trade_mutation_kind() {
+    let source = read_source_path(app_root().join("crates/desktop/src/runtime.rs").as_path());
+    let ingest_kinds = source_segment(source.as_str(), "const APP_DIRECT_RELAY_INGEST_KINDS", "];");
 
-    let active_evidence_identity = source_segment(
-        source.as_str(),
-        "fn root_event_id(&self)",
-        "struct ActiveOrderEvidenceBuckets",
-    );
-    assert!(active_evidence_identity.contains("Self::Request(record) => record.event_id.as_str()"));
-    assert!(
-        active_evidence_identity
-            .contains("Self::Decision(record) => record.root_event_id.as_str()")
-    );
-
-    let projected_order_id = source_segment(
-        source.as_str(),
-        "pub fn projected_order_id_from_trade_request(",
-        "fn active_order_change_status(",
-    );
-    assert!(projected_order_id.contains("root_event_id: &str"));
-    assert!(projected_order_id.contains("radroots-cli-order-root"));
-
-    for forbidden in [
-        "TradeAcceptRequest::new",
-        "TradeDeclineRequest::new",
-        "TradeCancelRequest::new",
-        "TradeEvidenceMode::",
+    for required_kind in [
+        "KIND_TRADE_PROPOSAL",
+        "KIND_TRADE_DECISION",
+        "KIND_TRADE_REVISION_PROPOSAL",
+        "KIND_TRADE_REVISION_DECISION",
+        "KIND_TRADE_CANCELLATION",
     ] {
         assert!(
-            !source.contains(forbidden),
-            "store projection must not become SDK mutation authority through `{forbidden}`"
+            ingest_kinds.contains(required_kind),
+            "direct relay ingest must include canonical mutation kind `{required_kind}`"
         );
     }
 }
@@ -1759,6 +1764,48 @@ fn app_store_current_schema_surfaces_reject_retired_terms() {
         offenders.is_empty(),
         "app store current-schema surfaces retain retired terms: {offenders:?}"
     );
+}
+
+#[test]
+fn app_store_current_default_schema_omits_buyer_private_plaintext() {
+    let app_root = app_root();
+    let latest_schema = read_source_path(
+        app_root
+            .join("crates/store/migrations/0031_drop_default_buyer_private_fields.sql")
+            .as_path(),
+    );
+    let buyer_repo = read_source_path(app_root.join("crates/store/src/repo/buyer.rs").as_path());
+    let buyer_repo_production =
+        production_source_without_tests("crates/store/src/repo/buyer.rs", buyer_repo.as_str())
+            .expect("buyer repo production source should classify");
+    let runtime_source = read_source_path(app_root.join("crates/desktop/src/runtime.rs").as_path());
+    let runtime_production =
+        production_source_without_tests("crates/desktop/src/runtime.rs", runtime_source.as_str())
+            .expect("runtime production source should classify");
+
+    for (label, source) in [
+        ("latest default schema", latest_schema.as_str()),
+        (
+            "buyer repository production source",
+            buyer_repo_production.as_str(),
+        ),
+        (
+            "desktop runtime production source",
+            runtime_production.as_str(),
+        ),
+    ] {
+        for private_field in [
+            "buyer_email",
+            "buyer_phone",
+            "buyer_order_note",
+            "buyer_order_note_public_confirmed",
+        ] {
+            assert!(
+                !source.contains(private_field),
+                "{label} must not contain default-store private field `{private_field}`"
+            );
+        }
+    }
 }
 
 const APP_STORE_RETIRED_SCHEMA_TERMS: &[&str] = &[

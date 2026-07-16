@@ -126,6 +126,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 30,
         sql: include_str!("../migrations/0030_buyer_order_public_note_confirmation.sql"),
     },
+    Migration {
+        version: 31,
+        sql: include_str!("../migrations/0031_drop_default_buyer_private_fields.sql"),
+    },
 ];
 
 pub fn latest_schema_version() -> u32 {

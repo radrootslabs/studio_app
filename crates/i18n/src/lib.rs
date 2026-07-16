@@ -633,22 +633,28 @@ mod tests {
             app_text(AppTextKey::TradeWorkflowAxisAgreement),
             "Agreement"
         );
+        assert_eq!(app_text(AppTextKey::TradeWorkflowAxisEvidence), "Evidence");
+        assert_eq!(app_text(AppTextKey::TradeWorkflowAxisConflict), "Conflict");
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowAxisPrivateTerms),
+            "Private terms"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowAxisAttestation),
+            "Attestation"
+        );
         assert_eq!(app_text(AppTextKey::TradeWorkflowAxisSource), "Source");
         assert_eq!(
             app_text(AppTextKey::TradeWorkflowAgreementRequested),
             "Requested"
         );
         assert_eq!(
-            app_text(AppTextKey::TradeWorkflowAgreementAgreedPendingValidation),
-            "Pending validation"
+            app_text(AppTextKey::TradeWorkflowAgreementContested),
+            "Contested"
         );
         assert_eq!(
             app_text(AppTextKey::TradeWorkflowAgreementCommitted),
             "Committed"
-        );
-        assert_eq!(
-            app_text(AppTextKey::TradeWorkflowAgreementValidationExpired),
-            "Validation expired"
         );
         assert_eq!(
             app_text(AppTextKey::TradeWorkflowAgreementInvalid),
@@ -665,6 +671,22 @@ mod tests {
         assert_eq!(
             app_text(AppTextKey::TradeWorkflowInventoryReserved),
             "Reserved"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowEvidenceMissing),
+            "Missing"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowConflictDoubleAcceptance),
+            "Double acceptance"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowPrivateTermsCommitmentMismatch),
+            "Commitment mismatch"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowAttestationPresentInvalid),
+            "Invalid"
         );
         assert_eq!(app_text(AppTextKey::TradeWorkflowProvenanceCli), "CLI");
         assert_eq!(
