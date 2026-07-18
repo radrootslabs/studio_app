@@ -2367,8 +2367,8 @@ mod tests {
         let issue = status
             .last_issue
             .expect("degraded status should include issue");
-        assert_eq!(issue.code, "invalid_relay_url");
-        assert_eq!(issue.class, "configuration");
+        assert_eq!(issue.code.as_ref(), "invalid_relay_url");
+        assert_eq!(issue.class.as_ref(), "configuration");
         assert!(!issue.retryable);
         assert!(
             issue
@@ -2390,7 +2390,7 @@ mod tests {
             .as_ref()
             .and_then(|effect| effect.issue.as_ref())
             .expect("failed diagnostics effect should include issue");
-        assert_eq!(issue.code, "invalid_relay_url");
+        assert_eq!(issue.code.as_ref(), "invalid_relay_url");
         assert!(runtime.request_shutdown());
         let _ = fs::remove_dir_all(storage_root);
     }
@@ -2532,7 +2532,7 @@ mod tests {
             .as_ref()
             .and_then(|effect| effect.issue.as_ref())
             .expect("blocked refresh should expose lifecycle issue");
-        assert_eq!(issue.code, "sdk_lifecycle_busy");
+        assert_eq!(issue.code.as_ref(), "sdk_lifecycle_busy");
         assert_eq!(issue.detail_json["state"], "RebuildingProjections");
 
         let complete = runtime

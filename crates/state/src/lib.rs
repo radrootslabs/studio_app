@@ -3488,7 +3488,7 @@ mod tests {
         );
         assert_eq!(
             store.projection().products.editor,
-            ProductEditorState::Open(super::ProductEditorSession {
+            ProductEditorState::Open(Box::new(super::ProductEditorSession {
                 selected_product_id: None,
                 draft: ProductEditorDraft::default(),
                 publish_blockers: vec![
@@ -3499,7 +3499,7 @@ mod tests {
                     ProductPublishBlocker::SetStock,
                     ProductPublishBlocker::AttachAvailability,
                 ],
-            })
+            }))
         );
 
         assert_eq!(
@@ -3510,11 +3510,11 @@ mod tests {
         );
         assert_eq!(
             store.projection().products.editor,
-            ProductEditorState::Open(super::ProductEditorSession {
+            ProductEditorState::Open(Box::new(super::ProductEditorSession {
                 selected_product_id: None,
                 draft: ready_draft.clone(),
                 publish_blockers: vec![ProductPublishBlocker::AttachAvailability],
-            })
+            }))
         );
 
         assert_eq!(
@@ -3526,11 +3526,11 @@ mod tests {
         );
         assert_eq!(
             store.projection().products.editor,
-            ProductEditorState::Open(super::ProductEditorSession {
+            ProductEditorState::Open(Box::new(super::ProductEditorSession {
                 selected_product_id: Some(product_id),
                 draft: ready_draft,
                 publish_blockers: vec![ProductPublishBlocker::AttachAvailability],
-            })
+            }))
         );
 
         assert_eq!(
@@ -3631,7 +3631,7 @@ mod tests {
         );
         assert_eq!(
             store.projection().products.editor,
-            ProductEditorState::Open(super::ProductEditorSession {
+            ProductEditorState::Open(Box::new(super::ProductEditorSession {
                 selected_product_id: Some(product_id),
                 draft: ProductEditorDraft {
                     title: "Salad mix".to_owned(),
@@ -3645,7 +3645,7 @@ mod tests {
                     status: radroots_studio_app_view::ProductStatus::Published,
                 },
                 publish_blockers: Vec::new(),
-            })
+            }))
         );
 
         assert_eq!(
@@ -3656,11 +3656,11 @@ mod tests {
         );
         assert_eq!(
             store.projection().products.editor,
-            ProductEditorState::Open(super::ProductEditorSession {
+            ProductEditorState::Open(Box::new(super::ProductEditorSession {
                 selected_product_id: Some(product_id),
                 draft: stale_draft,
                 publish_blockers: vec![ProductPublishBlocker::AttachAvailability],
-            })
+            }))
         );
     }
 

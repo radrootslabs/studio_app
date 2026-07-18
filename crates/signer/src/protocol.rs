@@ -227,6 +227,7 @@ fn connect_request_for_target(
         .expect("signer public key is derived from a validated identity"),
         secret: target.connect_secret.clone(),
         requested_permissions: target.requested_permissions.clone(),
+        client_metadata: None,
     }
 }
 
@@ -355,7 +356,7 @@ impl ConnectedRemoteSignerSessionClient {
             vec![client_identity.public_key_hex()],
         )
         .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
-        let notifications = client.notifications();
+        let notifications = client.clone().into_inner().notifications();
         client
             .subscribe(filter, None)
             .await
@@ -784,11 +785,15 @@ mod tests {
         match request {
             RadrootsNostrConnectRequest::Connect {
                 requested_permissions,
+                client_metadata,
                 ..
-            } => assert_eq!(
-                requested_permissions.to_string(),
-                "sign_event:kind:1,switch_relays"
-            ),
+            } => {
+                assert_eq!(
+                    requested_permissions.to_string(),
+                    "sign_event:kind:1,switch_relays"
+                );
+                assert!(client_metadata.is_none());
+            }
             other => panic!("unexpected request: {other:?}"),
         }
     }

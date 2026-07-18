@@ -123,11 +123,16 @@ mod tests {
             .iter()
             .copied()
             .collect::<BTreeSet<_>>();
+        let generated_variant_keys = super::DEFAULT_CATALOG_KEY_VARIANTS
+            .iter()
+            .map(|(key, _variant)| *key)
+            .collect::<BTreeSet<_>>();
         let typed_keys = AppTextKey::ALL
             .iter()
             .map(|key| key.id())
             .collect::<BTreeSet<_>>();
 
+        assert_eq!(generated_variant_keys, catalog_keys);
         assert_eq!(typed_keys, catalog_keys);
     }
 
