@@ -8855,6 +8855,7 @@ mod tests {
 
     use chrono::{Duration, Utc};
     use futures_util::{SinkExt, StreamExt};
+    use nostr::{EventBuilder, Kind, Tag};
     use radroots_event::ids::{
         RadrootsAddressableCoordinate, RadrootsDTag, RadrootsEventId, RadrootsInventoryBinId,
         RadrootsPublicKey, RadrootsTradeId,
@@ -8874,7 +8875,7 @@ mod tests {
     use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
     use radroots_nostr::prelude::{
         RadrootsNostrClient, RadrootsNostrEvent, RadrootsNostrKeys, RadrootsNostrSecretKey,
-        RadrootsNostrTimestamp, radroots_event_from_nostr, radroots_nostr_build_event,
+        RadrootsNostrTimestamp, radroots_event_from_nostr,
     };
     use radroots_nostr_accounts::prelude::{
         RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
@@ -9331,12 +9332,24 @@ mod tests {
     ) -> RadrootsEventEnvelope {
         let secret_key = RadrootsNostrSecretKey::from_hex(secret_key_hex).expect("secret key");
         let keys = RadrootsNostrKeys::new(secret_key);
-        let event = radroots_nostr_build_event(parts.kind, parts.content, parts.tags)
-            .expect("test event builder")
+        let event = wire_fixture_builder(parts)
             .custom_created_at(RadrootsNostrTimestamp::from_secs(u64::from(created_at)))
             .sign_with_keys(&keys)
             .expect("test event should sign");
         radroots_event_from_nostr(&event)
+    }
+
+    fn wire_fixture_builder(parts: WireEventParts) -> EventBuilder {
+        let kind = u16::try_from(parts.kind).expect("fixture kind must fit NIP-01");
+        let tags = parts
+            .tags
+            .into_iter()
+            .filter(|tag| !tag.is_empty())
+            .map(|tag| Tag::parse(tag).expect("fixture tag must parse"))
+            .collect::<Vec<_>>();
+        EventBuilder::new(Kind::Custom(kind), parts.content)
+            .tags(tags)
+            .allow_self_tagging()
     }
 
     fn signed_test_event_for_pubkey(
@@ -9887,8 +9900,7 @@ mod tests {
                 .expect("listing payload should convert to SDK listing");
         let parts = radroots_event_codec::listing::encode::to_wire_parts(&listing)
             .expect("listing draft should build");
-        let event = radroots_nostr_build_event(parts.kind, parts.content, parts.tags)
-            .expect("listing event builder should build")
+        let event = wire_fixture_builder(parts)
             .sign_with_keys(identity.keys())
             .expect("listing event should sign");
         publish_signed_test_event_to_relay(relay, &event);
@@ -18874,8 +18886,7 @@ mod tests {
         .expect("trade decision envelope should build");
         let parts = trade_mutation_event_build(envelope)
             .expect("trade decision event builder should build");
-        let event = radroots_nostr_build_event(parts.kind, parts.content, parts.tags)
-            .expect("trade decision event builder should build")
+        let event = wire_fixture_builder(parts)
             .sign_with_keys(identity.keys())
             .expect("trade decision event should sign");
         publish_signed_test_event_to_relay(relay, &event);
@@ -19108,8 +19119,7 @@ mod tests {
         let secret_key = RadrootsNostrSecretKey::from_hex(SDK_TEST_BUYER_SECRET_KEY_HEX)
             .expect("SDK test buyer secret key should parse");
         let keys = RadrootsNostrKeys::new(secret_key);
-        let signed_event = radroots_nostr_build_event(parts.kind, parts.content, parts.tags)
-            .expect("trade proposal event should build")
+        let signed_event = wire_fixture_builder(parts)
             .custom_created_at(RadrootsNostrTimestamp::from_secs(1_774_000_010))
             .sign_with_keys(&keys)
             .expect("trade proposal event should sign");
