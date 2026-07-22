@@ -4,8 +4,10 @@ use std::{
 };
 
 const WORKSPACE_SQLX_DEPENDENCY: &str = r#"sqlx = { version = "0.9.0", default-features = false, features = ["derive", "sqlite-bundled"] }"#;
-const WORKSPACE_LIBSQLITE3_PATCH: &str =
-    r#"libsqlite3-sys = { path = "../lib/crates/libsqlite3_sys_3_53_3" }"#;
+const LIBSQLITE3_SYS_VERSION: &str = "0.37.0";
+const LIBSQLITE3_SYS_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
+const LIBSQLITE3_SYS_CHECKSUM: &str =
+    "b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1";
 
 #[test]
 fn app_sqlite_runtime_uses_sqlx_bundled_sqlite_only() {
@@ -16,9 +18,24 @@ fn app_sqlite_runtime_uses_sqlx_bundled_sqlite_only() {
         workspace_manifest.contains(WORKSPACE_SQLX_DEPENDENCY),
         "workspace SQLx dependency must stay pinned to SQLx 0.9.0 with sqlite-bundled"
     );
+
+    let manifest: toml::Value =
+        toml::from_str(workspace_manifest.as_str()).expect("workspace Cargo.toml should parse");
+    let libsqlite3_patch = manifest
+        .get("patch")
+        .and_then(|patch| patch.get("crates-io"))
+        .and_then(|crates_io| crates_io.get("libsqlite3-sys"));
     assert!(
-        workspace_manifest.contains(WORKSPACE_LIBSQLITE3_PATCH),
-        "workspace must keep the approved SQLite 3.53.3 libsqlite3-sys patch"
+        libsqlite3_patch.is_none(),
+        "workspace must resolve libsqlite3-sys from crates.io without a source override"
+    );
+
+    let lockfile = read_source(app_root.join("Cargo.lock").as_path());
+    let lockfile_findings = libsqlite3_lock_findings(lockfile.as_str());
+    assert!(
+        lockfile_findings.is_empty(),
+        "app SQLite lockfile findings:\n{}",
+        lockfile_findings.join("\n")
     );
 
     let findings = sqlite_runtime_drift_findings(app_root.as_path());
@@ -27,6 +44,50 @@ fn app_sqlite_runtime_uses_sqlx_bundled_sqlite_only() {
         "app SQLite runtime drift findings:\n{}",
         findings.join("\n")
     );
+}
+
+fn libsqlite3_lock_findings(lockfile: &str) -> Vec<String> {
+    let lock: toml::Value = match toml::from_str(lockfile) {
+        Ok(lock) => lock,
+        Err(error) => return vec![format!("Cargo.lock is not valid TOML: {error}")],
+    };
+    let packages = lock
+        .get("package")
+        .and_then(toml::Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let libsqlite3_packages = packages
+        .iter()
+        .filter(|package| {
+            package.get("name").and_then(toml::Value::as_str) == Some("libsqlite3-sys")
+        })
+        .collect::<Vec<_>>();
+
+    if libsqlite3_packages.len() != 1 {
+        return vec![format!(
+            "Cargo.lock must contain exactly one libsqlite3-sys package, found {}",
+            libsqlite3_packages.len()
+        )];
+    }
+
+    let package = libsqlite3_packages[0];
+    let expected_fields = [
+        ("version", LIBSQLITE3_SYS_VERSION),
+        ("source", LIBSQLITE3_SYS_SOURCE),
+        ("checksum", LIBSQLITE3_SYS_CHECKSUM),
+    ];
+    expected_fields
+        .into_iter()
+        .filter_map(|(field, expected)| {
+            let actual = package.get(field).and_then(toml::Value::as_str);
+            (actual != Some(expected)).then(|| {
+                format!(
+                    "libsqlite3-sys {field} must be `{expected}`, found `{}`",
+                    actual.unwrap_or("<missing>")
+                )
+            })
+        })
+        .collect()
 }
 
 fn sqlite_runtime_drift_findings(app_root: &Path) -> Vec<String> {
@@ -56,6 +117,7 @@ fn forbidden_sqlite_findings(path: &str, source: &str) -> Vec<String> {
     }
 
     for pattern in [
+        "libsqlite3-sys = { path =",
         "sqlite-wasm-rs",
         "rsqlite-vfs",
         "bundled-sqlcipher",
@@ -78,6 +140,30 @@ fn forbidden_sqlite_findings(path: &str, source: &str) -> Vec<String> {
     }
 
     findings
+}
+
+#[test]
+fn sqlite_lock_guard_rejects_local_or_ambiguous_sources() {
+    let valid = format!(
+        r#"[[package]]
+name = "libsqlite3-sys"
+version = "{LIBSQLITE3_SYS_VERSION}"
+source = "{LIBSQLITE3_SYS_SOURCE}"
+checksum = "{LIBSQLITE3_SYS_CHECKSUM}"
+"#
+    );
+    assert!(libsqlite3_lock_findings(valid.as_str()).is_empty());
+
+    let local = format!(
+        r#"[[package]]
+name = "libsqlite3-sys"
+version = "{LIBSQLITE3_SYS_VERSION}"
+"#
+    );
+    assert_eq!(libsqlite3_lock_findings(local.as_str()).len(), 2);
+
+    let duplicate = format!("{valid}\n{valid}");
+    assert_eq!(libsqlite3_lock_findings(duplicate.as_str()).len(), 1);
 }
 
 fn sqlite_guard_paths(app_root: &Path) -> Vec<PathBuf> {

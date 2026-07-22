@@ -73,4 +73,3 @@ unsafe_code = "forbid"
 
 [patch.crates-io]
 block = { path = "vendor/block" }
-libsqlite3-sys = { path = "../lib/crates/libsqlite3_sys_3_53_3" }
